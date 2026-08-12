@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="KcalCue">
+  <rect width="512" height="512" rx="120" fill="#173f35"/>
+  <circle cx="256" cy="258" r="144" fill="#f8f0df"/>
+  <path d="M168 258c0-49 39-88 88-88s88 39 88 88-39 88-88 88-88-39-88-88Z" fill="#e7784b"/>
+  <path d="M154 129c43 28 75 34 102 8 27 26 59 20 102-8" fill="none" stroke="#a9d3b5" stroke-width="28" stroke-linecap="round"/>
+  <circle cx="256" cy="258" r="31" fill="#f8f0df"/>
+</svg>

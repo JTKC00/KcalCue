@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Next.js output
+.next/
+out/
+
+# Test output
+coverage/
+output/
+.playwright-cli/
+
+# Local credentials
+.env
+.env.local
+.env.*.local
+
+# System and editor files
+.DS_Store
+*.log
+
+# TypeScript cache
+*.tsbuildinfo
