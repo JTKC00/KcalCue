@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server";
 import { DemoFoodVisionProvider } from "@/lib/providers/food-vision/demo";
+import {
+  extractGeminiErrorDetails,
+  logFoodVisionDiagnostic,
+} from "@/lib/providers/food-vision/diagnostics";
 import { FoodVisionError } from "@/lib/providers/food-vision/errors";
 import { createFoodVisionProvider } from "@/lib/providers/food-vision/factory";
 import {
   supportedImageMimeTypes,
   type SupportedImageMimeType,
 } from "@/lib/providers/food-vision/types";
+import { getGeminiServerConfig } from "@/lib/server/env";
 
 export const runtime = "nodejs";
 
@@ -27,6 +32,9 @@ function errorResponse(code: string, status: number) {
 }
 
 export async function POST(request: Request) {
+  let imageMimeType = "unknown";
+  let imageByteSize = 0;
+
   try {
     const formData = await request.formData();
     const forceDemo = formData.get("mode") === "demo";
@@ -55,6 +63,8 @@ export async function POST(request: Request) {
       return errorResponse("invalid_file", 415);
     }
 
+    imageMimeType = image.type;
+    imageByteSize = image.size;
     const bytes = Buffer.from(await image.arrayBuffer());
     const analysis = await provider.analyzeImage({
       data: bytes.toString("base64"),
@@ -64,8 +74,33 @@ export async function POST(request: Request) {
     return NextResponse.json({ analysis, mode: provider.mode });
   } catch (error) {
     if (error instanceof FoodVisionError) {
+      if (!error.diagnostic) {
+        const details = extractGeminiErrorDetails(error);
+        logFoodVisionDiagnostic({
+          stage: "unknown",
+          errorClass: details.errorClass,
+          httpStatus: details.httpStatus,
+          geminiErrorCode: details.geminiErrorCode,
+          safeMessage: details.safeMessage,
+          model: getGeminiServerConfig()?.model ?? "unset",
+          imageMimeType,
+          imageByteSize,
+        });
+      }
       return errorResponse(error.code, publicErrorStatus[error.code] ?? 500);
     }
+
+    const details = extractGeminiErrorDetails(error);
+    logFoodVisionDiagnostic({
+      stage: "unknown",
+      errorClass: details.errorClass,
+      httpStatus: details.httpStatus,
+      geminiErrorCode: details.geminiErrorCode,
+      safeMessage: details.safeMessage,
+      model: getGeminiServerConfig()?.model ?? "unset",
+      imageMimeType,
+      imageByteSize,
+    });
     return errorResponse("unknown", 500);
   }
 }

@@ -12,6 +12,7 @@ import {
   createEditableFoodItems,
 } from "./editable-meal";
 import {
+  foodAnalysisJsonSchema,
   validateFoodAnalysis,
   type FoodAnalysis,
   type FoodEstimate,
@@ -205,5 +206,27 @@ describe("structured food analysis validation", () => {
         foods: [],
       }).foods,
     ).toEqual([]);
+
+    expect(() =>
+      validateFoodAnalysis({
+        ...makeAnalysis(),
+        extraField: "not-allowed",
+      }),
+    ).toThrow();
+  });
+
+  it("keeps Gemini JSON Schema limited to generation-safe keywords", () => {
+    const json = JSON.stringify(foodAnalysisJsonSchema);
+    expect(json).not.toContain("additionalProperties");
+    expect(json).not.toContain("minimum");
+    expect(json).not.toContain("maximum");
+    expect(json).not.toContain("maxItems");
+    expect(foodAnalysisJsonSchema.properties.analysisStatus.enum).toEqual([
+      "success",
+      "unable_to_identify",
+    ]);
+    expect(
+      foodAnalysisJsonSchema.properties.foods.items.properties.unit.enum,
+    ).toEqual(["g", "ml", "piece", "bowl", "cup"]);
   });
 });

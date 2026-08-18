@@ -1,3 +1,5 @@
+import type { FoodVisionDiagnostic } from "./diagnostics";
+
 export type FoodVisionErrorCode =
   | "invalid_key"
   | "model_unavailable"
@@ -8,13 +10,20 @@ export type FoodVisionErrorCode =
   | "image_rejected"
   | "unknown";
 
+export interface FoodVisionErrorOptions extends ErrorOptions {
+  diagnostic?: FoodVisionDiagnostic;
+}
+
 export class FoodVisionError extends Error {
+  readonly diagnostic?: FoodVisionDiagnostic;
+
   constructor(
     public readonly code: FoodVisionErrorCode,
     message: string,
-    options?: ErrorOptions,
+    options?: FoodVisionErrorOptions,
   ) {
     super(message, options);
     this.name = "FoodVisionError";
+    this.diagnostic = options?.diagnostic;
   }
 }

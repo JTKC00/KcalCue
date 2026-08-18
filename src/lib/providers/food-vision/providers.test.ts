@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { generateContentMock, MockApiError } = vi.hoisted(() => {
   class HoistedMockApiError extends Error {
@@ -20,8 +20,13 @@ vi.mock("@google/genai", () => ({
   },
 }));
 
+import { foodAnalysisJsonSchema } from "@/lib/domain/food-analysis";
 import { DemoFoodVisionProvider, demoFoodAnalysis } from "./demo";
-import { GeminiFoodVisionProvider } from "./gemini";
+import {
+  GEMINI_ABORT_TIMEOUT_MS,
+  GEMINI_HTTP_TIMEOUT_MS,
+  GeminiFoodVisionProvider,
+} from "./gemini";
 
 describe("DemoFoodVisionProvider", () => {
   it("returns a validated independent copy of the deterministic demo result", async () => {
@@ -45,6 +50,11 @@ describe("DemoFoodVisionProvider", () => {
 describe("GeminiFoodVisionProvider structured response handling", () => {
   beforeEach(() => {
     generateContentMock.mockReset();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   function provider(): GeminiFoodVisionProvider {
@@ -130,6 +140,78 @@ describe("GeminiFoodVisionProvider structured response handling", () => {
     expect(request.config).not.toHaveProperty("temperature");
     expect(request.config).not.toHaveProperty("topP");
     expect(request.config).not.toHaveProperty("topK");
+    expect(request.config.httpOptions.timeout).toBe(GEMINI_HTTP_TIMEOUT_MS);
+    expect(request.config.abortSignal).toBeInstanceOf(AbortSignal);
+    expect(GEMINI_HTTP_TIMEOUT_MS).toBeGreaterThanOrEqual(60_000);
+    expect(GEMINI_ABORT_TIMEOUT_MS).toBeGreaterThan(GEMINI_HTTP_TIMEOUT_MS);
+    expect(request.config.responseJsonSchema).toEqual(foodAnalysisJsonSchema);
+  });
+
+  it("accepts optional null fields from Gemini without loosening Zod rules", async () => {
+    generateContentMock.mockResolvedValueOnce({
+      text: JSON.stringify({
+        ...demoFoodAnalysis,
+        foods: demoFoodAnalysis.foods.map((food) => ({
+          ...food,
+          preparationMethod: null,
+          notes: null,
+        })),
+      }),
+    });
+
+    await expect(
+      provider().analyzeImage({ data: "raw-base64", mimeType: "image/jpeg" }),
+    ).resolves.toMatchObject({ analysisStatus: "success" });
+  });
+
+  it("attaches a safe diagnostic for malformed JSON", async () => {
+    generateContentMock.mockResolvedValueOnce({ text: "{not-json" });
+
+    const error = await provider()
+      .analyzeImage({ data: "abc", mimeType: "image/webp" })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({
+      name: "FoodVisionError",
+      code: "invalid_response",
+      diagnostic: {
+        stage: "parse_json",
+        model: "test-only-model",
+        imageMimeType: "image/webp",
+        imageByteSize: 2,
+      },
+    });
+    expect(JSON.stringify(error)).not.toMatch(/test-only-key|raw-base64|AIza/);
+  });
+
+  it("classifies Gemini HTTP 400 invalid argument as unknown and records the Gemini code", async () => {
+    generateContentMock.mockRejectedValueOnce(
+      new MockApiError(
+        400,
+        JSON.stringify({
+          error: {
+            code: 400,
+            message: "Request contains an invalid argument.",
+            status: "INVALID_ARGUMENT",
+          },
+        }),
+      ),
+    );
+
+    const error = await provider()
+      .analyzeImage({ data: "abc", mimeType: "image/jpeg" })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({
+      name: "FoodVisionError",
+      code: "unknown",
+      diagnostic: {
+        stage: "gemini_request",
+        httpStatus: 400,
+        geminiErrorCode: "INVALID_ARGUMENT",
+        safeMessage: "Request contains an invalid argument.",
+      },
+    });
   });
 
   it.each([

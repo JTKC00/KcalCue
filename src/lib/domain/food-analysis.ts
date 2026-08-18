@@ -60,9 +60,11 @@ export const foodAnalysisSchema = z
 export type FoodEstimate = z.infer<typeof foodEstimateSchema>;
 export type FoodAnalysis = z.infer<typeof foodAnalysisSchema>;
 
+// Gemini 3.7 Flash generateContent rejects the constraint-heavy JSON Schema
+// (additionalProperties/min/max/maxItems) with HTTP 400 INVALID_ARGUMENT.
+// This schema only describes shape for generation. Zod remains authoritative.
 export const foodAnalysisJsonSchema = {
   type: "object",
-  additionalProperties: false,
   required: [
     "analysisStatus",
     "foods",
@@ -78,10 +80,8 @@ export const foodAnalysisJsonSchema = {
     },
     foods: {
       type: "array",
-      maxItems: 12,
       items: {
         type: "object",
-        additionalProperties: false,
         required: [
           "displayName",
           "normalizedName",
@@ -95,23 +95,21 @@ export const foodAnalysisJsonSchema = {
         properties: {
           displayName: { type: "string" },
           normalizedName: { type: "string" },
-          portionMin: { type: "number", minimum: 0.01 },
-          portionMax: { type: "number", minimum: 0.01 },
+          portionMin: { type: "number" },
+          portionMax: { type: "number" },
           unit: {
             type: "string",
             enum: [...portionUnits],
           },
-          recognitionConfidence: { type: "number", minimum: 0, maximum: 1 },
-          portionConfidence: { type: "number", minimum: 0, maximum: 1 },
+          recognitionConfidence: { type: "number" },
+          portionConfidence: { type: "number" },
           uncertaintyReasons: {
             type: "array",
-            maxItems: 8,
             items: { type: "string" },
           },
           preparationMethod: { type: "string" },
           visibleIngredients: {
             type: "array",
-            maxItems: 12,
             items: { type: "string" },
           },
           notes: { type: "string" },
@@ -120,22 +118,18 @@ export const foodAnalysisJsonSchema = {
     },
     uncertaintyReasons: {
       type: "array",
-      maxItems: 12,
       items: { type: "string" },
     },
     visibleEvidence: {
       type: "array",
-      maxItems: 12,
       items: { type: "string" },
     },
     estimatedInformation: {
       type: "array",
-      maxItems: 12,
       items: { type: "string" },
     },
     unknownInformation: {
       type: "array",
-      maxItems: 12,
       items: { type: "string" },
     },
   },
