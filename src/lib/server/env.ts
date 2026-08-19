@@ -14,3 +14,8 @@ export function getGeminiServerConfig(): GeminiServerConfig | null {
     model: process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL,
   };
 }
+
+export function getNutritionApiKey(): string | null {
+  const apiKey = process.env.NUTRITION_API_KEY?.trim();
+  return apiKey || null;
+}

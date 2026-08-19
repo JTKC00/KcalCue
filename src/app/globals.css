@@ -1104,11 +1104,16 @@ svg {
   height: 23px;
 }
 
-.confidence-panel > div:last-child {
+.confidence-panel > div:last-child,
+.confidence-split {
   display: grid;
   grid-template-columns: auto auto;
   align-items: baseline;
   gap: 2px 10px;
+}
+
+.confidence-split strong {
+  font-size: 1rem;
 }
 
 .confidence-panel span {

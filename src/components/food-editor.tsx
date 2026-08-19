@@ -1,7 +1,7 @@
 "use client";
 
 import { confidenceCopy, copy, unitCopy } from "@/content/zh-HK";
-import { foodConfidence } from "@/lib/domain/confidence";
+import { confidenceLevel } from "@/lib/domain/confidence";
 import {
   portionUnits,
   type PortionUnit,
@@ -41,7 +41,8 @@ export function FoodEditor({
   onPreset,
   onDelete,
 }: FoodEditorProps) {
-  const confidence = foodConfidence(item);
+  const recognition = confidenceLevel(item.recognitionConfidence);
+  const nutrition = calculation.match;
   const fieldId = `food-${item.id}`;
 
   return (
@@ -75,8 +76,18 @@ export function FoodEditor({
 
       <div className="food-summary-line">
         <strong>{calorieRange(calculation)}</strong>
-        <span className={`confidence-badge confidence-${confidence}`}>
-          可信程度：{confidenceCopy[confidence]}
+        <span className={`confidence-badge confidence-${recognition}`}>
+          {copy.recognitionLabel}：{confidenceCopy[recognition]}
+        </span>
+        <span
+          className={`confidence-badge confidence-${
+            nutrition?.includedInTotal ? nutrition.confidence : "low"
+          }`}
+        >
+          {copy.nutritionLabel}：
+          {nutrition?.includedInTotal
+            ? confidenceCopy[nutrition.confidence]
+            : copy.nutritionUnavailable}
         </span>
       </div>
 
@@ -143,6 +154,11 @@ export function FoodEditor({
 
       {calculation.unavailableReason ? (
         <p className="inline-warning">{calculation.unavailableReason}</p>
+      ) : nutrition?.reasons[0] ? (
+        <p className="food-uncertainty">
+          <span>營養：</span>
+          {nutrition.reasons[0]}
+        </p>
       ) : null}
 
       {item.uncertaintyReasons.length > 0 ? (

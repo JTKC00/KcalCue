@@ -1,30 +1,21 @@
+import { normalizeFoodName } from "./canonical";
 import { localNutritionProfiles, LOCAL_DATA_NOTICE } from "./local-data";
-import type { NutritionProfile, NutritionProvider } from "./types";
+import { findProfileByNormalizedName, resolveNutritionMatch } from "./resolver";
+import type { NutritionMatch, NutritionProfile, NutritionProvider } from "./types";
+import type { FoodEstimate } from "@/lib/domain/food-analysis";
 
-export function normalizeFoodName(name: string): string {
-  return name
-    .normalize("NFKC")
-    .trim()
-    .toLocaleLowerCase("en")
-    .replace(/[()（）,，.。]/g, " ")
-    .replace(/\s+/g, " ");
-}
+export { normalizeFoodName };
 
 export class LocalNutritionProvider implements NutritionProvider {
   readonly id = "local-reference";
   readonly dataNotice = LOCAL_DATA_NOTICE;
 
-  findByName(name: string): NutritionProfile | null {
-    const normalized = normalizeFoodName(name);
-    if (!normalized) return null;
+  resolve(food: FoodEstimate): NutritionMatch {
+    return resolveNutritionMatch(food, localNutritionProfiles);
+  }
 
-    return (
-      localNutritionProfiles.find((profile) =>
-        [profile.id, profile.displayName, ...profile.aliases].some(
-          (alias) => normalizeFoodName(alias) === normalized,
-        ),
-      ) ?? null
-    );
+  findByName(name: string): NutritionProfile | null {
+    return findProfileByNormalizedName(name, localNutritionProfiles);
   }
 
   listFoods(): NutritionProfile[] {

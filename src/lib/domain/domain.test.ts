@@ -151,10 +151,25 @@ describe("portion adjustment", () => {
     const converted = convertPortionUnit(editable, "bowl", {
       id: "rice",
       displayName: "白飯",
+      canonicalName: "rice",
+      category: "rice",
+      preparations: ["cooked"],
       aliases: [],
-      nutrientsPer100g: { calories: 130, protein: 2.7, carbs: 28, fat: 0.3 },
+      composite: false,
+      nutrientsPer100g: {
+        calories: { min: 130, max: 130 },
+        protein: { min: 2.7, max: 2.7 },
+        carbs: { min: 28, max: 28 },
+        fat: { min: 0.3, max: 0.3 },
+      },
       gramsPerUnit: { g: 1, bowl: 200 },
+      source: {
+        provider: "demo",
+        sourceName: "test fixture",
+        attribution: "test",
+      },
       dataNotice: "test fixture",
+      densityBasis: "test",
     });
 
     expect(converted).toMatchObject({

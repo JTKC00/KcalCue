@@ -1,10 +1,14 @@
 import type { FoodEstimate } from "@/lib/domain/food-analysis";
-import type { NutritionProfile, NutrientValues } from "./types";
+import type {
+  MealCoverage,
+  NutrientRange,
+  NutrientRangePer100g,
+  NutritionMatch,
+  NutritionProfile,
+} from "./types";
+import { MEAL_TOTAL_COVERAGE_THRESHOLD } from "./types";
 
-export interface NutrientRange {
-  min: number;
-  max: number;
-}
+export type { NutrientRange, MealCoverage };
 
 export interface NutritionRanges {
   calories: NutrientRange;
@@ -16,7 +20,9 @@ export interface NutritionRanges {
 export interface CalculatedFood {
   food: FoodEstimate;
   profile: NutritionProfile | null;
+  match: NutritionMatch | null;
   ranges: NutritionRanges | null;
+  includedInTotal: boolean;
   unavailableReason?: string;
 }
 
@@ -24,7 +30,9 @@ export interface CalculatedMeal {
   foods: CalculatedFood[];
   totals: NutritionRanges;
   midpointCalories: number;
-  coverage: "complete" | "partial" | "none";
+  coverage: MealCoverage;
+  includedCount: number;
+  totalCount: number;
 }
 
 const emptyRanges = (): NutritionRanges => ({
@@ -47,38 +55,56 @@ export function portionRangeToGrams(
   };
 }
 
-function scaleNutrientRange(
-  per100g: number,
+function scaleDensityRange(
+  density: NutrientRange,
   grams: NutrientRange,
 ): NutrientRange {
   return {
-    min: (per100g * grams.min) / 100,
-    max: (per100g * grams.max) / 100,
+    min: (density.min * grams.min) / 100,
+    max: (density.max * grams.max) / 100,
   };
 }
 
 export function calculateNutritionRanges(
-  nutrients: NutrientValues,
+  nutrients: NutrientRangePer100g,
   grams: NutrientRange,
 ): NutritionRanges {
   return {
-    calories: scaleNutrientRange(nutrients.calories, grams),
-    protein: scaleNutrientRange(nutrients.protein, grams),
-    carbs: scaleNutrientRange(nutrients.carbs, grams),
-    fat: scaleNutrientRange(nutrients.fat, grams),
+    calories: scaleDensityRange(nutrients.calories, grams),
+    protein: scaleDensityRange(nutrients.protein, grams),
+    carbs: scaleDensityRange(nutrients.carbs, grams),
+    fat: scaleDensityRange(nutrients.fat, grams),
   };
+}
+
+export function classifyMealCoverage(
+  includedCount: number,
+  totalCount: number,
+): MealCoverage {
+  if (totalCount === 0 || includedCount === 0) return "none";
+  if (includedCount === totalCount) return "complete";
+  if (includedCount / totalCount >= MEAL_TOTAL_COVERAGE_THRESHOLD) return "partial";
+  return "insufficient";
+}
+
+export function mealShowsTotal(coverage: MealCoverage): boolean {
+  return coverage === "complete" || coverage === "partial";
 }
 
 export function calculateFoodNutrition(
   food: FoodEstimate,
-  profile: NutritionProfile | null,
+  match: NutritionMatch | null,
 ): CalculatedFood {
-  if (!profile) {
+  const profile = match?.profile ?? null;
+  if (!profile || !match?.includedInTotal) {
     return {
       food,
-      profile: null,
+      profile,
+      match,
       ranges: null,
-      unavailableReason: "本地參考資料未有這項食物，暫不計入總數。",
+      includedInTotal: false,
+      unavailableReason:
+        match?.reasons[0] ?? "未有足夠可靠的營養參考資料，暫不計入總數。",
     };
   }
 
@@ -87,7 +113,9 @@ export function calculateFoodNutrition(
     return {
       food,
       profile,
+      match,
       ranges: null,
+      includedInTotal: false,
       unavailableReason: "這項食物未有相應單位換算，暫不計入總數。",
     };
   }
@@ -95,7 +123,9 @@ export function calculateFoodNutrition(
   return {
     food,
     profile,
+    match,
     ranges: calculateNutritionRanges(profile.nutrientsPer100g, grams),
+    includedInTotal: true,
   };
 }
 
@@ -106,29 +136,24 @@ function addRange(target: NutrientRange, next: NutrientRange): void {
 
 export function calculateMealNutrition(foods: CalculatedFood[]): CalculatedMeal {
   const totals = emptyRanges();
-  let calculatedCount = 0;
+  let includedCount = 0;
 
   for (const food of foods) {
-    if (!food.ranges) continue;
-    calculatedCount += 1;
+    if (!food.ranges || !food.includedInTotal) continue;
+    includedCount += 1;
     addRange(totals.calories, food.ranges.calories);
     addRange(totals.protein, food.ranges.protein);
     addRange(totals.carbs, food.ranges.carbs);
     addRange(totals.fat, food.ranges.fat);
   }
 
-  const coverage =
-    calculatedCount === 0
-      ? "none"
-      : calculatedCount === foods.length
-        ? "complete"
-        : "partial";
-
   return {
     foods,
     totals,
     midpointCalories: (totals.calories.min + totals.calories.max) / 2,
-    coverage,
+    coverage: classifyMealCoverage(includedCount, foods.length),
+    includedCount,
+    totalCount: foods.length,
   };
 }
 

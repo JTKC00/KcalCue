@@ -68,6 +68,7 @@ npm start
    ```dotenv
    GEMINI_API_KEY=your-server-side-key
    GEMINI_MODEL=gemini-3.5-flash-lite
+   NUTRITION_API_KEY=
    ```
 
 3. 重新啟動 `npm run dev`。
@@ -80,6 +81,7 @@ npm start
 |---|---:|---|---|
 | `GEMINI_API_KEY` | Live Mode 必須 | 空白 | 只由 server route 讀取；空白時使用 Demo Mode |
 | `GEMINI_MODEL` | 否 | `gemini-3.5-flash-lite` | 集中設定 Gemini multimodal model |
+| `NUTRITION_API_KEY` | 否 | 空白 | 可選 USDA FoodData Central key；空白時只用本地 reference |
 
 預設模型選擇原因記錄在 [DECISIONS.md](./DECISIONS.md)。Google 官方資料：[model page](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite)、[structured output](https://ai.google.dev/gemini-api/docs/structured-output)、[image understanding](https://ai.google.dev/gemini-api/docs/generate-content/image-understanding)。
 
@@ -101,7 +103,10 @@ Validated FoodAnalysis domain schema
         │
         ▼
 NutritionService → NutritionProvider
-                     └── LocalNutritionProvider (demo/reference data)
+                     └── LocalNutritionProvider
+                           ├── canonicalizeFood
+                           ├── resolveNutritionMatch
+                           └── optional USDA FDC fallback (`/api/nutrition/resolve`)
         │
         ▼
 Deterministic calculation engine
@@ -121,22 +126,30 @@ Shared result UI + editing + immediate recalculation
 
 未來新增 `OpenAIFoodVisionProvider`、本地模型或另一個 multimodal provider 時，只需實作 `FoodVisionProvider` 並在 factory 選擇；Result UI、meal domain model、nutrition service、confidence 及 calculation engine 不需要重寫。
 
+## Nutrition data
+
+AI 只辨認食物及估算份量，不提供正式 kcal／macro。Nutrition layer 會：
+
+1. 把 `displayName` 轉成 canonical identity（與 UI 名稱分開）
+2. 以 synonym／category／preparation 做 resolution，而不是只做 exact alias
+3. 給每個 match 可信程度；low 或無法代表的組合菜式不計入總數
+4. 用 **份量範圍 × 營養密度範圍** 做 deterministic calculation
+5. 標示資料來源（KcalCue reference／USDA FDC）
+
+本地 catalog 是可離線使用的 reference set。可選的 `NUTRITION_API_KEY`（USDA FoodData Central）只在本地無法可靠配對時由 server 查詢。沒有這把 key 時，App、Demo 與 partial result 仍然可用。
+
+修改份量或 preset 只重算，不會再次呼叫 Gemini 或 Nutrition API。
+
 ## Structured AI boundary
 
 Gemini request 使用：
 
 - inline image bytes（raw base64，只在 server memory 建立，不會 log）
 - `responseMimeType: "application/json"`
-- `responseJsonSchema` 定義 provider output
-- 30 秒 outer abort、15 秒 per-attempt timeout、最多 2 attempts
+- `responseJsonSchema` 只描述 shape；Zod 仍是權威驗證
+- 90 秒 HTTP timeout（Gemini 3.7 Flash thinking）
 
-Server 收到回覆後仍會 `JSON.parse` 並再以 Zod schema 驗證。空回覆、malformed JSON、超出 confidence/portion bounds、成功但沒有 food items，或 unable-to-identify 卻包含猜測項目都會被拒絕。
-
-## Nutrition data
-
-V0.1 的 `LocalNutritionProvider` 是明確標示的 KcalCue 本地示範／參考資料，不是即時官方資料。AI 只辨認食物及估算份量；最終 kcal/macros 永遠由 application code 根據 per-100g values 及 unit transformation 計算。
-
-`NutritionProvider` interface 可在未來接駁 USDA FoodData Central、Open Food Facts、自建資料庫或其他來源。
+Server 收到回覆後仍會 `JSON.parse` 並再以 Zod schema 驗證。
 
 ## 測試及驗證
 
@@ -161,7 +174,8 @@ npm run build
 
 ## Known limitations
 
-- 本次無 Gemini credential，因此真實付費 API request 未執行；SDK request shape、schema及所有 error mapping 已以 mock automated tests 驗證。
-- 本地 nutrition catalog 為小型 MVP reference set；未配對食物會清楚標示並從 total 排除，不會偽造數據。
+- 香港／亞洲組合菜式（咖喱、炒飯、火鍋、酒樓菜）coverage 仍然有限；沒有專屬可靠 profile 時會維持 unresolved，而不是套用 generic beef curry。
+- USDA 即時查詢是可選 fallback，對港式食物名稱的命中率有限。
+- HEIC / HEIF 仍未支援；這是下一個獨立 sprint。
 - 單張相片本身無法知道真實重量、隱藏材料、油份、糖份或完整烹調方法；產品刻意以範圍及 uncertainty 表達。
 - V0.1 沒有帳戶、歷史紀錄、雲端圖片保存、醫療建議或個人減重目標。

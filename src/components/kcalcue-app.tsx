@@ -12,6 +12,7 @@ import {
   type PortionPreset,
 } from "@/lib/domain/editable-meal";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
+import { enrichUnresolvedMatches } from "@/lib/nutrition/client";
 import type { FoodVisionProvider } from "@/lib/providers/food-vision/types";
 import { ImageInput } from "./image-input";
 import {
@@ -66,6 +67,7 @@ function createManualItem(): EditableFoodItem {
     recognitionConfidence: 0.5,
     portionConfidence: 0.5,
     uncertaintyReasons: ["手動輸入仍需要你確認實際份量。"],
+    nutritionMatch: null,
   };
 }
 
@@ -391,7 +393,14 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
         setItems([]);
         setStage("unable");
       } else {
-        setItems(createEditableFoodItems(parsed.data.foods));
+        const localMatches = parsed.data.foods.map((food) =>
+          nutritionProvider.resolve(food),
+        );
+        const matches =
+          responseMode === "live"
+            ? await enrichUnresolvedMatches(parsed.data.foods, localMatches)
+            : localMatches;
+        setItems(createEditableFoodItems(parsed.data.foods, matches));
         setStage("result");
       }
     } catch (error) {
@@ -434,12 +443,16 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
 
   const handleNameChange = (id: string, name: string) => {
     updateItem(id, (item) => {
-      const profile = nutritionProvider.findByName(name);
-      return {
+      const nextFood = {
         ...item,
         displayName: name,
-        normalizedName: profile?.id ?? name,
-        recognitionConfidence: name.trim() ? 0.95 : 0.5,
+        normalizedName: name,
+      };
+      const match = name.trim() ? nutritionProvider.resolve(nextFood) : null;
+      return {
+        ...nextFood,
+        normalizedName: match?.profile?.canonicalName ?? name,
+        nutritionMatch: match,
       };
     });
   };
@@ -475,6 +488,7 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
   const handleUnitChange = (id: string, unit: PortionUnit) => {
     updateItem(id, (item) => {
       const profile =
+        item.nutritionMatch?.profile ??
         nutritionProvider.findByName(item.normalizedName) ??
         nutritionProvider.findByName(item.displayName);
       return convertPortionUnit(item, unit, profile);

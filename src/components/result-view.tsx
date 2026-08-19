@@ -5,7 +5,10 @@ import { confidenceCopy, copy } from "@/content/zh-HK";
 import {
   collectUncertaintyReasons,
   mealConfidence,
+  recognitionConfidenceLevel,
 } from "@/lib/domain/confidence";
+import { mealShowsTotal } from "@/lib/nutrition/calculation";
+import type { NutritionConfidence } from "@/lib/nutrition/types";
 import type { FoodAnalysis, PortionUnit } from "@/lib/domain/food-analysis";
 import type { EditableFoodItem, PortionPreset } from "@/lib/domain/editable-meal";
 import {
@@ -40,6 +43,27 @@ function displayRange(range: NutrientRange, increment = 1): string {
   return `${rounded.min}–${rounded.max}`;
 }
 
+function weakestNutritionConfidence(
+  meal: ReturnType<NutritionService["calculateMeal"]>,
+): NutritionConfidence | "none" {
+  const included = meal.foods
+    .map((item) => item.match)
+    .filter((match) => match?.includedInTotal);
+  if (included.length === 0) return "none";
+  if (included.some((match) => match?.confidence === "low")) return "low";
+  if (included.some((match) => match?.confidence === "medium")) return "medium";
+  return "high";
+}
+
+function nutritionSources(
+  meal: ReturnType<NutritionService["calculateMeal"]>,
+): string[] {
+  const names = meal.foods
+    .map((item) => item.profile?.source.sourceName)
+    .filter((name): name is string => Boolean(name));
+  return [...new Set(names)];
+}
+
 export function ResultView({
   analysis,
   items,
@@ -56,7 +80,10 @@ export function ResultView({
   const provider = useMemo(() => new LocalNutritionProvider(), []);
   const service = useMemo(() => new NutritionService(provider), [provider]);
   const meal = useMemo(() => service.calculateMeal(items), [items, service]);
-  const confidence = mealConfidence(items);
+  const recognition = recognitionConfidenceLevel(items);
+  const visionConfidence = mealConfidence(items);
+  const nutritionConfidence = weakestNutritionConfidence(meal);
+  const showTotal = mealShowsTotal(meal.coverage);
   const calories = roundRange(meal.totals.calories, 5);
   const midpoint = Math.round(meal.midpointCalories / 5) * 5;
   const uncertainties = analysis
@@ -68,16 +95,16 @@ export function ResultView({
       <section className="result-hero" aria-labelledby="result-title">
         <div className="result-hero-copy">
           <p className="eyebrow">{copy.resultEyebrow}</p>
-          {meal.coverage === "none" ? (
-            <h1 id="result-title" className="no-total">
-              暫未能計算
-            </h1>
-          ) : (
+          {showTotal ? (
             <h1 id="result-title">
               約 <span>{calories.min}–{calories.max}</span> kcal
             </h1>
+          ) : (
+            <h1 id="result-title" className="no-total">
+              暫未能計算
+            </h1>
           )}
-          {meal.coverage !== "none" ? (
+          {showTotal ? (
             <p className="midpoint">中間估算：約 {midpoint} kcal</p>
           ) : null}
         </div>
@@ -92,7 +119,7 @@ export function ResultView({
 
       <div className="result-grid">
         <div className="result-main-column">
-          {meal.coverage !== "none" ? (
+          {showTotal ? (
             <section className="macro-grid" aria-label="主要營養素估算範圍" aria-live="polite">
               <div className="macro-card macro-protein">
                 <span>Protein</span>
@@ -112,21 +139,45 @@ export function ResultView({
             </section>
           ) : null}
 
-          <section className={`confidence-panel confidence-panel-${confidence}`}>
+          <section
+            className={`confidence-panel ${
+              visionConfidence === "low" || nutritionConfidence === "none"
+                ? "confidence-panel-low"
+                : ""
+            }`}
+          >
             <div className="confidence-icon">
-              {confidence === "low" ? <AlertIcon /> : <CheckIcon />}
+              {visionConfidence === "low" || nutritionConfidence === "none" ? (
+                <AlertIcon />
+              ) : (
+                <CheckIcon />
+              )}
             </div>
-            <div>
-              <span>整體可信程度</span>
-              <strong>{confidenceCopy[confidence]}</strong>
-              {confidence === "low" ? <p>{copy.coarseEstimate}</p> : null}
+            <div className="confidence-split">
+              <span>{copy.recognitionLabel}</span>
+              <strong>{confidenceCopy[recognition]}</strong>
+              <span>{copy.nutritionLabel}</span>
+              <strong>
+                {nutritionConfidence === "none"
+                  ? copy.nutritionUnavailable
+                  : meal.coverage === "complete"
+                    ? confidenceCopy[nutritionConfidence]
+                    : `${copy.nutritionIncomplete}（${meal.includedCount} / ${meal.totalCount}）`}
+              </strong>
+              {visionConfidence === "low" ? <p>{copy.coarseEstimate}</p> : null}
             </div>
           </section>
 
           {meal.coverage === "partial" ? (
             <p className="coverage-notice" role="status">
               <AlertIcon />
-              {copy.partialNutrition}
+              {copy.partialNutrition} 此總數只包括 {meal.includedCount} / {meal.totalCount} 項有可靠營養資料的食物。
+            </p>
+          ) : null}
+          {meal.coverage === "insufficient" ? (
+            <p className="coverage-notice" role="status">
+              <AlertIcon />
+              {copy.insufficientNutrition} 目前有 {meal.includedCount} / {meal.totalCount} 項可配對。
             </p>
           ) : null}
           {meal.coverage === "none" ? (
@@ -263,8 +314,12 @@ export function ResultView({
           </div>
 
           <div className="data-notice">
-            <span>資料來源</span>
-            <p>{copy.localNutritionNotice}</p>
+            <span>{copy.nutritionSourceTitle}</span>
+            <p>
+              {nutritionSources(meal).length > 0
+                ? nutritionSources(meal).join("；")
+                : copy.localNutritionNotice}
+            </p>
           </div>
         </aside>
       </div>

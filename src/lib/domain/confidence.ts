@@ -24,6 +24,20 @@ export function mealConfidence(foods: FoodEstimate[]): ConfidenceLevel {
   return confidenceLevel(conservativeScore);
 }
 
+export function recognitionConfidenceLevel(foods: FoodEstimate[]): ConfidenceLevel {
+  if (foods.length === 0) return "low";
+  return confidenceLevel(
+    Math.min(...foods.map((food) => food.recognitionConfidence)),
+  );
+}
+
+export function portionConfidenceLevel(foods: FoodEstimate[]): ConfidenceLevel {
+  if (foods.length === 0) return "low";
+  return confidenceLevel(
+    Math.min(...foods.map((food) => food.portionConfidence)),
+  );
+}
+
 export function collectUncertaintyReasons(analysis: FoodAnalysis): string[] {
   const reasons = [
     ...analysis.uncertaintyReasons,

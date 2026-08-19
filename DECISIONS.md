@@ -35,15 +35,69 @@ Gemini JSON Schema 只用來約束生成；application 不信任模型一定正�
 
 ## 5. Nutrition 與 AI 完全分開
 
-V0.1 使用 `LocalNutritionProvider` 支援 Demo及常見手動輸入，所有資料在 code/UI 明確標示為「本地示範／參考資料，並非即時官方資料」。`NutritionProvider` interface 可日後增加 USDA、Open Food Facts 或自建資料庫 adapter。
-
-找不到 food 或 unit conversion 時，採 partial result 並明確排除該項，而不是請 AI 補一個看似精確數值。
+Gemini 只提供可見食物身份、份量範圍與不確定性。kcal / Protein / Carbs / Fat 永遠由 Nutrition Provider 的參考資料經 application logic 計算，不接受模型自行填數。
 
 ## 6. Deterministic range calculation
 
-所有 kcal、Protein、Carbs、Fat 都以 `per100g × portion range` 的 application logic 計算。份量 quick presets 永遠由原始 estimate baseline 計算，避免反覆點按造成倍數累積。單位轉換先經 nutrition profile 的 `gramsPerUnit`，沒有 conversion 就清楚標示不可計算。
+最終範圍同時反映份量不確定性與營養密度不確定性：
 
-整餐 confidence 採最弱食物的 recognition/portion confidence，這是刻意保守的產品決定，避免平均值掩蓋一項高度不確定的食物。
+`min = portionMin × densityMin / 100`  
+`max = portionMax × densityMax / 100`
+
+若可靠資料只有單點值，則 `min = max`。份量 presets 永遠由原始 estimate baseline 計算。單位轉換先經 profile 的 `gramsPerUnit`，沒有 conversion 就不計入總數。
+
+---
+
+## 12. 舊 Nutrition Layer 的限制（2026-08-19 重構前）
+
+重構前 `NutritionProvider.findByName` 只做 NFKC／小寫後的 **整串 exact match**（id、displayName、aliases）。`NutritionProfile.nutrientsPer100g` 只有單一 point。餐範圍只是 `單一密度 × 份量 range`。Result UI 用 recognition∩portion 的最弱值當「整體可信程度」，營養配對失敗時仍可能顯示中等可信度，造成「暫未能計算」與「可信程度：中等」並存。
+
+這令 Gemini 的自然描述（紅米白飯、香煎雞胸肉、炒什錦蔬菜、番茄風味醬汁）全部 miss。
+
+## 13. Canonical identity 與 resolution pipeline
+
+Display name 不再當 database key。`canonicalizeFood()` 用詞彙（雞胸、紅米、炒、番茄、醬汁…）抽出：
+
+`CanonicalFoodIdentity { canonicalName, category, preparation, qualifiers }`
+
+Resolver 再對 catalog 評分，並區分：
+
+- `exact_canonical`
+- `strong_synonym`
+- `category_preparation`
+- `approximate_generic`
+- `unresolved`
+
+只有 **high / medium** 的 match 計入餐總數。low 或組合菜式（炒飯、咖喱、火鍋、pizza 等）若沒有專屬 profile，維持 unresolved。不把每個 Gemini 字串寫成 alias。
+
+## 14. Nutrition 資料來源
+
+評估結果（2026-08-19）：
+
+| 來源 | 可信度 | 通用／熟食 | 授權 | Key | 港式／亞洲 | 決定 |
+|---|---|---|---|---|---|---|
+| USDA FoodData Central | 高 | 強 | 公有領域／CC0 | 可選，約 1000 req/h | 弱 | 參考基準 + 可選 live fallback |
+| Open Food Facts | 中（眾包包裝食品） | 弱於 generic cooked | ODbL 需署名／share-alike | 無，但 10–15 req/min | 包裝食品較好 | 本輪不採用 |
+| 僅 alias 擴充 | 低 | 無泛化 | n/a | 無 | 只覆蓋寫死名稱 | 拒絕作為完成條件 |
+
+**本輪選擇：**
+
+1. **主路徑**：KcalCue curated reference catalog。密度來自 USDA 公開熟食／原料值；有烹調不確定性時用已記錄的 min/max band，不是 LLM 編造。
+2. **可選**：`NUTRITION_API_KEY`（USDA FDC）只用於本地 unresolved 的 Live 食物。沒有 key 時 App 仍可啟動、Demo、local fallback、partial result。
+3. 解析結果 cache 在 `EditableFoodItem.nutritionMatch`。改份量只重算，不重查 Gemini 或 Nutrition API。
+
+## 15. Partial coverage threshold
+
+- `complete`：全部項目 high/medium
+- `partial`：已計入項目 ≥ 75%，顯示總數並寫明「只包括 N / M 項」
+- `insufficient`：已計入 > 0 但 < 75%，**不顯示整餐總數**
+- `none`：沒有可計入項目
+
+4 項餐中 3 項可靠 → 顯示總數。2 / 4 → 不顯示總數。
+
+## 16. HEIC / HEIF
+
+仍是已知高優先 product gap。本 sprint 範圍是 Nutrition Foundation；HEIC 留待獨立 sprint，避免拖延 P0。
 
 ## 7. 一套 Demo / Live UI flow
 

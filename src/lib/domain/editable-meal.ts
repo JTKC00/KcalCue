@@ -1,5 +1,5 @@
 import type { FoodEstimate, PortionUnit } from "./food-analysis";
-import type { NutritionProfile } from "@/lib/nutrition/types";
+import type { NutritionMatch, NutritionProfile } from "@/lib/nutrition/types";
 
 export type PortionPreset = "small" | "regular" | "large";
 
@@ -7,6 +7,7 @@ export interface EditableFoodItem extends FoodEstimate {
   id: string;
   originalPortionMin: number;
   originalPortionMax: number;
+  nutritionMatch?: NutritionMatch | null;
 }
 
 function roundPortion(value: number, unit: PortionUnit): number {
@@ -16,12 +17,14 @@ function roundPortion(value: number, unit: PortionUnit): number {
 
 export function createEditableFoodItems(
   foods: FoodEstimate[],
+  matches: Array<NutritionMatch | null | undefined> = [],
 ): EditableFoodItem[] {
   return foods.map((food, index) => ({
     ...food,
     id: `${index}-${food.normalizedName.replace(/[^a-z0-9]+/gi, "-")}`,
     originalPortionMin: food.portionMin,
     originalPortionMax: food.portionMax,
+    nutritionMatch: matches[index] ?? null,
   }));
 }
 

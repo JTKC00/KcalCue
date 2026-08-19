@@ -4,19 +4,24 @@ import {
   calculateMealNutrition,
   type CalculatedMeal,
 } from "./calculation";
-import type { NutritionProvider } from "./types";
+import type { NutritionMatch, NutritionProvider } from "./types";
+
+export interface ResolvableFood extends FoodEstimate {
+  nutritionMatch?: NutritionMatch | null;
+}
 
 export class NutritionService {
   constructor(private readonly provider: NutritionProvider) {}
 
-  calculateMeal(foods: FoodEstimate[]): CalculatedMeal {
-    const calculatedFoods = foods.map((food) => {
-      const profile =
-        this.provider.findByName(food.normalizedName) ??
-        this.provider.findByName(food.displayName);
-      return calculateFoodNutrition(food, profile);
-    });
+  resolveFood(food: ResolvableFood): NutritionMatch {
+    if (food.nutritionMatch) return food.nutritionMatch;
+    return this.provider.resolve(food);
+  }
 
+  calculateMeal(foods: ResolvableFood[]): CalculatedMeal {
+    const calculatedFoods = foods.map((food) =>
+      calculateFoodNutrition(food, this.resolveFood(food)),
+    );
     return calculateMealNutrition(calculatedFoods);
   }
 }
