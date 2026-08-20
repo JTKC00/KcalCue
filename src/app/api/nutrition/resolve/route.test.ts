@@ -23,6 +23,7 @@ const banana = {
 describe("POST /api/nutrition/resolve", () => {
   beforeEach(() => {
     vi.mocked(getNutritionApiKey).mockReturnValue(null);
+    vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
   afterEach(() => {

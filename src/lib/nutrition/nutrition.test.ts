@@ -240,6 +240,16 @@ describe("canonicalization", () => {
       canonicalName: "tomato-sauce",
       category: "sauce",
     });
+    expect(canonicalizeFood(makeFood({ displayName: "炒麵", normalizedName: "fried noodles" }))).toMatchObject({
+      canonicalName: "fried-noodles",
+      category: "mixed",
+      preparation: "stir_fried",
+      qualifiers: ["composite"],
+    });
+    expect(canonicalizeFood(makeFood({ displayName: "混合菜式", normalizedName: "mixed dish" }))).toMatchObject({
+      canonicalName: "unknown",
+      category: "unknown",
+    });
   });
 
   it("normalizes punctuation and whitespace", () => {

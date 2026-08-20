@@ -2,6 +2,8 @@
 
 完成日期：2026-08-13（Asia/Hong_Kong）
 
+> 這是 2026-08-13 的 V0.1 baseline report。其後的 HEIC / HEIF、CI、deterministic evaluation 及 privacy-safe timing readiness work，請以 [OVERNIGHT_REPORT.md](./OVERNIGHT_REPORT.md) 為準；本文件保留 baseline 當時的測試數字及限制，沒有回寫歷史結果。
+
 ## Goal
 
 從空白 workspace 自主設計、建立、測試及完成一個可實際執行的 KcalCue V0.1 Responsive Web App / PWA：讓使用者拍照／上載食物圖片，透過 provider-neutral AI food analysis layer 辨認可見食物及估算份量範圍，再由獨立 nutrition layer 及 deterministic calculation engine 計算 kcal / Protein / Carbs / Fat 範圍；誠實呈現 confidence 及 uncertainty，並讓使用者即時修正。

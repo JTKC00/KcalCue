@@ -97,7 +97,7 @@ Resolver 再對 catalog 評分，並區分：
 
 ## 16. HEIC / HEIF
 
-仍是已知高優先 product gap。本 sprint 範圍是 Nutrition Foundation；HEIC 留待獨立 sprint，避免拖延 P0。
+原始 V0.1 baseline 曾把 HEIC / HEIF 留作 product gap；本文件第 17 節記錄 overnight readiness sprint 的取代決定。
 
 ## 7. 一套 Demo / Live UI flow
 
@@ -118,3 +118,31 @@ V0.1 支援 browser 可靠預覽的 JPEG、PNG、WebP，限制 10MB，client/ser
 ## 11. 固定 lint-compatible toolchain
 
 初次安裝的 TypeScript 7 與目前 `typescript-eslint` 不相容；ESLint 10 亦超出 `eslint-config-next` 內 plugins 的 peer support。根據 npm peer metadata 改用 TypeScript 6.0.3 + ESLint 9.39.5，保留完整 Next/core-web-vitals/a11y lint，而不是停用規則。
+
+---
+
+## 17. HEIC / HEIF 原始 bytes 與 preview fallback（2026-08-20）
+
+查閱 Google 官方 [Gemini image understanding](https://ai.google.dev/gemini-api/docs/image-understanding) 及 [GenerateContent API](https://ai.google.dev/api/generate-content) 文件後，Gemini inline image 支援 `image/heic` 及 `image/heif`，因此不加入 decoder 或先轉 JPEG 的 dependency。原始檔案只會短暫存在 browser object URL、request memory 及 Gemini inline base64 中。
+
+Safari / WebKit 的官方 [Safari 17 release note](https://webkit.org/blog/14445/webkit-features-in-safari-17-0/) 確認 Safari 17 起支援 HEIC image；其他瀏覽器是否可直接預覽取決於其 decoder。Preview failure 不再阻止分析：UI 顯示「HEIC 相片已選擇」及 fallback 說明，仍保留分析、更換、移除操作。
+
+Server 不信任 `File.type`：在 10 MiB image limit 及 multipart `Content-Length` guard 後，以 JPEG、PNG、WebP magic bytes 或 HEIF/HEIC ISO-BMFF `ftyp` brands 判斷實際 MIME，再將該 MIME 傳給 provider。這同時處理 MIME 空白／不一致及基本 MIME spoofing，而不把私人圖片寫入 disk。
+
+本地沒有真實 HEIC fixture，亦沒有 credential 可作 live Gemini image request；raw HEIC forwarding 以 header-detection、route mock 及 preview fallback tests 驗證，真實 target-browser matrix 保留為 limitation。
+
+## 18. CI boundary（2026-08-20）
+
+`.github/workflows/ci.yml` 使用 GitHub 官方 `actions/checkout@v6` 及 `actions/setup-node@v6`、Node 20、npm cache、`npm ci`，並設 `permissions: contents: read`。CI 只執行 lint、typecheck、Vitest、`npm run eval` 及 production build，不讀取 Gemini、USDA 或 production secrets。
+
+## 19. Deterministic evaluation contract（2026-08-20）
+
+`npm run eval` 使用 21 個 representative food / meal cases，驗證 canonical identity、match type、included / unresolved、complete / partial / insufficient / none coverage、unit conversion、range ordering、非負值及相同輸入的 deterministic recalculation。Golden expectations 不包含聲稱真實的精確 kcal 數字。
+
+## 20. Privacy-safe latency diagnostics（2026-08-20）
+
+只記錄 operation、mode/provider、image MIME、byte size、`foodVisionMs`、`nutritionResolveMs`、`totalMs` 及 resolved count；不記錄圖片、base64、食物名稱、prompt、個人識別資料或 secrets。分析及 nutrition route 的 timing log 使用既有 developer-safe `console.error` channel，沒有第三方 analytics。
+
+## 21. Evidence-backed canonical collision fixes（2026-08-20）
+
+Deterministic evaluation 發現兩個實際 collision：英文 `fried noodles` 被較短 `noodles` identity 覆蓋，以及「混合菜式」被單字 alias「菜」誤判為蔬菜。加入 fried-noodles 同義詞並移除過寬單字 alias；新增 regression tests，保持 composite / unresolved 不會套用 generic nutrition profile。

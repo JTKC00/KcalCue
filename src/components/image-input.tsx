@@ -5,10 +5,14 @@ import { copy } from "@/content/zh-HK";
 import {
   ArrowRightIcon,
   CameraIcon,
-  ImageIcon,
   ShieldIcon,
   UploadIcon,
 } from "./icons";
+import {
+  imageMimeLabel,
+  isHeicFile,
+} from "@/lib/providers/food-vision/types";
+import { ImagePreviewFallback } from "./image-preview-fallback";
 
 interface ImageInputProps {
   file: File | null;
@@ -20,7 +24,8 @@ interface ImageInputProps {
   onAnalyze: () => void;
 }
 
-const ACCEPTED_IMAGES = "image/jpeg,image/png,image/webp";
+const ACCEPTED_IMAGES =
+  "image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif";
 
 export function ImageInput({
   file,
@@ -106,15 +111,17 @@ export function ImageInput({
                 onError={onPreviewError}
               />
             ) : (
-              <div className="preview-failed" role="alert">
-                <ImageIcon />
-                <strong>讀取唔到相片預覽</strong>
-                <span>請更換另一張圖片。</span>
-              </div>
+              <ImagePreviewFallback
+                isHeic={isHeicFile(file.name, file.type)}
+              />
             )}
             <div className="image-status-badge">
               <span className="status-dot" />
-              {demoMode ? "只作示範預覽" : "準備分析"}
+              {previewFailed
+                ? "已選擇，可分析"
+                : demoMode
+                  ? "只作示範預覽"
+                  : "準備分析"}
             </div>
           </div>
           <div className="selected-image-content">
@@ -125,14 +132,13 @@ export function ImageInput({
             </div>
             <div className="selected-meta">
               <span>{(file.size / 1024 / 1024).toFixed(1)} MB</span>
-              <span>{file.type.replace("image/", "").toUpperCase()}</span>
+              <span>{imageMimeLabel(file.name, file.type)}</span>
             </div>
             <div className="selected-actions">
               <button
                 className="button button-primary button-large"
                 type="button"
                 onClick={onAnalyze}
-                disabled={previewFailed}
               >
                 {copy.analyze}
                 <ArrowRightIcon />

@@ -640,6 +640,22 @@ svg {
   font-size: 0.88rem;
 }
 
+.preview-failed-compact {
+  min-height: 178px;
+  height: 178px;
+  padding: 18px 10px;
+}
+
+.preview-failed-compact svg {
+  width: 34px;
+  height: 34px;
+}
+
+.preview-failed-compact strong,
+.preview-failed-compact span {
+  font-size: 0.78rem;
+}
+
 .selected-image-content {
   min-width: 0;
   padding: 22px 2px 1px;

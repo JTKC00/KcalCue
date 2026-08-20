@@ -14,6 +14,7 @@ export interface FoodVisionDiagnostic {
   model: string;
   imageMimeType: string;
   imageByteSize: number;
+  foodVisionMs?: number;
 }
 
 const REDACTED = "[redacted]";
@@ -78,7 +79,7 @@ export function extractGeminiErrorDetails(error: unknown): {
 }
 
 export function logFoodVisionDiagnostic(diagnostic: FoodVisionDiagnostic): void {
-  console.error("[kcalcue:food-vision]", {
+  const safeFields: Record<string, string | number | null> = {
     stage: diagnostic.stage,
     errorClass: diagnostic.errorClass,
     httpStatus: diagnostic.httpStatus,
@@ -87,5 +88,9 @@ export function logFoodVisionDiagnostic(diagnostic: FoodVisionDiagnostic): void 
     model: diagnostic.model,
     imageMimeType: diagnostic.imageMimeType,
     imageByteSize: diagnostic.imageByteSize,
-  });
+  };
+  if (diagnostic.foodVisionMs !== undefined) {
+    safeFields.foodVisionMs = diagnostic.foodVisionMs;
+  }
+  console.error("[kcalcue:food-vision]", safeFields);
 }

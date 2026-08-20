@@ -13,6 +13,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "eval": "vitest run src/lib/evaluation/evaluation.test.ts --reporter=dot",
     "test:watch": "vitest"
   },
   "dependencies": {

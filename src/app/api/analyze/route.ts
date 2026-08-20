@@ -7,14 +7,15 @@ import {
 import { FoodVisionError } from "@/lib/providers/food-vision/errors";
 import { createFoodVisionProvider } from "@/lib/providers/food-vision/factory";
 import {
-  supportedImageMimeTypes,
-  type SupportedImageMimeType,
+  detectSupportedImageMimeType,
 } from "@/lib/providers/food-vision/types";
 import { getGeminiServerConfig } from "@/lib/server/env";
+import { elapsedMs, logSafeTiming } from "@/lib/server/timing";
 
 export const runtime = "nodejs";
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_MULTIPART_BYTES = MAX_IMAGE_BYTES + 512 * 1024;
 
 const publicErrorStatus: Record<string, number> = {
   invalid_key: 503,
@@ -34,15 +35,25 @@ function errorResponse(code: string, status: number) {
 export async function POST(request: Request) {
   let imageMimeType = "unknown";
   let imageByteSize = 0;
+  const startedAt = performance.now();
+  let visionStartedAt: number | null = null;
+  let visionMode: string | undefined;
 
   try {
+    const contentLength = Number(request.headers.get("content-length"));
+    if (Number.isFinite(contentLength) && contentLength > MAX_MULTIPART_BYTES) {
+      return errorResponse("file_too_large", 413);
+    }
+
     const formData = await request.formData();
     const forceDemo = formData.get("mode") === "demo";
     const provider = forceDemo
       ? new DemoFoodVisionProvider()
       : createFoodVisionProvider();
+    visionMode = provider.mode;
 
     if (provider.mode === "demo") {
+      visionStartedAt = performance.now();
       const analysis = await provider.analyzeImage({
         data: "",
         mimeType: "image/jpeg",
@@ -57,18 +68,19 @@ export async function POST(request: Request) {
     if (image.size > MAX_IMAGE_BYTES) {
       return errorResponse("file_too_large", 413);
     }
-    if (
-      !supportedImageMimeTypes.includes(image.type as SupportedImageMimeType)
-    ) {
+
+    const bytes = Buffer.from(await image.arrayBuffer());
+    const detectedMimeType = detectSupportedImageMimeType(bytes);
+    if (!detectedMimeType) {
       return errorResponse("invalid_file", 415);
     }
 
-    imageMimeType = image.type;
-    imageByteSize = image.size;
-    const bytes = Buffer.from(await image.arrayBuffer());
+    imageMimeType = detectedMimeType;
+    imageByteSize = bytes.byteLength;
+    visionStartedAt = performance.now();
     const analysis = await provider.analyzeImage({
       data: bytes.toString("base64"),
-      mimeType: image.type as SupportedImageMimeType,
+      mimeType: detectedMimeType,
     });
 
     return NextResponse.json({ analysis, mode: provider.mode });
@@ -102,5 +114,16 @@ export async function POST(request: Request) {
       imageByteSize,
     });
     return errorResponse("unknown", 500);
+  } finally {
+    if (visionStartedAt !== null && visionMode) {
+      logSafeTiming({
+        operation: "food-vision",
+        mode: visionMode,
+        imageMimeType,
+        imageByteSize,
+        foodVisionMs: elapsedMs(visionStartedAt),
+        totalMs: elapsedMs(startedAt),
+      });
+    }
   }
 }
