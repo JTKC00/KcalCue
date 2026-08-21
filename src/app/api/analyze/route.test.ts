@@ -23,13 +23,32 @@ import { FoodVisionError } from "@/lib/providers/food-vision/errors";
 import { demoFoodAnalysis } from "@/lib/providers/food-vision/demo";
 import { POST } from "./route";
 
-function jpegRequest(name = "meal.jpg", type = "image/jpeg") {
+function imageRequest(
+  bytes: Uint8Array,
+  name = "meal.jpg",
+  type = "image/jpeg",
+) {
   const form = new FormData();
-  form.set("image", new File([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], name, { type }));
+  const blobBytes = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(blobBytes).set(bytes);
+  form.set("image", new File([blobBytes], name, { type }));
   return new Request("http://localhost/api/analyze", {
     method: "POST",
     body: form,
   });
+}
+
+function jpegRequest(name = "meal.jpg", type = "image/jpeg") {
+  return imageRequest(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), name, type);
+}
+
+function heifBytes(brand = "mif1"): Uint8Array {
+  const bytes = new Uint8Array(24);
+  bytes.set([0, 0, 0, 24], 0);
+  bytes.set([..."ftyp"].map((character) => character.charCodeAt(0)), 4);
+  bytes.set([...brand].map((character) => character.charCodeAt(0)), 8);
+  bytes.set([..."mif1"].map((character) => character.charCodeAt(0)), 16);
+  return bytes;
 }
 
 describe("POST /api/analyze", () => {
@@ -100,12 +119,52 @@ describe("POST /api/analyze", () => {
     expect(logged).not.toContain("test-only-key");
   });
 
-  it("rejects unsupported files before calling Gemini", async () => {
-    const response = await POST(jpegRequest("meal.heic", "image/heic"));
+  it("accepts raw HEIC bytes and forwards the detected MIME type", async () => {
+    analyzeImage.mockResolvedValueOnce(demoFoodAnalysis);
+
+    const response = await POST(imageRequest(heifBytes("heic"), "meal.heic", "image/heic"));
+
+    expect(response.status).toBe(200);
+    expect(analyzeImage).toHaveBeenCalledWith({
+      data: expect.any(String),
+      mimeType: "image/heic",
+    });
+  });
+
+  it("recovers when a browser leaves the MIME type blank", async () => {
+    analyzeImage.mockResolvedValueOnce(demoFoodAnalysis);
+
+    const response = await POST(imageRequest(heifBytes(), "meal.heif", ""));
+
+    expect(response.status).toBe(200);
+    expect(analyzeImage).toHaveBeenCalledWith({
+      data: expect.any(String),
+      mimeType: "image/heif",
+    });
+  });
+
+  it("rejects bytes that are not a supported image container", async () => {
+    const response = await POST(
+      imageRequest(new Uint8Array([1, 2, 3, 4]), "meal.heic", "image/heic"),
+    );
     const body = await response.json();
 
     expect(response.status).toBe(415);
     expect(body).toEqual({ error: { code: "invalid_file" } });
+    expect(analyzeImage).not.toHaveBeenCalled();
+  });
+
+  it("rejects an oversized multipart request before parsing the body", async () => {
+    const response = await POST(
+      new Request("http://localhost/api/analyze", {
+        method: "POST",
+        headers: { "content-length": String(11 * 1024 * 1024) },
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(413);
+    expect(body).toEqual({ error: { code: "file_too_large" } });
     expect(analyzeImage).not.toHaveBeenCalled();
   });
 });

@@ -4,6 +4,7 @@ import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { UsdaNutritionClient, UsdaNutritionError } from "@/lib/nutrition/usda";
 import { getNutritionApiKey } from "@/lib/server/env";
 import type { NutritionMatch } from "@/lib/nutrition/types";
+import { elapsedMs, logSafeTiming } from "@/lib/server/timing";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -37,30 +38,41 @@ export async function POST(request: Request) {
   const apiKey = getNutritionApiKey();
   const usda = apiKey ? new UsdaNutritionClient(apiKey) : null;
   const matches: NutritionMatch[] = [];
+  const startedAt = performance.now();
 
-  for (const food of parsed.data.foods) {
-    const localMatch = local.resolve(food);
-    if (localMatch.includedInTotal || !usda) {
-      matches.push(localMatch);
-      continue;
-    }
-
-    try {
-      const remote = await usda.resolve(food);
-      matches.push(remote.includedInTotal ? remote : localMatch);
-    } catch (error) {
-      if (error instanceof UsdaNutritionError) {
-        return NextResponse.json(
-          { error: { code: error.code } },
-          { status: publicErrorStatus[error.code] ?? 500 },
-        );
+  try {
+    for (const food of parsed.data.foods) {
+      const localMatch = local.resolve(food);
+      if (localMatch.includedInTotal || !usda) {
+        matches.push(localMatch);
+        continue;
       }
-      return NextResponse.json({ error: { code: "unavailable" } }, { status: 503 });
-    }
-  }
 
-  return NextResponse.json({
-    matches,
-    provider: usda ? "usda-fdc" : "kcalcue-reference",
-  });
+      try {
+        const remote = await usda.resolve(food);
+        matches.push(remote.includedInTotal ? remote : localMatch);
+      } catch (error) {
+        if (error instanceof UsdaNutritionError) {
+          return NextResponse.json(
+            { error: { code: error.code } },
+            { status: publicErrorStatus[error.code] ?? 500 },
+          );
+        }
+        return NextResponse.json({ error: { code: "unavailable" } }, { status: 503 });
+      }
+    }
+
+    return NextResponse.json({
+      matches,
+      provider: usda ? "usda-fdc" : "kcalcue-reference",
+    });
+  } finally {
+    logSafeTiming({
+      operation: "nutrition-resolve",
+      provider: usda ? "usda-fdc" : "kcalcue-reference",
+      nutritionResolveMs: elapsedMs(startedAt),
+      totalMs: elapsedMs(startedAt),
+      resolvedCount: matches.length,
+    });
+  }
 }

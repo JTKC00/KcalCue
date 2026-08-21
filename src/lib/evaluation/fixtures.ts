@@ -1,0 +1,237 @@
+import type { FoodEstimate } from "@/lib/domain/food-analysis";
+import type { MealCoverage, NutritionMatchType } from "@/lib/nutrition/types";
+
+export interface EvaluationCase {
+  id: string;
+  description: string;
+  foods: FoodEstimate[];
+  expectedCanonicalNames: string[];
+  expectedIncluded: boolean[];
+  expectedMatchTypes?: Array<NutritionMatchType | undefined>;
+  expectedCoverage: MealCoverage;
+}
+
+function food(
+  displayName: string,
+  normalizedName: string,
+  overrides: Partial<FoodEstimate> = {},
+): FoodEstimate {
+  return {
+    displayName,
+    normalizedName,
+    portionMin: 100,
+    portionMax: 150,
+    unit: "g",
+    recognitionConfidence: 0.9,
+    portionConfidence: 0.75,
+    uncertaintyReasons: [],
+    ...overrides,
+  };
+}
+
+export const representativeEvaluationCases: EvaluationCase[] = [
+  {
+    id: "banana",
+    description: "banana exact identity",
+    foods: [food("香蕉", "banana", { unit: "piece", portionMin: 1, portionMax: 2 })],
+    expectedCanonicalNames: ["banana"],
+    expectedIncluded: [true],
+    expectedMatchTypes: ["exact_canonical"],
+    expectedCoverage: "complete",
+  },
+  {
+    id: "apple",
+    description: "apple exact identity",
+    foods: [food("蘋果", "apple", { unit: "piece", portionMin: 1, portionMax: 1 })],
+    expectedCanonicalNames: ["apple"],
+    expectedIncluded: [true],
+    expectedMatchTypes: ["exact_canonical"],
+    expectedCoverage: "complete",
+  },
+  {
+    id: "white-rice",
+    description: "white rice exact local name",
+    foods: [food("白飯", "cooked white rice", { portionMin: 120, portionMax: 180 })],
+    expectedCanonicalNames: ["rice"],
+    expectedIncluded: [true],
+    expectedMatchTypes: ["exact_canonical"],
+    expectedCoverage: "complete",
+  },
+  {
+    id: "egg",
+    description: "egg with countable unit",
+    foods: [food("雞蛋", "boiled egg", { unit: "piece", portionMin: 1, portionMax: 2 })],
+    expectedCanonicalNames: ["egg"],
+    expectedIncluded: [true],
+    expectedMatchTypes: ["exact_canonical"],
+    expectedCoverage: "complete",
+  },
+  {
+    id: "milk",
+    description: "whole milk with millilitre conversion",
+    foods: [food("牛奶", "whole milk", { unit: "ml", portionMin: 200, portionMax: 250 })],
+    expectedCanonicalNames: ["milk"],
+    expectedIncluded: [true],
+    expectedMatchTypes: ["exact_canonical"],
+    expectedCoverage: "complete",
+  },
+  {
+    id: "balanced-meal",
+    description: "rice, chicken breast and leafy greens",
+    foods: [
+      food("白飯", "cooked white rice"),
+      food("香煎雞胸肉", "pan-seared chicken breast", { preparationMethod: "香煎" }),
+      food("青菜", "cooked leafy greens", { preparationMethod: "熟" }),
+    ],
+    expectedCanonicalNames: ["rice", "chicken-breast", "leafy-greens"],
+    expectedIncluded: [true, true, true],
+    expectedMatchTypes: ["exact_canonical", "exact_canonical", "exact_canonical"],
+    expectedCoverage: "complete",
+  },
+  {
+    id: "red-rice",
+    description: "red and white rice keeps wholegrain qualifier",
+    foods: [food("紅米白飯", "red and white rice")],
+    expectedCanonicalNames: ["rice"],
+    expectedIncluded: [true],
+    expectedMatchTypes: ["exact_canonical"],
+    expectedCoverage: "complete",
+  },
+  {
+    id: "grilled-salmon",
+    description: "grilled salmon preparation",
+    foods: [food("烤三文魚", "grilled salmon", { preparationMethod: "烤" })],
+    expectedCanonicalNames: ["salmon"],
+    expectedIncluded: [true],
+    expectedMatchTypes: ["strong_synonym"],
+    expectedCoverage: "complete",
+  },
+  {
+    id: "noodles-and-egg",
+    description: "noodles and egg meal",
+    foods: [
+      food("麵", "egg noodles"),
+      food("雞蛋", "egg", { unit: "piece", portionMin: 1, portionMax: 2 }),
+    ],
+    expectedCanonicalNames: ["noodles", "egg"],
+    expectedIncluded: [true, true],
+    expectedMatchTypes: ["exact_canonical", "exact_canonical"],
+    expectedCoverage: "complete",
+  },
+  {
+    id: "salad",
+    description: "unresolved salad stays unresolved",
+    foods: [food("沙律", "salad")],
+    expectedCanonicalNames: ["unknown"],
+    expectedIncluded: [false],
+    expectedMatchTypes: ["unresolved"],
+    expectedCoverage: "none",
+  },
+  {
+    id: "pan-seared-chicken",
+    description: "pan-seared chicken breast uses preparation-aware match",
+    foods: [food("香煎雞胸肉", "pan-seared chicken breast", { preparationMethod: "香煎" })],
+    expectedCanonicalNames: ["chicken-breast"],
+    expectedIncluded: [true],
+    expectedMatchTypes: ["exact_canonical"],
+    expectedCoverage: "complete",
+  },
+  {
+    id: "stir-fried-vegetables",
+    description: "stir-fried mixed vegetables",
+    foods: [food("炒什錦蔬菜", "stir-fried mixed vegetables", { preparationMethod: "炒" })],
+    expectedCanonicalNames: ["mixed-vegetables"],
+    expectedIncluded: [true],
+    expectedMatchTypes: ["exact_canonical"],
+    expectedCoverage: "complete",
+  },
+  {
+    id: "tomato-sauce",
+    description: "tomato flavored sauce",
+    foods: [food("番茄風味醬汁", "tomato flavored sauce", { unit: "ml" })],
+    expectedCanonicalNames: ["tomato-sauce"],
+    expectedIncluded: [true],
+    expectedMatchTypes: ["strong_synonym"],
+    expectedCoverage: "complete",
+  },
+  {
+    id: "fried-rice",
+    description: "composite fried rice is not generic rice",
+    foods: [food("炒飯", "fried rice")],
+    expectedCanonicalNames: ["fried-rice"],
+    expectedIncluded: [false],
+    expectedMatchTypes: ["unresolved"],
+    expectedCoverage: "none",
+  },
+  {
+    id: "curry",
+    description: "generic curry stays unresolved",
+    foods: [food("咖喱", "curry")],
+    expectedCanonicalNames: ["curry"],
+    expectedIncluded: [false],
+    expectedMatchTypes: ["unresolved"],
+    expectedCoverage: "none",
+  },
+  {
+    id: "fried-noodles",
+    description: "composite fried noodles stays unresolved",
+    foods: [food("炒麵", "fried noodles")],
+    expectedCanonicalNames: ["fried-noodles"],
+    expectedIncluded: [false],
+    expectedMatchTypes: ["unresolved"],
+    expectedCoverage: "none",
+  },
+  {
+    id: "pizza",
+    description: "pizza stays unresolved without a dedicated profile",
+    foods: [food("pizza", "pizza")],
+    expectedCanonicalNames: ["pizza"],
+    expectedIncluded: [false],
+    expectedMatchTypes: ["unresolved"],
+    expectedCoverage: "none",
+  },
+  {
+    id: "mixed-dish",
+    description: "unknown mixed dish is not guessed",
+    foods: [food("混合菜式", "mixed dish")],
+    expectedCanonicalNames: ["unknown"],
+    expectedIncluded: [false],
+    expectedMatchTypes: ["unresolved"],
+    expectedCoverage: "none",
+  },
+  {
+    id: "space-food",
+    description: "unrecognized name remains unresolved",
+    foods: [food("太空食品", "space food brick")],
+    expectedCanonicalNames: ["unknown"],
+    expectedIncluded: [false],
+    expectedMatchTypes: ["unresolved"],
+    expectedCoverage: "none",
+  },
+  {
+    id: "partial-meal",
+    description: "three reliable foods plus fried rice gives partial coverage",
+    foods: [
+      food("香蕉", "banana", { unit: "piece", portionMin: 1, portionMax: 1 }),
+      food("雞蛋", "egg", { unit: "piece", portionMin: 1, portionMax: 1 }),
+      food("白飯", "cooked white rice"),
+      food("炒飯", "fried rice"),
+    ],
+    expectedCanonicalNames: ["banana", "egg", "rice", "fried-rice"],
+    expectedIncluded: [true, true, true, false],
+    expectedMatchTypes: ["exact_canonical", "exact_canonical", "exact_canonical", "unresolved"],
+    expectedCoverage: "partial",
+  },
+  {
+    id: "insufficient-meal",
+    description: "one reliable food plus pizza hides the meal total",
+    foods: [
+      food("香蕉", "banana", { unit: "piece", portionMin: 1, portionMax: 1 }),
+      food("pizza", "pizza"),
+    ],
+    expectedCanonicalNames: ["banana", "pizza"],
+    expectedIncluded: [true, false],
+    expectedMatchTypes: ["exact_canonical", "unresolved"],
+    expectedCoverage: "insufficient",
+  },
+];

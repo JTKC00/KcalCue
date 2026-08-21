@@ -13,8 +13,13 @@ import {
 } from "@/lib/domain/editable-meal";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { enrichUnresolvedMatches } from "@/lib/nutrition/client";
-import type { FoodVisionProvider } from "@/lib/providers/food-vision/types";
+import {
+  inferSupportedImageMimeType,
+  isHeicFile,
+  type FoodVisionProvider,
+} from "@/lib/providers/food-vision/types";
 import { ImageInput } from "./image-input";
+import { ImagePreviewFallback } from "./image-preview-fallback";
 import {
   AlertIcon,
   CameraIcon,
@@ -46,7 +51,6 @@ interface KcalCueAppProps {
 }
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
-const acceptedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 function getError(code: string): AppError {
   const message = errorCopy[code] ?? errorCopy.unknown;
@@ -163,12 +167,24 @@ function HowItWorks() {
   );
 }
 
-function LoadingView({ previewUrl, demoMode }: { previewUrl: string | null; demoMode: boolean }) {
+function LoadingView({
+  previewUrl,
+  previewFailed,
+  isHeic,
+  demoMode,
+}: {
+  previewUrl: string | null;
+  previewFailed: boolean;
+  isHeic: boolean;
+  demoMode: boolean;
+}) {
   return (
     <main className="state-page" id="main-content">
       <section className="loading-card" aria-live="polite" aria-busy="true">
         <div className="loading-visual">
-          {previewUrl ? (
+          {previewFailed ? (
+            <ImagePreviewFallback isHeic={isHeic} />
+          ) : previewUrl ? (
             // A local object URL is the appropriate preview source here.
             // eslint-disable-next-line @next/next/no-img-element
             <img src={previewUrl} alt="正在分析的餐點相片" />
@@ -199,6 +215,8 @@ interface RecoveryViewProps {
   kind: "unable" | "error";
   error: AppError | null;
   previewUrl: string | null;
+  previewFailed: boolean;
+  isHeic: boolean;
   onRetry: () => void;
   onReplace: () => void;
   onManual: () => void;
@@ -210,6 +228,8 @@ function RecoveryView({
   kind,
   error,
   previewUrl,
+  previewFailed,
+  isHeic,
   onRetry,
   onReplace,
   onManual,
@@ -222,7 +242,9 @@ function RecoveryView({
   return (
     <main className="state-page" id="main-content">
       <section className="recovery-card" role={kind === "error" ? "alert" : "status"}>
-        {previewUrl ? (
+        {previewFailed ? (
+          <ImagePreviewFallback isHeic={isHeic} />
+        ) : previewUrl ? (
           <div className="recovery-photo">
             {/* A local object URL is the appropriate preview source here. */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -311,7 +333,7 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
       setStage("input");
       return;
     }
-    if (!acceptedTypes.has(nextFile.type)) {
+    if (nextFile.size === 0 || !inferSupportedImageMimeType(nextFile.name, nextFile.type)) {
       setFile(null);
       setPreviewUrl(null);
       setAppError(getError("invalid_file"));
@@ -522,7 +544,6 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
               onFileSelected={handleFileSelected}
               onPreviewError={() => {
                 setPreviewFailed(true);
-                setAppError(getError("image_read_failed"));
               }}
               onAnalyze={() => void analyze()}
             />
@@ -532,7 +553,12 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
       ) : null}
 
       {stage === "analyzing" ? (
-        <LoadingView previewUrl={previewUrl} demoMode={activeMode === "demo"} />
+        <LoadingView
+          previewUrl={previewUrl}
+          previewFailed={previewFailed}
+          isHeic={isHeicFile(file?.name ?? "", file?.type)}
+          demoMode={activeMode === "demo"}
+        />
       ) : null}
 
       {stage === "unable" || stage === "error" ? (
@@ -540,6 +566,8 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
           kind={stage}
           error={appError}
           previewUrl={previewUrl}
+          previewFailed={previewFailed}
+          isHeic={isHeicFile(file?.name ?? "", file?.type)}
           onRetry={() => void analyze()}
           onReplace={reset}
           onManual={startManual}
@@ -554,6 +582,8 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
           items={items}
           mode={activeMode}
           previewUrl={previewUrl}
+          previewFailed={previewFailed}
+          isHeic={isHeicFile(file?.name ?? "", file?.type)}
           onNameChange={handleNameChange}
           onPortionChange={handlePortionChange}
           onUnitChange={handleUnitChange}

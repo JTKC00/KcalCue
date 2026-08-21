@@ -121,6 +121,7 @@ function diagnosticFor(
     model: string;
     imageMimeType: string;
     imageByteSize: number;
+    foodVisionMs: number;
   },
 ): FoodVisionDiagnostic {
   if (error instanceof FoodVisionError && error.diagnostic) {
@@ -140,6 +141,7 @@ function diagnosticFor(
     model: context.model,
     imageMimeType: context.imageMimeType,
     imageByteSize: context.imageByteSize,
+    foodVisionMs: context.foodVisionMs,
   };
 }
 
@@ -153,10 +155,12 @@ export class GeminiFoodVisionProvider implements FoodVisionProvider {
   }
 
   async analyzeImage(image: FoodImageInput): Promise<FoodAnalysis> {
+    const startedAt = performance.now();
     const context = {
       model: this.config.model,
       imageMimeType: image.mimeType,
       imageByteSize: base64ByteLength(image.data),
+      foodVisionMs: 0,
     };
     let stage: FoodVisionFailureStage = "gemini_request";
 
@@ -221,6 +225,10 @@ export class GeminiFoodVisionProvider implements FoodVisionProvider {
       return validated.data;
     } catch (error) {
       const mapped = mapGeminiError(error);
+      context.foodVisionMs = Math.max(
+        0,
+        Math.round(performance.now() - startedAt),
+      );
       const diagnostic = diagnosticFor(error, stage, context);
       logFoodVisionDiagnostic(diagnostic);
       throw new FoodVisionError(mapped.code, mapped.message, {

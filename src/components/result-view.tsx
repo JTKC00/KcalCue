@@ -19,12 +19,15 @@ import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { NutritionService } from "@/lib/nutrition/service";
 import { AlertIcon, CheckIcon, PlusIcon, RefreshIcon, ShieldIcon } from "./icons";
 import { FoodEditor } from "./food-editor";
+import { ImagePreviewFallback } from "./image-preview-fallback";
 
 interface ResultViewProps {
   analysis: FoodAnalysis | null;
   items: EditableFoodItem[];
   mode: "live" | "demo" | "manual";
   previewUrl: string | null;
+  previewFailed: boolean;
+  isHeic: boolean;
   onNameChange: (id: string, name: string) => void;
   onPortionChange: (
     id: string,
@@ -69,6 +72,8 @@ export function ResultView({
   items,
   mode,
   previewUrl,
+  previewFailed,
+  isHeic,
   onNameChange,
   onPortionChange,
   onUnitChange,
@@ -273,7 +278,15 @@ export function ResultView({
         </div>
 
         <aside className="result-sidebar" aria-label="相片及資料說明">
-          {previewUrl ? (
+          {previewFailed ? (
+            <div className="sidebar-photo-card">
+              <ImagePreviewFallback isHeic={isHeic} compact />
+              <button className="button button-secondary" type="button" onClick={onReset}>
+                <RefreshIcon />
+                {copy.newMeal}
+              </button>
+            </div>
+          ) : previewUrl ? (
             <div className="sidebar-photo-card">
               {/* A local object URL is the appropriate preview source here. */}
               {/* eslint-disable-next-line @next/next/no-img-element */}

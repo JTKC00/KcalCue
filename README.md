@@ -9,7 +9,8 @@ KcalCue 是一個 mobile-first Responsive Web App / PWA：使用者影低或選�
 ## 功能
 
 - 手機拍照及裝置圖片選擇
-- JPEG / PNG / WebP 預覽、更換、移除及 client/server validation
+- JPEG / PNG / WebP / HEIC / HEIF 選擇、更換、移除及 client/server validation
+- 如果瀏覽器未能預覽 HEIC / HEIF，仍可保留原檔進行分析
 - Gemini Live Mode：server-side 圖片理解及 structured JSON output
 - 無 `GEMINI_API_KEY` 時自動進入清楚標示的 Demo Mode
 - 分離的 `FoodVisionProvider`、`NutritionProvider` 及 calculation engine
@@ -20,6 +21,7 @@ KcalCue 是一個 mobile-first Responsive Web App / PWA：使用者影低或選�
 - 375px 手機、tablet 及 desktop responsive layout
 - semantic HTML、keyboard focus、form labels、ARIA loading/error state 及 reduced-motion support
 - Web App Manifest、icon 及最小 service worker
+- GitHub Actions CI：lint、typecheck、tests、deterministic evaluation 及 production build
 
 ## 技術棧
 
@@ -91,7 +93,7 @@ npm start
 Browser image input
         │
         ▼
-POST /api/analyze  (server-only, transient image bytes)
+POST /api/analyze  (server-only, transient image bytes + container sniffing)
         │
         ▼
 FoodVisionProvider
@@ -144,7 +146,7 @@ AI 只辨認食物及估算份量，不提供正式 kcal／macro。Nutrition lay
 
 Gemini request 使用：
 
-- inline image bytes（raw base64，只在 server memory 建立，不會 log）
+- inline image bytes（raw base64，只在 server memory 建立，不會 log）；Gemini 官方支援 JPEG、PNG、WebP、HEIC 及 HEIF MIME types
 - `responseMimeType: "application/json"`
 - `responseJsonSchema` 只描述 shape；Zod 仍是權威驗證
 - 90 秒 HTTP timeout（Gemini 3.7 Flash thinking）
@@ -157,12 +159,17 @@ Server 收到回覆後仍會 `JSON.parse` 並再以 Zod schema 驗證。
 npm run lint
 npm run typecheck
 npm test
+npm run eval
 npm run build
 ```
 
 測試涵蓋 calculation ranges、所有 macros、g/ml/piece conversion、portion presets、confidence mapping、uncertainty de-duplication/fallback、schema validation、Gemini error mapping，以及 Demo analysis → nutrition → user correction → updated result integration pipeline。
 
-完整驗證紀錄見 [GOAL_REPORT.md](./GOAL_REPORT.md)。
+`npm run eval` 會獨立執行 21 個 representative food / meal cases，驗證 canonical identity、nutrition match、partial / unresolved coverage、range ordering、非負值及 deterministic recalculation；不使用 Gemini 或 USDA live API，也不建立精確 kcal golden numbers。
+
+GitHub Actions workflow 位於 `.github/workflows/ci.yml`，只使用 `npm ci` 及 deterministic local checks，不需要 `GEMINI_API_KEY`、`NUTRITION_API_KEY` 或 production secrets。
+
+V0.1 baseline 紀錄見 [GOAL_REPORT.md](./GOAL_REPORT.md)；本次 real-world readiness sprint 的完整驗證紀錄見 [OVERNIGHT_REPORT.md](./OVERNIGHT_REPORT.md)。
 
 ## Privacy design
 
@@ -170,12 +177,13 @@ npm run build
 - Demo Mode 不會將圖片傳到 server；圖片 object URL 只用於 browser preview，離開／更換後即 revoke。
 - Live Mode 圖片以 multipart request 暫時傳到 KcalCue server，再以 inline bytes 傳給 Gemini。
 - KcalCue 不寫入圖片檔案、不持久保存 base64，也不記錄 image payload。
+- developer-safe timing diagnostics 只記錄 operation、MIME、byte size、計時及 resolved count，不記錄圖片、base64、食物名稱、prompt、個人資料或 secrets。
 - 真正 Live Mode 使用時，圖片仍會由 Google Gemini API 處理；部署者應同時審視其帳戶與資料處理條款。
 
 ## Known limitations
 
 - 香港／亞洲組合菜式（咖喱、炒飯、火鍋、酒樓菜）coverage 仍然有限；沒有專屬可靠 profile 時會維持 unresolved，而不是套用 generic beef curry。
 - USDA 即時查詢是可選 fallback，對港式食物名稱的命中率有限。
-- HEIC / HEIF 仍未支援；這是下一個獨立 sprint。
+- Gemini raw inline request 支援 HEIC / HEIF；Safari 17 起由 WebKit 支援 HEIC 預覽。其他瀏覽器是否能直接顯示相片取決於其 image decoder；KcalCue 會在預覽失敗時保留分析入口，不會為了預覽強制轉檔。目標裝置的完整 browser matrix 仍需持續 QA。
 - 單張相片本身無法知道真實重量、隱藏材料、油份、糖份或完整烹調方法；產品刻意以範圍及 uncertainty 表達。
 - V0.1 沒有帳戶、歷史紀錄、雲端圖片保存、醫療建議或個人減重目標。
