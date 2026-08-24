@@ -165,7 +165,7 @@ npm run build
 
 測試涵蓋 calculation ranges、所有 macros、g/ml/piece conversion、portion presets、confidence mapping、uncertainty de-duplication/fallback、schema validation、Gemini error mapping，以及 Demo analysis → nutrition → user correction → updated result integration pipeline。
 
-`npm run eval` 會獨立執行 21 個 representative food / meal cases，驗證 canonical identity、nutrition match、partial / unresolved coverage、range ordering、非負值及 deterministic recalculation；不使用 Gemini 或 USDA live API，也不建立精確 kcal golden numbers。
+`npm run eval` 會獨立執行 representative food / meal cases，驗證 canonical identity、nutrition match、partial / unresolved coverage、composite dish safety、range ordering、非負值及 deterministic recalculation；不使用 Gemini 或 USDA live API，也不建立精確 kcal golden numbers。
 
 GitHub Actions workflow 位於 `.github/workflows/ci.yml`，只使用 `npm ci` 及 deterministic local checks，不需要 `GEMINI_API_KEY`、`NUTRITION_API_KEY` 或 production secrets。
 

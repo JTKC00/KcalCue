@@ -101,4 +101,27 @@ describe("USDA nutrition client", () => {
     await client.resolve({ ...food, portionMin: 140, portionMax: 180 });
     expect(fetchMock).toHaveBeenCalledOnce();
   });
+
+  it("does not query USDA for a composite dish", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const match = await new UsdaNutritionClient("test-only-key").resolve({
+      displayName: "墨魚汁意大利飯",
+      normalizedName: "squid ink risotto",
+      portionMin: 180,
+      portionMax: 260,
+      unit: "g",
+      recognitionConfidence: 0.9,
+      portionConfidence: 0.7,
+      uncertaintyReasons: [],
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(match.includedInTotal).toBe(false);
+    expect(match.matchType).toBe("unresolved");
+    expect(match.profile).toBeNull();
+    expect(match.identity.canonicalName).toBe("risotto");
+    expect(match.reasons[0]).toContain("不足以代表整道菜");
+  });
 });

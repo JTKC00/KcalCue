@@ -1,5 +1,6 @@
 import type { FoodEstimate } from "@/lib/domain/food-analysis";
-import { canonicalizeFood } from "./canonical";
+import { canonicalizeFood, isCompositeIdentity } from "./canonical";
+import { COMPOSITE_GENERIC_FALLBACK_REASON } from "./compatibility";
 import type {
   NutrientRangePer100g,
   NutritionMatch,
@@ -112,6 +113,17 @@ export class UsdaNutritionClient {
 
   async resolve(food: FoodEstimate): Promise<NutritionMatch> {
     const identity = canonicalizeFood(food);
+    if (isCompositeIdentity(identity)) {
+      return {
+        profile: null,
+        confidence: "low",
+        matchType: "unresolved",
+        reasons: [COMPOSITE_GENERIC_FALLBACK_REASON],
+        identity,
+        includedInTotal: false,
+      };
+    }
+
     const query = [food.normalizedName, food.displayName].filter(Boolean).join(" ").trim();
     const cacheKey = query.toLocaleLowerCase("en");
     const cached = queryCache.get(cacheKey);

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { foodEstimateSchema } from "@/lib/domain/food-analysis";
+import { isCompositeIdentity } from "@/lib/nutrition/canonical";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { UsdaNutritionClient, UsdaNutritionError } from "@/lib/nutrition/usda";
 import { getNutritionApiKey } from "@/lib/server/env";
@@ -43,7 +44,11 @@ export async function POST(request: Request) {
   try {
     for (const food of parsed.data.foods) {
       const localMatch = local.resolve(food);
-      if (localMatch.includedInTotal || !usda) {
+      if (
+        localMatch.includedInTotal ||
+        !usda ||
+        isCompositeIdentity(localMatch.identity)
+      ) {
         matches.push(localMatch);
         continue;
       }

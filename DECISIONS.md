@@ -137,7 +137,7 @@ Server 不信任 `File.type`：在 10 MiB image limit 及 multipart `Content-Len
 
 ## 19. Deterministic evaluation contract（2026-08-20）
 
-`npm run eval` 使用 21 個 representative food / meal cases，驗證 canonical identity、match type、included / unresolved、complete / partial / insufficient / none coverage、unit conversion、range ordering、非負值及相同輸入的 deterministic recalculation。Golden expectations 不包含聲稱真實的精確 kcal 數字。
+`npm run eval` 使用 representative food / meal cases，驗證 canonical identity、match type、included / unresolved、complete / partial / insufficient / none coverage、unit conversion、range ordering、非負值及相同輸入的 deterministic recalculation。Golden expectations 不包含聲稱真實的精確 kcal 數字。 Composite dish cases 驗證不得把 risotto／炒飯／意粉等配成單一 rice／noodle／bread／meat profile 並計入總數。
 
 ## 20. Privacy-safe latency diagnostics（2026-08-20）
 
@@ -146,3 +146,13 @@ Server 不信任 `File.type`：在 10 MiB image limit 及 multipart `Content-Len
 ## 21. Evidence-backed canonical collision fixes（2026-08-20）
 
 Deterministic evaluation 發現兩個實際 collision：英文 `fried noodles` 被較短 `noodles` identity 覆蓋，以及「混合菜式」被單字 alias「菜」誤判為蔬菜。加入 fried-noodles 同義詞並移除過寬單字 alias；新增 regression tests，保持 composite / unresolved 不會套用 generic nutrition profile。
+
+## 22. Composite dish safety（2026-08-24）
+
+真實 Live case「墨魚汁意大利飯」曾被 Canonical Identity 因短詞「飯」判成 `rice`，再 High-confidence fallback 到 USDA 白米飯（熟）。這違反「精準呈現不確定性，而不是假裝精準」。
+
+Invariant：若 Canonical Identity 表示 composite dish，而 Nutrition Catalog 沒有該菜式本身的可靠 profile，Resolver 不得 fallback 到其中單一基礎食材，亦不得把結果視為可計算的 High / Medium match。
+
+Precedence 不再靠 array ordering：`named_dish` > `dish_class` > `specific_food` > `generic_ingredient`，同層再比 matched key 長度。Cross-family 組合（starch + protein / sauce）及 rice leftover 分析會把「蘑菇飯」「牛肉麵」提升為 dish，但「白飯」「紅米飯」「steamed rice」仍是 simple rice。
+
+Compatibility：`dish → dish` 與 `ingredient → ingredient` 才可計入；`dish → ingredient` 一律 unresolved，文案說明找到相近基礎食材但不足以代表整道菜。USDA live fallback 對 composite identity 不查詢。不為每道餐廳菜加 alias，也不把所有含「飯」的名稱都當 unresolved。

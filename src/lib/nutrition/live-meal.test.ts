@@ -51,6 +51,30 @@ const firstLiveMeal: FoodEstimate[] = [
   },
 ];
 
+const secondLiveMeal: FoodEstimate[] = [
+  {
+    displayName: "墨魚汁意大利飯",
+    normalizedName: "squid ink risotto",
+    portionMin: 180,
+    portionMax: 260,
+    unit: "g",
+    recognitionConfidence: 0.9,
+    portionConfidence: 0.72,
+    uncertaintyReasons: ["牛油、高湯、芝士及墨魚汁用量未能由相片確定。"],
+  },
+  {
+    displayName: "香煎帶子",
+    normalizedName: "pan-seared scallops",
+    portionMin: 80,
+    portionMax: 120,
+    unit: "g",
+    recognitionConfidence: 0.86,
+    portionConfidence: 0.65,
+    uncertaintyReasons: ["帶子實際重量及用油量未知。"],
+    preparationMethod: "香煎",
+  },
+];
+
 describe("first live meal regression", () => {
   it("resolves the four natural names through the general pipeline", () => {
     const provider = new LocalNutritionProvider();
@@ -92,5 +116,34 @@ describe("first live meal regression", () => {
       ...items.slice(1),
     ]);
     expect(afterPortionEdit.totals.calories.min).toBeGreaterThan(meal.totals.calories.min);
+  });
+});
+
+describe("second live meal regression", () => {
+  it("does not invent risotto or scallop calories from generic fallbacks", () => {
+    const provider = new LocalNutritionProvider();
+    const matches = secondLiveMeal.map((food) => provider.resolve(food));
+
+    expect(matches.map((match) => match.identity.canonicalName)).toEqual([
+      "risotto",
+      "unknown",
+    ]);
+    expect(matches.map((match) => match.identity.qualifiers.includes("composite"))).toEqual([
+      true,
+      false,
+    ]);
+    expect(matches.every((match) => match.includedInTotal)).toBe(false);
+    expect(matches.map((match) => match.matchType)).toEqual(["unresolved", "unresolved"]);
+    expect(matches[0]?.profile).toBeNull();
+    expect(matches[0]?.reasons[0]).toContain("不足以代表整道菜");
+    expect(matches[1]?.profile).toBeNull();
+
+    const items = createEditableFoodItems(secondLiveMeal, matches);
+    const meal = new NutritionService(provider).calculateMeal(items);
+
+    expect(meal.coverage).toBe("none");
+    expect(mealShowsTotal(meal.coverage)).toBe(false);
+    expect(meal.includedCount).toBe(0);
+    expect(meal.totals.calories).toEqual({ min: 0, max: 0 });
   });
 });

@@ -4,6 +4,10 @@ import {
   isCompositeIdentity,
   normalizeFoodName,
 } from "./canonical";
+import {
+  COMPOSITE_GENERIC_FALLBACK_REASON,
+  isCompatibleNutritionIdentity,
+} from "./compatibility";
 import type {
   CanonicalFoodIdentity,
   FoodPreparation,
@@ -105,8 +109,9 @@ function scoreProfile(
     score += 20;
   }
 
-  if (isCompositeIdentity(identity) && !profile.composite) score -= 40;
-  if (!isCompositeIdentity(identity) && profile.composite) score -= 20;
+  if (!isCompatibleNutritionIdentity(identity, profile)) score -= 200;
+  else if (isCompositeIdentity(identity) && !profile.composite) score -= 40;
+  else if (!isCompositeIdentity(identity) && profile.composite) score -= 20;
 
   return score;
 }
@@ -151,6 +156,11 @@ function classifyMatch(
     };
   }
 
+  if (isCompositeIdentity(identity) || !isCompatibleNutritionIdentity(identity, profile)) {
+    reasons.push(COMPOSITE_GENERIC_FALLBACK_REASON);
+    return { matchType: "unresolved", confidence: "low", reasons };
+  }
+
   if (identity.category === profile.category && score >= 70) {
     reasons.push("以食物類別及烹調方式配對通用參考資料。");
     return { matchType: "category_preparation", confidence: "medium", reasons };
@@ -183,22 +193,29 @@ export function resolveNutritionMatch(
     }))
     .sort((left, right) => right.score - left.score);
 
-  const best = ranked[0];
-  const second = ranked[1];
+  const compatible = ranked.filter((item) =>
+    isCompatibleNutritionIdentity(identity, item.profile),
+  );
+  const best = isCompositeIdentity(identity) ? compatible[0] : ranked[0];
+  const second = isCompositeIdentity(identity) ? compatible[1] : ranked[1];
 
-  if (
-    !best ||
-    best.score < 50 ||
-    (isCompositeIdentity(identity) &&
-      best.profile.canonicalName !== identity.canonicalName)
-  ) {
+  if (isCompositeIdentity(identity) && (!best || best.score < 50)) {
     return {
       profile: null,
       confidence: "low",
       matchType: "unresolved",
-      reasons: isCompositeIdentity(identity)
-        ? ["這類組合菜式變化太大，現有資料不足以代表實際食材與烹調。"]
-        : ["未有足夠可靠的營養參考資料可以配對。"],
+      reasons: [COMPOSITE_GENERIC_FALLBACK_REASON],
+      identity,
+      includedInTotal: false,
+    };
+  }
+
+  if (!best || best.score < 50) {
+    return {
+      profile: null,
+      confidence: "low",
+      matchType: "unresolved",
+      reasons: ["未有足夠可靠的營養參考資料可以配對。"],
       identity,
       includedInTotal: false,
     };
