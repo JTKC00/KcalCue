@@ -10,12 +10,14 @@ function ascii(value: string): number[] {
   return [...value].map((character) => character.charCodeAt(0));
 }
 
-function ftypBytes(brand: string): Uint8Array {
-  const bytes = new Uint8Array(24);
-  bytes.set([0, 0, 0, 24], 0);
+function ftypBytes(majorBrand: string, compatibleBrands = ["mif1"]): Uint8Array {
+  const bytes = new Uint8Array(16 + compatibleBrands.length * 4);
+  new DataView(bytes.buffer).setUint32(0, bytes.length, false);
   bytes.set(ascii("ftyp"), 4);
-  bytes.set(ascii(brand), 8);
-  bytes.set(ascii("mif1"), 16);
+  bytes.set(ascii(majorBrand), 8);
+  compatibleBrands.forEach((brand, index) => {
+    bytes.set(ascii(brand), 16 + index * 4);
+  });
   return bytes;
 }
 
@@ -43,9 +45,18 @@ describe("supported image MIME handling", () => {
     expect(detectSupportedImageMimeType(ftypBytes("heic"))).toBe("image/heic");
     expect(detectSupportedImageMimeType(ftypBytes("heix"))).toBe("image/heic");
     expect(detectSupportedImageMimeType(ftypBytes("mif1"))).toBe("image/heif");
+    expect(detectSupportedImageMimeType(ftypBytes("mif1", ["mif1", "miaf"]))).toBe(
+      "image/heif",
+    );
+    expect(
+      detectSupportedImageMimeType(ftypBytes("mif1", ["avif", "mif1", "miaf"])),
+    ).toBeNull();
     expect(detectSupportedImageMimeType(ftypBytes("avif"))).toBeNull();
     expect(detectSupportedImageMimeType(ftypBytes("avis"))).toBeNull();
+    expect(detectSupportedImageMimeType(ftypBytes("avio"))).toBeNull();
     expect(detectSupportedImageMimeType(ftypBytes("miaf"))).toBeNull();
+    expect(detectSupportedImageMimeType(ftypBytes("mif1", ["avis"]))).toBeNull();
+    expect(detectSupportedImageMimeType(ftypBytes("mif1", ["avio"]))).toBeNull();
     expect(detectSupportedImageMimeType(ftypBytes("isom"))).toBeNull();
     expect(detectSupportedImageMimeType(ftypBytes("hevc"))).toBeNull();
     expect(detectSupportedImageMimeType(ftypBytes("hevx"))).toBeNull();
