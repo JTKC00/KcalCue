@@ -37,7 +37,7 @@ function cachedUsdaMatch(): NutritionMatch {
         carbs: { min: 3.2, max: 3.2 },
         fat: { min: 0.5, max: 0.5 },
       },
-      gramsPerUnit: { g: 1, ml: 1 },
+      gramsPerUnit: { g: 1 },
       source: {
         provider: "usda-fdc",
         sourceName: "Scallop, raw",

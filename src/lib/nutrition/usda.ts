@@ -241,7 +241,7 @@ function toPointProfile(food: UsdaFood): NutritionProfile | null {
     aliases: [food.description],
     composite: false,
     nutrientsPer100g,
-    gramsPerUnit: { g: 1, ml: 1 },
+    gramsPerUnit: { g: 1 },
     source: {
       provider: "usda-fdc",
       sourceId: String(food.fdcId),
@@ -251,7 +251,7 @@ function toPointProfile(food: UsdaFood): NutritionProfile | null {
     },
     dataNotice: "USDA FoodData Central 即時查詢結果；單一公開值，烹調差異未必已包含。",
     densityBasis:
-      "FDC 回傳的單一 per-100g 值，因此 min = max；ml 暫按 1 ml ≈ 1 g，未有可靠的 piece／bowl／cup 換算不會納入。",
+      "FDC 回傳的單一 per-100g 值，因此 min = max；只有 g 直接按 1 g 納入，未有可靠的 ml／piece／bowl／cup 換算不會納入。",
   };
 }
 

@@ -61,12 +61,7 @@ describe("USDA nutrition client", () => {
     expect(match.profile?.source.provider).toBe("usda-fdc");
     expect(match.profile?.source.sourceId).toBe("1105314");
     expect(match.profile?.nutrientsPer100g.calories).toEqual({ min: 89, max: 89 });
-    expect(match.profile?.gramsPerUnit).toEqual({ g: 1, ml: 1 });
-    const mlMatch = await new UsdaNutritionClient("test-only-key").resolve({
-      ...food,
-      unit: "ml",
-    });
-    expect(mlMatch.includedInTotal).toBe(true);
+    expect(match.profile?.gramsPerUnit).toEqual({ g: 1 });
     expect(JSON.stringify(match)).not.toContain("test-only-key");
   });
 
@@ -102,38 +97,41 @@ describe("USDA nutrition client", () => {
     expect(match.profile?.nutrientsPer100g.fat).toEqual({ min: 0.3, max: 0.3 });
   });
 
-  it("does not include a count unit when USDA has no gram factor", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          foods: [
-            {
-              fdcId: 1105316,
-              description: "Banana, raw",
-              foodNutrients: [
-                { nutrientName: "Energy", nutrientNumber: "208", value: 89, unitName: "kcal" },
-                { nutrientName: "Protein", nutrientNumber: "203", value: 1.1, unitName: "g" },
-                { nutrientName: "Carbohydrate, by difference", nutrientNumber: "205", value: 22.8, unitName: "g" },
-                { nutrientName: "Total lipid (fat)", nutrientNumber: "204", value: 0.3, unitName: "g" },
-              ],
-            },
-          ],
+  it.each(["ml", "piece", "bowl", "cup"] as const)(
+    "does not include %s when USDA has no gram factor",
+    async (unit) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            foods: [
+              {
+                fdcId: 1105316,
+                description: "Banana, raw",
+                foodNutrients: [
+                  { nutrientName: "Energy", nutrientNumber: "208", value: 89, unitName: "kcal" },
+                  { nutrientName: "Protein", nutrientNumber: "203", value: 1.1, unitName: "g" },
+                  { nutrientName: "Carbohydrate", nutrientNumber: "205", value: 22.8, unitName: "g" },
+                  { nutrientName: "Total lipid (fat)", nutrientNumber: "204", value: 0.3, unitName: "g" },
+                ],
+              },
+            ],
+          }),
         }),
-      }),
-    );
+      );
 
-    const match = await new UsdaNutritionClient("test-only-key").resolve({
-      ...food,
-      unit: "piece",
-    });
+      const match = await new UsdaNutritionClient("test-only-key").resolve({
+        ...food,
+        unit,
+      });
 
-    expect(match.profile?.gramsPerUnit).toEqual({ g: 1, ml: 1 });
-    expect(match.includedInTotal).toBe(false);
-    expect(match.reasons.at(-1)).toContain("piece");
-  });
+      expect(match.profile?.gramsPerUnit).toEqual({ g: 1 });
+      expect(match.includedInTotal).toBe(false);
+      expect(match.reasons.at(-1)).toContain(unit);
+    },
+  );
 
   it("leaves an irrelevant Banana chips hit unresolved", async () => {
     vi.stubGlobal(
