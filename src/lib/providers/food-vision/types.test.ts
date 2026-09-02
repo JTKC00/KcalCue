@@ -41,7 +41,14 @@ describe("supported image MIME handling", () => {
     webp.set(ascii("WEBP"), 8);
     expect(detectSupportedImageMimeType(webp)).toBe("image/webp");
     expect(detectSupportedImageMimeType(ftypBytes("heic"))).toBe("image/heic");
+    expect(detectSupportedImageMimeType(ftypBytes("heix"))).toBe("image/heic");
     expect(detectSupportedImageMimeType(ftypBytes("mif1"))).toBe("image/heif");
+    expect(detectSupportedImageMimeType(ftypBytes("avif"))).toBeNull();
+    expect(detectSupportedImageMimeType(ftypBytes("avis"))).toBeNull();
+    expect(detectSupportedImageMimeType(ftypBytes("miaf"))).toBeNull();
+    expect(detectSupportedImageMimeType(ftypBytes("isom"))).toBeNull();
+    expect(detectSupportedImageMimeType(ftypBytes("hevc"))).toBeNull();
+    expect(detectSupportedImageMimeType(ftypBytes("hevx"))).toBeNull();
   });
 
   it("identifies HEIC-like filenames for the preview fallback copy", () => {

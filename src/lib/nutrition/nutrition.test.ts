@@ -253,6 +253,37 @@ describe("canonicalization", () => {
     });
   });
 
+  it.each([
+    ["橙汁", "orange juice"],
+    ["果汁", "fruit juice"],
+    ["椰汁", "coconut juice"],
+  ] as const)("does not classify %s as savory sauce", (displayName, normalizedName) => {
+    const food = makeFood({ displayName, normalizedName });
+    const identity = canonicalizeFood(food);
+    const match = resolveNutritionMatch(food, localNutritionProfiles);
+
+    expect(identity.canonicalName).not.toBe("sauce");
+    expect(identity.canonicalName).not.toBe("tomato-sauce");
+    expect(match.profile?.id).not.toBe("savory-sauce");
+    expect(match.matchType).toBe("unresolved");
+    expect(match.includedInTotal).toBe(false);
+  });
+
+  it.each([
+    ["茄汁", "tomato sauce", "tomato-sauce"],
+    ["醬汁", "savory sauce", "savory-sauce"],
+    ["豉油汁", "soy sauce", "savory-sauce"],
+    ["汁", "juice", "savory-sauce"],
+  ] as const)("keeps %s as a sauce identity", (displayName, normalizedName, profileId) => {
+    const food = makeFood({ displayName, normalizedName });
+    const identity = canonicalizeFood(food);
+    const match = resolveNutritionMatch(food, localNutritionProfiles);
+
+    expect(identity.category).toBe("sauce");
+    expect(match.profile?.id).toBe(profileId);
+    expect(match.includedInTotal).toBe(true);
+  });
+
   it("normalizes punctuation and whitespace", () => {
     expect(normalizeFoodName("  ＷＨＩＴＥ   ＲＩＣＥ  ")).toBe("white rice");
     expect(normalizeFoodName("chicken-breast!!")).toBe("chicken breast");

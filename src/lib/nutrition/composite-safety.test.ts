@@ -135,6 +135,18 @@ describe("composite identity precedence", () => {
     expect(mushroomRice.canonicalName).not.toBe("rice");
     expect(isCompositeIdentity(mushroomRice)).toBe(true);
   });
+
+  it.each([
+    ["番茄雞", "tomato chicken"],
+    ["雞肉配番茄醬汁", "chicken with tomato sauce"],
+    ["雞肉配醬汁", "chicken with savory sauce"],
+  ] as const)("keeps protein plus sauce name %s at ingredient level", (displayName, normalizedName) => {
+    const identity = canonicalizeFood(makeFood(displayName, normalizedName));
+
+    expect(identity.canonicalName).not.toBe("mixed-dish");
+    expect(isCompositeIdentity(identity)).toBe(false);
+    expect(foodIdentityLevel(identity)).toBe("ingredient");
+  });
 });
 
 describe("composite vocabulary without recipe aliases", () => {
