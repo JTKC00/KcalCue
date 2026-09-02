@@ -52,8 +52,36 @@ const IDENTITY_RULES: TermRule[] = [
   { keys: ["risotto", "意大利飯", "italian rice"], canonicalName: "risotto", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
   { keys: ["baked rice", "焗飯"], canonicalName: "baked-rice", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
   { keys: ["braised rice", "燴飯"], canonicalName: "braised-rice", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
-  { keys: ["fried rice", "炒飯"], canonicalName: "fried-rice", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
-  { keys: ["curry rice", "咖喱飯", "咖哩飯"], canonicalName: "curry", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
+  {
+    keys: [
+      "fried rice",
+      "fried white rice",
+      "fried cooked rice",
+      "fried leftover rice",
+      "leftover rice dish",
+      "leftover rice fried",
+      "炒飯",
+      "炒白飯",
+      "炒白米飯",
+      "炒米飯",
+      "炒隔夜飯",
+      "炒隔夜米飯",
+      "炒剩飯",
+      "炒剩餘飯",
+      "剩飯炒",
+    ],
+    canonicalName: "fried-rice",
+    category: "mixed",
+    kind: "named_dish",
+    qualifiers: ["composite"],
+  },
+  {
+    keys: ["curry rice", "咖喱飯", "咖哩飯"],
+    canonicalName: "curry-rice",
+    category: "mixed",
+    kind: "named_dish",
+    qualifiers: ["composite"],
+  },
   { keys: ["donburi", "丼飯", "丼"], canonicalName: "donburi", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
   { keys: ["bibimbap", "石鍋拌飯", "拌飯"], canonicalName: "bibimbap", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
   { keys: ["chow mein", "lo mein", "fried noodles", "stir-fried noodles", "stir fried noodles", "炒麵", "撈麵"], canonicalName: "fried-noodles", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
@@ -102,6 +130,7 @@ const COMPOSITE_CANONICALS = new Set([
   "baked-rice",
   "braised-rice",
   "fried-rice",
+  "curry-rice",
   "donburi",
   "bibimbap",
   "fried-noodles",
@@ -387,6 +416,20 @@ function synthesizedComposite(hits: IdentityHit[]): Pick<
   };
 }
 
+function synthesizedIdentityHit(
+  canonicalName: string,
+  kind: IdentityKind = "dish_class",
+): IdentityHit {
+  return {
+    keys: [],
+    matchedKey: "",
+    canonicalName,
+    category: "mixed",
+    kind,
+    qualifiers: ["composite"],
+  };
+}
+
 function promoteSimpleStarchIfComposite(
   hit: IdentityHit,
   text: string,
@@ -435,6 +478,13 @@ export function canonicalizeFood(food: FoodEstimate): CanonicalFoodIdentity {
   const hasSauce = identityHits.some((rule) =>
     ["sauce", "tomato-sauce"].includes(rule.canonicalName),
   );
+  const hasCurry = identityHits.some((rule) =>
+    ["curry", "curry-rice"].includes(rule.canonicalName),
+  );
+  const hasRice = identityHits.some((rule) => rule.canonicalName === "rice");
+  const hasCurryRiceDish =
+    identityHits.some((rule) => rule.canonicalName === "curry-rice") ||
+    (hasCurry && hasRice);
   const tomatoSauceOverride =
     hasTomato &&
     (hasSauce || text.includes("風味") || text.includes("flavor")) &&
@@ -443,10 +493,17 @@ export function canonicalizeFood(food: FoodEstimate): CanonicalFoodIdentity {
 
   let primary: IdentityHit | undefined;
 
-  if (tomatoSauceOverride) {
+  if (food.identityLevel === "dish") {
+    primary = hasCurryRiceDish
+      ? synthesizedIdentityHit("curry-rice")
+      : rankedHits.find((hit) => hit.kind === "named_dish" || hit.kind === "dish_class") ??
+        synthesizedIdentityHit("mixed-dish");
+  } else if (tomatoSauceOverride) {
     canonicalName = "tomato-sauce";
     category = "sauce";
     qualifiers.add("tomato");
+  } else if (hasCurryRiceDish) {
+    primary = synthesizedIdentityHit("curry-rice", "named_dish");
   } else if (hasNamedDish(identityHits)) {
     primary = rankedHits.find((hit) => hit.kind === "named_dish" || hit.kind === "dish_class");
   } else if (isCrossFamilyComposite(identityHits)) {

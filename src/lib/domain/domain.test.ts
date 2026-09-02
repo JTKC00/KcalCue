@@ -13,6 +13,7 @@ import {
 } from "./editable-meal";
 import {
   foodAnalysisJsonSchema,
+  foodIdentityLevels,
   validateFoodAnalysis,
   type FoodAnalysis,
   type FoodEstimate,
@@ -22,6 +23,7 @@ function makeFood(overrides: Partial<FoodEstimate> = {}): FoodEstimate {
   return {
     displayName: "白飯",
     normalizedName: "cooked white rice",
+    identityLevel: "ingredient",
     portionMin: 100,
     portionMax: 150,
     unit: "g",
@@ -221,13 +223,23 @@ describe("structured food analysis validation", () => {
         foods: [],
       }).foods,
     ).toEqual([]);
+  });
 
-    expect(() =>
-      validateFoodAnalysis({
-        ...makeAnalysis(),
-        extraField: "not-allowed",
-      }),
-    ).toThrow();
+  it("strips unknown model fields while keeping known analysis data", () => {
+    const validated = validateFoodAnalysis({
+      ...makeAnalysis(),
+      extraField: "not-allowed",
+      foods: [
+        {
+          ...makeFood(),
+          calories: 999,
+        },
+      ],
+    });
+
+    expect(validated).toEqual(makeAnalysis());
+    expect(validated).not.toHaveProperty("extraField");
+    expect(validated.foods[0]).not.toHaveProperty("calories");
   });
 
   it("keeps Gemini JSON Schema limited to generation-safe keywords", () => {
@@ -243,5 +255,31 @@ describe("structured food analysis validation", () => {
     expect(
       foodAnalysisJsonSchema.properties.foods.items.properties.unit.enum,
     ).toEqual(["g", "ml", "piece", "bowl", "cup"]);
+    expect(foodAnalysisJsonSchema.properties.foods.items.required).toContain(
+      "identityLevel",
+    );
+    expect(
+      foodAnalysisJsonSchema.properties.foods.items.properties.identityLevel.enum,
+    ).toEqual(foodIdentityLevels);
+  });
+
+  it("requires a dish or ingredient identity level for every food", () => {
+    const withoutIdentityLevel = Object.fromEntries(
+      Object.entries(makeFood()).filter(([key]) => key !== "identityLevel"),
+    );
+
+    expect(() =>
+      validateFoodAnalysis({
+        ...makeAnalysis(),
+        foods: [withoutIdentityLevel],
+      }),
+    ).toThrow();
+
+    expect(
+      validateFoodAnalysis({
+        ...makeAnalysis(),
+        foods: [makeFood({ identityLevel: "dish" })],
+      }).foods[0]?.identityLevel,
+    ).toBe("dish");
   });
 });

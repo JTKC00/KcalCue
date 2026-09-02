@@ -1,10 +1,46 @@
 import type { FoodEstimate } from "@/lib/domain/food-analysis";
+import { canonicalizeFood, normalizeFoodName } from "./canonical";
 import type { NutritionMatch } from "./types";
 
 export interface NutritionResolveResponse {
   matches?: NutritionMatch[];
   provider?: string;
   error?: { code?: string };
+  warnings?: Array<{ index?: number; code?: string }>;
+}
+
+function nutritionIdentityKey(
+  identity: NutritionMatch["identity"],
+): string {
+  return [
+    identity.canonicalName,
+    identity.category,
+    identity.preparation,
+    [...identity.qualifiers].sort().join(","),
+  ].join("|");
+}
+
+export function canReuseNutritionMatchForNameEdit(
+  currentFood: FoodEstimate,
+  nextFood: FoodEstimate,
+  match: NutritionMatch | null | undefined,
+): match is NutritionMatch {
+  if (!match?.profile) return false;
+
+  const currentIdentity = canonicalizeFood(currentFood);
+  const nextIdentity = canonicalizeFood(nextFood);
+  const matchIdentityKey = nutritionIdentityKey(match.identity);
+  if (
+    nutritionIdentityKey(currentIdentity) !== matchIdentityKey ||
+    nutritionIdentityKey(nextIdentity) !== matchIdentityKey
+  ) {
+    return false;
+  }
+
+  return (
+    normalizeFoodName(currentFood.normalizedName || currentFood.displayName) ===
+    normalizeFoodName(nextFood.normalizedName || nextFood.displayName)
+  );
 }
 
 export async function enrichUnresolvedMatches(
@@ -27,6 +63,7 @@ export async function enrichUnresolvedMatches(
           return {
             displayName: food.displayName,
             normalizedName: food.normalizedName,
+            identityLevel: food.identityLevel,
             portionMin: food.portionMin,
             portionMax: food.portionMax,
             unit: food.unit,
@@ -55,4 +92,12 @@ export async function enrichUnresolvedMatches(
   } catch {
     return localMatches;
   }
+}
+
+export async function resolveNutritionMatchWithFallback(
+  food: FoodEstimate,
+  localMatch: NutritionMatch,
+): Promise<NutritionMatch> {
+  const [match] = await enrichUnresolvedMatches([food], [localMatch]);
+  return match ?? localMatch;
 }

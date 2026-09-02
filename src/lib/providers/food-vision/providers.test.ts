@@ -27,6 +27,7 @@ import {
   GEMINI_HTTP_TIMEOUT_MS,
   GeminiFoodVisionProvider,
 } from "./gemini";
+import { FOOD_VISION_SYSTEM_INSTRUCTION } from "./prompt";
 
 describe("DemoFoodVisionProvider", () => {
   it("returns a validated independent copy of the deterministic demo result", async () => {
@@ -63,6 +64,17 @@ describe("GeminiFoodVisionProvider structured response handling", () => {
       model: "test-only-model",
     });
   }
+
+  it("includes the dish-versus-ingredient contract in the vision instruction", () => {
+    expect(FOOD_VISION_SYSTEM_INSTRUCTION).toContain('identityLevel "dish"');
+    expect(FOOD_VISION_SYSTEM_INSTRUCTION).toContain('identityLevel "ingredient"');
+    expect(FOOD_VISION_SYSTEM_INSTRUCTION).toContain(
+      "do not decompose it into generic rice",
+    );
+    expect(FOOD_VISION_SYSTEM_INSTRUCTION).toContain(
+      "visibleIngredients must never become separate food entries",
+    );
+  });
 
   it("maps malformed JSON to an invalid_response error without a network call", async () => {
     generateContentMock.mockResolvedValueOnce({ text: "{not-json" });
@@ -145,6 +157,28 @@ describe("GeminiFoodVisionProvider structured response handling", () => {
     expect(GEMINI_HTTP_TIMEOUT_MS).toBeGreaterThanOrEqual(60_000);
     expect(GEMINI_ABORT_TIMEOUT_MS).toBeGreaterThan(GEMINI_HTTP_TIMEOUT_MS);
     expect(request.config.responseJsonSchema).toEqual(foodAnalysisJsonSchema);
+  });
+
+  it("strips unknown Gemini fields before returning the analysis", async () => {
+    generateContentMock.mockResolvedValueOnce({
+      text: JSON.stringify({
+        ...demoFoodAnalysis,
+        extraModelField: "ignored",
+        foods: demoFoodAnalysis.foods.map((food) => ({
+          ...food,
+          calories: 999,
+        })),
+      }),
+    });
+
+    const analysis = await provider().analyzeImage({
+      data: "raw-base64",
+      mimeType: "image/jpeg",
+    });
+
+    expect(analysis).toEqual(demoFoodAnalysis);
+    expect(analysis).not.toHaveProperty("extraModelField");
+    expect(analysis.foods[0]).not.toHaveProperty("calories");
   });
 
   it("accepts optional null fields from Gemini without loosening Zod rules", async () => {

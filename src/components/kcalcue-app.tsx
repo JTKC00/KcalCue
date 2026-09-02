@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { copy, errorCopy } from "@/content/zh-HK";
 import { foodAnalysisSchema, type FoodAnalysis, type PortionUnit } from "@/lib/domain/food-analysis";
@@ -12,7 +12,13 @@ import {
   type PortionPreset,
 } from "@/lib/domain/editable-meal";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
-import { enrichUnresolvedMatches } from "@/lib/nutrition/client";
+import {
+  canReuseNutritionMatchForNameEdit,
+  enrichUnresolvedMatches,
+  resolveNutritionMatchWithFallback,
+} from "@/lib/nutrition/client";
+import { normalizeFoodName } from "@/lib/nutrition/canonical";
+import type { NutritionMatch } from "@/lib/nutrition/types";
 import {
   inferSupportedImageMimeType,
   isHeicFile,
@@ -63,6 +69,7 @@ function createManualItem(): EditableFoodItem {
     id,
     displayName: "",
     normalizedName: "",
+    identityLevel: "ingredient",
     portionMin: 100,
     portionMax: 150,
     originalPortionMin: 100,
@@ -73,6 +80,13 @@ function createManualItem(): EditableFoodItem {
     uncertaintyReasons: ["手動輸入仍需要你確認實際份量。"],
     nutritionMatch: null,
   };
+}
+
+function normalizedNameForMatch(name: string, match: NutritionMatch | null): string {
+  if (!match?.profile) return name;
+  return match.profile.source.provider === "usda-fdc"
+    ? name
+    : match.profile.canonicalName;
 }
 
 function SiteHeader({ mode }: { mode: AppMode }) {
@@ -310,6 +324,7 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
   );
   const [appError, setAppError] = useState<AppError | null>(null);
   const nutritionProvider = useMemo(() => new LocalNutritionProvider(), []);
+  const nameEditTimers = useRef(new Map<string, number>());
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
@@ -320,6 +335,15 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
   }, [previewUrl]);
+
+  useEffect(() => {
+    const timers = nameEditTimers.current;
+    return () => {
+      for (const timer of timers.values()) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, []);
 
   const handleFileSelected = (nextFile: File | null) => {
     setAppError(null);
@@ -365,11 +389,7 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
 
   const analyze = async (forceDemo = false) => {
     if (!file) {
-      setAppError({
-        code: "missing_image",
-        title: "請先選擇相片",
-        body: "影低或者選擇一張餐點相片，再開始分析。",
-      });
+      setAppError(getError("missing_image"));
       setStage("input");
       return;
     }
@@ -439,6 +459,10 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
   };
 
   const reset = () => {
+    for (const timer of nameEditTimers.current.values()) {
+      window.clearTimeout(timer);
+    }
+    nameEditTimers.current.clear();
     setStage("input");
     setFile(null);
     setPreviewUrl(null);
@@ -464,19 +488,64 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
   };
 
   const handleNameChange = (id: string, name: string) => {
-    updateItem(id, (item) => {
-      const nextFood = {
-        ...item,
-        displayName: name,
-        normalizedName: name,
-      };
-      const match = name.trim() ? nutritionProvider.resolve(nextFood) : null;
-      return {
-        ...nextFood,
-        normalizedName: match?.profile?.canonicalName ?? name,
-        nutritionMatch: match,
-      };
-    });
+    const previousTimer = nameEditTimers.current.get(id);
+    if (previousTimer !== undefined) {
+      window.clearTimeout(previousTimer);
+      nameEditTimers.current.delete(id);
+    }
+
+    const currentItem = items.find((item) => item.id === id);
+    if (!currentItem) return;
+
+    const nextFood = {
+      ...currentItem,
+      displayName: name,
+      normalizedName:
+        normalizeFoodName(currentItem.displayName) === normalizeFoodName(name)
+          ? currentItem.normalizedName
+          : name,
+    };
+    const cachedMatch = canReuseNutritionMatchForNameEdit(
+      currentItem,
+      nextFood,
+      currentItem.nutritionMatch,
+    )
+      ? currentItem.nutritionMatch
+      : null;
+    const localMatch = name.trim() ? nutritionProvider.resolve(nextFood) : null;
+    const match = cachedMatch ?? localMatch;
+
+    updateItem(id, () => ({
+      ...nextFood,
+      normalizedName: normalizedNameForMatch(name, match),
+      nutritionMatch: match,
+    }));
+
+    if (
+      activeMode !== "live" ||
+      !localMatch ||
+      localMatch.includedInTotal ||
+      cachedMatch
+    ) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      void resolveNutritionMatchWithFallback(nextFood, localMatch).then(
+        (resolvedMatch) => {
+          updateItem(id, (item) => {
+            if (item.displayName !== name) return item;
+            return {
+              ...item,
+              normalizedName: normalizedNameForMatch(name, resolvedMatch),
+              nutritionMatch: resolvedMatch,
+            };
+          });
+        },
+      );
+      nameEditTimers.current.delete(id);
+    }, 350);
+    nameEditTimers.current.set(id, timer);
   };
 
   const handlePortionChange = (

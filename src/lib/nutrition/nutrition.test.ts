@@ -25,6 +25,7 @@ function makeFood(overrides: Partial<FoodEstimate> = {}): FoodEstimate {
   return {
     displayName: "測試食物",
     normalizedName: "test food",
+    identityLevel: "ingredient",
     portionMin: 100,
     portionMax: 150,
     unit: "g",

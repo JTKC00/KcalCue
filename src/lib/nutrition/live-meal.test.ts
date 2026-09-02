@@ -10,6 +10,7 @@ const firstLiveMeal: FoodEstimate[] = [
   {
     displayName: "紅米白飯",
     normalizedName: "cooked red and white rice",
+    identityLevel: "ingredient",
     portionMin: 150,
     portionMax: 200,
     unit: "g",
@@ -20,6 +21,7 @@ const firstLiveMeal: FoodEstimate[] = [
   {
     displayName: "香煎雞胸肉",
     normalizedName: "pan-seared chicken breast",
+    identityLevel: "ingredient",
     portionMin: 120,
     portionMax: 160,
     unit: "g",
@@ -31,6 +33,7 @@ const firstLiveMeal: FoodEstimate[] = [
   {
     displayName: "炒什錦蔬菜",
     normalizedName: "stir-fried mixed vegetables",
+    identityLevel: "ingredient",
     portionMin: 60,
     portionMax: 90,
     unit: "g",
@@ -42,6 +45,7 @@ const firstLiveMeal: FoodEstimate[] = [
   {
     displayName: "番茄風味醬汁",
     normalizedName: "tomato-style sauce",
+    identityLevel: "ingredient",
     portionMin: 40,
     portionMax: 70,
     unit: "ml",
@@ -55,6 +59,7 @@ const secondLiveMeal: FoodEstimate[] = [
   {
     displayName: "墨魚汁意大利飯",
     normalizedName: "squid ink risotto",
+    identityLevel: "dish",
     portionMin: 180,
     portionMax: 260,
     unit: "g",
@@ -65,6 +70,7 @@ const secondLiveMeal: FoodEstimate[] = [
   {
     displayName: "香煎帶子",
     normalizedName: "pan-seared scallops",
+    identityLevel: "ingredient",
     portionMin: 80,
     portionMax: 120,
     unit: "g",
