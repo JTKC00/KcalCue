@@ -13,7 +13,7 @@ KcalCue 是一個 mobile-first Responsive Web App / PWA：使用者影低或選�
 - 如果瀏覽器未能預覽 HEIC / HEIF，仍可保留原檔進行分析
 - Gemini Live Mode：server-side 圖片理解及 structured JSON output
 - 無 `GEMINI_API_KEY` 時自動進入清楚標示的 Demo Mode
-- 分離的 `FoodVisionProvider`、`NutritionProvider` 及 calculation engine
+- 分離的 `FoodVisionProvider`、browser 內的 `LocalNutritionProvider`、可選 server-side `UsdaNutritionClient` 及 calculation engine
 - kcal、Protein、Carbs、Fat 範圍及 High / Medium / Low 可信程度
 - 可編輯食物名稱、份量及單位；可新增／刪除食物
 - 每次修改都在 browser 以 deterministic code 即時重算，不會再次呼叫 AI
@@ -31,7 +31,7 @@ KcalCue 是一個 mobile-first Responsive Web App / PWA：使用者影低或選�
 - Vitest 4 + Testing Library
 - ESLint 9 + `eslint-config-next`
 
-需要 Node.js 20 或以上；本專案使用 npm 11。
+需要符合 `package.json` `engines` 所列的 Node.js 版本（`^22.22.2`、`^24.15.0` 或 `>=26.0.0`）；GitHub Actions CI 固定使用 Node.js 24；本專案使用 npm 11。
 
 ## 安裝及執行
 
@@ -104,14 +104,25 @@ FoodVisionProvider
 Validated FoodAnalysis domain schema
         │
         ▼
-NutritionService → NutritionProvider
-                     └── LocalNutritionProvider
-                           ├── canonicalizeFood
-                           ├── resolveNutritionMatch
-                           └── optional USDA FDC fallback (`/api/nutrition/resolve`)
-        │
-        ▼
-Deterministic calculation engine
+Browser nutrition resolution
+  └── LocalNutritionProvider (`NutritionProvider`)
+        ├── canonicalizeFood
+        ├── resolveNutritionMatch
+        ├── locally resolved items ──────────────────────┐
+        └── Live unresolved items                         │
+                    │                                    │
+                    ▼                                    │
+             POST /api/nutrition/resolve                  │
+                    │                                    │
+                    ▼                                    │
+       Optional server-side USDA fallback                 │
+         └── UsdaNutritionClient (USDA FDC)               │
+             conservative; gram-based results only        │
+             are auto-included                            │
+                    └────────────────────────────────────┘
+                                                         │
+                                                         ▼
+                                      Deterministic calculation engine
         │
         ▼
 Shared result UI + editing + immediate recalculation
@@ -121,7 +132,7 @@ Shared result UI + editing + immediate recalculation
 
 - `src/lib/providers/food-vision/`：只負責「圖片 → structured food analysis」。Gemini SDK、prompt、timeout 及 API error mapping 不會滲入 UI。
 - `src/lib/domain/`：provider-neutral schema、confidence、portion adjustment 及 unit transformation。
-- `src/lib/nutrition/`：營養 provider interface、本地 reference adapter 及 deterministic range calculation。
+- `src/lib/nutrition/`：`NutritionProvider` interface、本地 browser reference adapter、server-side `UsdaNutritionClient` fallback 及 deterministic range calculation。
 - `src/app/api/analyze/route.ts`：server-only input validation、provider selection 及 public-safe error codes。
 - `src/components/`：一套共用 Demo/Live UI flow。
 - `src/content/zh-HK.ts`：集中維護共用狀態及錯誤文案；元件專屬短文案留在相關元件。
@@ -138,7 +149,7 @@ AI 只辨認食物及估算份量，不提供正式 kcal／macro。Nutrition lay
 4. 用 **份量範圍 × 營養密度範圍** 做 deterministic calculation
 5. 標示資料來源（KcalCue reference／USDA FDC）
 
-本地 catalog 是可離線使用的 reference set。可選的 `NUTRITION_API_KEY`（USDA FoodData Central）只在本地無法可靠配對時由 server 查詢。沒有這把 key 時，App、Demo 與 partial result 仍然可用。
+本地 catalog 是可離線使用的 reference set，先由 browser 內的 `LocalNutritionProvider` resolve。Live 食物只有在本地無法可靠配對時，才會把 unresolved items 送到 `POST /api/nutrition/resolve`；該 server route 可按 `NUTRITION_API_KEY` 使用 `UsdaNutritionClient` 作可選 USDA FoodData Central fallback。USDA 結果保持保守：只有克（或有可靠 item-specific 克重換算）的結果會自動納入總數，其他單位維持 unresolved／不計入。沒有這把 key 時，App、Demo 與 partial result 仍然可用。
 
 修改份量或 preset 只重算，不會再次呼叫 Gemini 或 Nutrition API。
 
@@ -183,7 +194,7 @@ V0.1 baseline 紀錄見 [GOAL_REPORT.md](./GOAL_REPORT.md)；本次 real-world r
 ## Known limitations
 
 - 香港／亞洲組合菜式（咖喱、炒飯、火鍋、酒樓菜）coverage 仍然有限；沒有專屬可靠 profile 時會維持 unresolved，而不是套用 generic beef curry。
-- USDA 即時查詢是可選 fallback，對港式食物名稱的命中率有限。
+- USDA 即時查詢是可選的 server-side fallback，對港式食物名稱的命中率有限；沒有可靠克重換算的非克單位不會自動納入總數。
 - Gemini raw inline request 支援 HEIC / HEIF；Safari 17 起由 WebKit 支援 HEIC 預覽。其他瀏覽器是否能直接顯示相片取決於其 image decoder；KcalCue 會在預覽失敗時保留分析入口，不會為了預覽強制轉檔。目標裝置的完整 browser matrix 仍需持續 QA。
 - 單張相片本身無法知道真實重量、隱藏材料、油份、糖份或完整烹調方法；產品刻意以範圍及 uncertainty 表達。
 - V0.1 沒有帳戶、歷史紀錄、雲端圖片保存、醫療建議或個人減重目標。

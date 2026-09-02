@@ -34,7 +34,7 @@
 
 - `npm run eval` 新增 21 個 representative food / meal cases，覆蓋 canonical identity、exact / synonym / unresolved match、complete / partial / insufficient / none coverage、unit conversion、range ordering、非負值及 deterministic recalculation。
 - Golden expectations 只驗證 identity、coverage 及 invariants，不宣稱精確 kcal 真值。
-- `.github/workflows/ci.yml` 新增 GitHub Actions workflow：Node 20、`npm ci`、lint、typecheck、Vitest、eval 及 production build；只要求 `contents: read`，不讀取 provider secrets。
+- `.github/workflows/ci.yml` 新增 GitHub Actions workflow：Node 24、`npm ci`、lint、typecheck、Vitest、eval 及 production build；只要求 `contents: read`，不讀取 provider secrets。
 - README、DECISIONS、GOAL_REPORT historical pointer 及本報告已同步。
 
 ## Verification evidence
