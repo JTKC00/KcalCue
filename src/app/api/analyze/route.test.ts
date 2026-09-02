@@ -61,6 +61,40 @@ describe("POST /api/analyze", () => {
     vi.restoreAllMocks();
   });
 
+  it("runs demo mode without requiring or reading an image", async () => {
+    const form = new FormData();
+    form.set("mode", "demo");
+
+    const response = await POST(
+      new Request("http://localhost/api/analyze", {
+        method: "POST",
+        body: form,
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.mode).toBe("demo");
+    expect(body.analysis.analysisStatus).toBe("success");
+    expect(analyzeImage).not.toHaveBeenCalled();
+  });
+
+  it("returns a missing-image error for live requests without a file", async () => {
+    const form = new FormData();
+
+    const response = await POST(
+      new Request("http://localhost/api/analyze", {
+        method: "POST",
+        body: form,
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body).toEqual({ error: { code: "missing_image" } });
+    expect(analyzeImage).not.toHaveBeenCalled();
+  });
+
   it("returns a validated live analysis", async () => {
     analyzeImage.mockResolvedValueOnce(demoFoodAnalysis);
 

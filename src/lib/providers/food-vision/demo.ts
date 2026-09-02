@@ -7,6 +7,7 @@ export const demoFoodAnalysis: FoodAnalysis = foodAnalysisSchema.parse({
     {
       displayName: "白飯",
       normalizedName: "cooked white rice",
+      identityLevel: "ingredient",
       portionMin: 150,
       portionMax: 200,
       unit: "g",
@@ -19,6 +20,7 @@ export const demoFoodAnalysis: FoodAnalysis = foodAnalysisSchema.parse({
     {
       displayName: "雞扒",
       normalizedName: "grilled chicken thigh",
+      identityLevel: "ingredient",
       portionMin: 140,
       portionMax: 180,
       unit: "g",
@@ -31,6 +33,7 @@ export const demoFoodAnalysis: FoodAnalysis = foodAnalysisSchema.parse({
     {
       displayName: "青菜",
       normalizedName: "cooked leafy greens",
+      identityLevel: "ingredient",
       portionMin: 80,
       portionMax: 120,
       unit: "g",
@@ -43,6 +46,7 @@ export const demoFoodAnalysis: FoodAnalysis = foodAnalysisSchema.parse({
     {
       displayName: "醬汁",
       normalizedName: "savory sauce",
+      identityLevel: "ingredient",
       portionMin: 20,
       portionMax: 35,
       unit: "ml",

@@ -66,9 +66,13 @@ export const unitCopy = {
 } as const;
 
 export const errorCopy: Record<string, { title: string; body: string }> = {
+  missing_image: {
+    title: "請先選擇相片",
+    body: "影低或者選擇一張餐點相片，再開始分析。",
+  },
   invalid_file: {
     title: "呢個檔案唔支援",
-    body: "請選擇 JPEG、PNG 或 WebP 圖片。",
+    body: "請選擇 JPEG、PNG、WebP、HEIC 或 HEIF 圖片。",
   },
   file_too_large: {
     title: "相片太大",
@@ -104,7 +108,7 @@ export const errorCopy: Record<string, { title: string; body: string }> = {
   },
   image_rejected: {
     title: "AI 未能處理呢張相",
-    body: "請換一張 JPEG、PNG 或 WebP 餐點相片。",
+    body: "請換一張 JPEG、PNG、WebP、HEIC 或 HEIF 餐點相片；如果仍然失敗，可以試下 JPEG 或 PNG。",
   },
   unknown: {
     title: "今次未能完成分析",

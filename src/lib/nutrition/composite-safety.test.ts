@@ -23,6 +23,7 @@ function makeFood(
   return {
     displayName,
     normalizedName,
+    identityLevel: "ingredient",
     portionMin: 180,
     portionMax: 260,
     unit: "g",
@@ -38,7 +39,7 @@ const provider = new LocalNutritionProvider();
 const GENERIC_STARCH_PROTEIN_IDS = new Set([
   "white-rice-cooked",
   "rice-cooked-mixed",
-  "egg-noodles-cooked",
+  "noodles-cooked",
   "bread-white",
   "beef-cooked",
   "pork-cooked",
@@ -48,7 +49,10 @@ const GENERIC_STARCH_PROTEIN_IDS = new Set([
 
 describe("live composite regression", () => {
   it("does not treat squid-ink risotto as plain cooked white rice", () => {
-    const food = makeFood("墨魚汁意大利飯", "squid ink risotto");
+    const food = makeFood("墨魚汁意大利飯", "squid ink risotto", {
+      identityLevel: "dish",
+      visibleIngredients: ["cooked rice", "squid", "stock"],
+    });
     const identity = canonicalizeFood(food);
     const match = provider.resolve(food);
 
@@ -108,7 +112,7 @@ describe("composite identity precedence", () => {
       canonicalName: "fried-rice",
     });
     expect(canonicalizeFood(makeFood("咖喱雞飯", "curry chicken rice"))).toMatchObject({
-      canonicalName: "curry",
+      canonicalName: "curry-rice",
     });
     expect(canonicalizeFood(makeFood("肉醬意粉", "spaghetti bolognese"))).toMatchObject({
       canonicalName: "bolognese",
@@ -140,7 +144,7 @@ describe("composite vocabulary without recipe aliases", () => {
     ["燴飯", "braised rice", "braised-rice"],
     ["焗飯", "baked rice", "baked-rice"],
     ["炒飯", "fried rice", "fried-rice"],
-    ["咖喱飯", "curry rice", "curry"],
+    ["咖喱飯", "curry rice", "curry-rice"],
     ["丼飯", "donburi", "donburi"],
     ["石鍋拌飯", "bibimbap", "bibimbap"],
     ["炒麵", "chow mein", "fried-noodles"],
@@ -162,13 +166,8 @@ describe("composite vocabulary without recipe aliases", () => {
 describe("generic fallback safety gate", () => {
   it.each([
     ["墨魚汁意大利飯", "squid ink risotto"],
-    ["咖喱雞飯", "curry chicken rice"],
-    ["海鮮炒飯", "seafood fried rice"],
-    ["芝士焗飯", "cheese baked rice"],
-    ["牛肉燴飯", "beef braised rice"],
     ["Carbonara", "carbonara"],
     ["肉醬意粉", "spaghetti bolognese"],
-    ["炒麵", "fried noodles"],
     ["Laksa", "laksa"],
     ["Pizza", "pizza"],
   ] as const)("does not include %s via a generic starch or protein profile", (displayName, normalizedName) => {
@@ -200,11 +199,40 @@ describe("generic fallback safety gate", () => {
     }
   });
 
-  it("still allows a dedicated composite profile", () => {
-    const dumpling = provider.resolve(makeFood("餃子", "dumpling", { unit: "piece", portionMin: 4, portionMax: 6 }));
-    expect(dumpling.identity.qualifiers).toContain("composite");
-    expect(dumpling.profile?.id).toBe("dumpling-cooked");
-    expect(dumpling.includedInTotal).toBe(true);
-    expect(dumpling.profile && isCompatibleNutritionIdentity(dumpling.identity, dumpling.profile)).toBe(true);
+  it.each([
+    ["餃子", "dumpling", "dumpling-cooked"],
+    ["炒飯", "fried rice", "fried-rice"],
+    ["炒白飯", "fried white rice", "fried-rice"],
+    ["炒隔夜飯", "fried leftover rice", "fried-rice"],
+    ["炒麵", "fried noodles", "fried-noodles"],
+    ["咖喱雞飯", "curry chicken rice", "curry-rice"],
+    ["牛肉燴飯", "beef braised rice", "braised-rice"],
+    ["芝士焗飯", "cheese baked rice", "baked-rice"],
+  ] as const)("allows the curated %s composite profile", (displayName, normalizedName, profileId) => {
+    const match = provider.resolve(makeFood(displayName, normalizedName, {
+      identityLevel: "dish",
+      unit: "g",
+      portionMin: 180,
+      portionMax: 260,
+    }));
+    expect(match.identity.qualifiers).toContain("composite");
+    expect(match.profile?.id).toBe(profileId);
+    expect(match.profile?.composite).toBe(true);
+    expect(match.profile?.nutrientsPer100g.calories.max).toBeGreaterThan(
+      match.profile?.nutrientsPer100g.calories.min ?? 0,
+    );
+    expect(match.includedInTotal).toBe(true);
+    expect(match.profile && isCompatibleNutritionIdentity(match.identity, match.profile)).toBe(true);
+  });
+
+  it("honours a dish-level vision label instead of matching a base ingredient", () => {
+    const match = provider.resolve(
+      makeFood("白飯", "cooked white rice", { identityLevel: "dish" }),
+    );
+
+    expect(match.identity.canonicalName).toBe("mixed-dish");
+    expect(match.identity.qualifiers).toContain("composite");
+    expect(match.profile).toBeNull();
+    expect(match.includedInTotal).toBe(false);
   });
 });

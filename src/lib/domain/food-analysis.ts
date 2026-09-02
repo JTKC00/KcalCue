@@ -3,6 +3,9 @@ import { z } from "zod";
 export const portionUnits = ["g", "ml", "piece", "bowl", "cup"] as const;
 export type PortionUnit = (typeof portionUnits)[number];
 
+export const foodIdentityLevels = ["dish", "ingredient"] as const;
+export type FoodIdentityLevel = (typeof foodIdentityLevels)[number];
+
 const confidenceSchema = z.number().min(0).max(1);
 const shortTextSchema = z.string().trim().min(1).max(180);
 
@@ -10,6 +13,7 @@ export const foodEstimateSchema = z
   .object({
     displayName: z.string().trim().min(1).max(80),
     normalizedName: z.string().trim().min(1).max(100),
+    identityLevel: z.enum(foodIdentityLevels),
     portionMin: z.number().positive().max(5000),
     portionMax: z.number().positive().max(5000),
     unit: z.enum(portionUnits),
@@ -20,7 +24,7 @@ export const foodEstimateSchema = z
     visibleIngredients: z.array(shortTextSchema).max(12).optional(),
     notes: z.string().trim().min(1).max(240).optional(),
   })
-  .strict()
+  .strip()
   .refine((food) => food.portionMax >= food.portionMin, {
     message: "portionMax must be greater than or equal to portionMin",
     path: ["portionMax"],
@@ -35,7 +39,7 @@ export const foodAnalysisSchema = z
     estimatedInformation: z.array(shortTextSchema).max(12),
     unknownInformation: z.array(shortTextSchema).max(12),
   })
-  .strict()
+  .strip()
   .superRefine((analysis, context) => {
     if (analysis.analysisStatus === "success" && analysis.foods.length === 0) {
       context.addIssue({
@@ -85,6 +89,7 @@ export const foodAnalysisJsonSchema = {
         required: [
           "displayName",
           "normalizedName",
+          "identityLevel",
           "portionMin",
           "portionMax",
           "unit",
@@ -95,6 +100,10 @@ export const foodAnalysisJsonSchema = {
         properties: {
           displayName: { type: "string" },
           normalizedName: { type: "string" },
+          identityLevel: {
+            type: "string",
+            enum: [...foodIdentityLevels],
+          },
           portionMin: { type: "number" },
           portionMax: { type: "number" },
           unit: {

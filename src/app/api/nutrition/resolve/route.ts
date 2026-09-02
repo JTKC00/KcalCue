@@ -14,14 +14,6 @@ const requestSchema = z.object({
   foods: z.array(foodEstimateSchema).max(12),
 });
 
-const publicErrorStatus: Record<string, number> = {
-  missing_key: 200,
-  timeout: 504,
-  rate_limited: 429,
-  invalid_response: 502,
-  unavailable: 503,
-};
-
 export async function POST(request: Request) {
   let body: unknown;
   try {
@@ -39,10 +31,11 @@ export async function POST(request: Request) {
   const apiKey = getNutritionApiKey();
   const usda = apiKey ? new UsdaNutritionClient(apiKey) : null;
   const matches: NutritionMatch[] = [];
+  const warnings: Array<{ index: number; code: string }> = [];
   const startedAt = performance.now();
 
   try {
-    for (const food of parsed.data.foods) {
+    for (const [index, food] of parsed.data.foods.entries()) {
       const localMatch = local.resolve(food);
       if (
         localMatch.includedInTotal ||
@@ -57,20 +50,20 @@ export async function POST(request: Request) {
         const remote = await usda.resolve(food);
         matches.push(remote.includedInTotal ? remote : localMatch);
       } catch (error) {
-        if (error instanceof UsdaNutritionError) {
-          return NextResponse.json(
-            { error: { code: error.code } },
-            { status: publicErrorStatus[error.code] ?? 500 },
-          );
-        }
-        return NextResponse.json({ error: { code: "unavailable" } }, { status: 503 });
+        matches.push(localMatch);
+        warnings.push({
+          index,
+          code: error instanceof UsdaNutritionError ? error.code : "unavailable",
+        });
       }
     }
 
-    return NextResponse.json({
+    const response = {
       matches,
       provider: usda ? "usda-fdc" : "kcalcue-reference",
-    });
+      ...(warnings.length > 0 ? { warnings } : {}),
+    };
+    return NextResponse.json(response);
   } finally {
     logSafeTiming({
       operation: "nutrition-resolve",
