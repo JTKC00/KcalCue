@@ -19,8 +19,9 @@ const extensionMimeTypes: Record<string, SupportedImageMimeType> = {
   ".heif": "image/heif",
 };
 
-const heicBrands = new Set(["heic", "heix", "hevc", "hevx"]);
+const heicBrands = new Set(["heic", "heix"]);
 const heifBrands = new Set(["mif1", "msf1", "heif"]);
+const avifBrands = new Set(["avif", "avis", "avio"]);
 
 function ascii(bytes: Uint8Array, start: number, length: number): string {
   return String.fromCharCode(...bytes.subarray(start, start + length));
@@ -86,8 +87,10 @@ export function detectSupportedImageMimeType(
   }
 
   const brands = isoBmffBrands(bytes);
-  if (brands.some((brand) => heicBrands.has(brand))) return "image/heic";
-  if (brands.some((brand) => heifBrands.has(brand))) return "image/heif";
+  const majorBrand = brands[0];
+  if (!majorBrand || brands.some((brand) => avifBrands.has(brand))) return null;
+  if (heicBrands.has(majorBrand)) return "image/heic";
+  if (heifBrands.has(majorBrand)) return "image/heif";
 
   return null;
 }

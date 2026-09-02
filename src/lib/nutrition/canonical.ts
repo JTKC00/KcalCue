@@ -242,7 +242,29 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function textContainsKey(haystack: string, key: string): boolean {
+interface MatchOptions {
+  singleCjkKeyMustBeStandalone?: boolean;
+}
+
+function standaloneCjkRemainder(haystack: string): string {
+  let remainder = haystack.replace(/[^\u4e00-\u9fff]/g, "");
+  const cjkPreparationKeys = PREPARATION_RULES.flatMap((rule) => rule.keys)
+    .filter((key) => /[\u4e00-\u9fff]/.test(key))
+    .map((key) => normalizeFoodName(key))
+    .sort((left, right) => right.length - left.length);
+
+  for (const modifier of cjkPreparationKeys) {
+    remainder = remainder.split(modifier).join("");
+  }
+
+  return remainder;
+}
+
+function textContainsKey(
+  haystack: string,
+  key: string,
+  options: MatchOptions = {},
+): boolean {
   const needle = normalizeFoodName(key);
   if (!needle) return false;
   if (haystack === needle) return true;
@@ -252,13 +274,24 @@ function textContainsKey(haystack: string, key: string): boolean {
     return new RegExp(`(?:^|\\s)${escapeRegExp(needle)}(?:$|\\s)`).test(haystack);
   }
 
+  if (
+    options.singleCjkKeyMustBeStandalone &&
+    [...needle].length === 1
+  ) {
+    return standaloneCjkRemainder(haystack) === needle;
+  }
+
   return haystack.includes(needle);
 }
 
-function findLongestMatch(haystack: string, keys: string[]): string | null {
+function findLongestMatch(
+  haystack: string,
+  keys: string[],
+  options: MatchOptions = {},
+): string | null {
   const sorted = [...keys].sort((a, b) => b.length - a.length);
   for (const key of sorted) {
-    if (textContainsKey(haystack, key)) return key;
+    if (textContainsKey(haystack, key, options)) return key;
   }
   return null;
 }
@@ -348,7 +381,9 @@ function isSimpleRemainder(text: string, modifiers: string[]): boolean {
 function collectIdentityHits(text: string): IdentityHit[] {
   const hits: IdentityHit[] = [];
   for (const rule of IDENTITY_RULES) {
-    const matchedKey = findLongestMatch(text, rule.keys);
+    const matchedKey = findLongestMatch(text, rule.keys, {
+      singleCjkKeyMustBeStandalone: true,
+    });
     if (matchedKey) hits.push({ ...rule, matchedKey });
   }
   return hits;
@@ -376,7 +411,7 @@ function isCrossFamilyComposite(hits: IdentityHit[]): boolean {
   const hasProtein = families.has("protein");
   const hasSauce = families.has("sauce");
 
-  return (hasStarch && hasProtein) || (hasStarch && hasSauce) || (hasProtein && hasSauce);
+  return (hasStarch && hasProtein) || (hasStarch && hasSauce);
 }
 
 function synthesizedComposite(hits: IdentityHit[]): Pick<
