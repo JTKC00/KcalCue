@@ -133,7 +133,7 @@ Server 不信任 `File.type`：在 10 MiB image limit 及 multipart `Content-Len
 
 ## 18. CI boundary（2026-08-20）
 
-`.github/workflows/ci.yml` 使用 GitHub 官方 `actions/checkout@v6` 及 `actions/setup-node@v6`、Node 20、npm cache、`npm ci`，並設 `permissions: contents: read`。CI 只執行 lint、typecheck、Vitest、`npm run eval` 及 production build，不讀取 Gemini、USDA 或 production secrets。
+`.github/workflows/ci.yml` 使用 GitHub 官方 `actions/checkout@v6` 及 `actions/setup-node@v6`、Node 24、npm cache、`npm ci`，並設 `permissions: contents: read`。Node.js 支援範圍以 `package.json` `engines` 為準：`^22.22.2`、`^24.15.0` 或 `>=26.0.0`；CI 固定使用其中的 Node 24。CI 只執行 lint、typecheck、Vitest、`npm run eval` 及 production build，不讀取 Gemini、USDA 或 production secrets。
 
 ## 19. Deterministic evaluation contract（2026-08-20）
 
