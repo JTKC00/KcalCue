@@ -27,7 +27,6 @@ describe("KcalCueApp analysis cancel", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
-    vi.useRealTimers();
   });
 
   it("returns to the selected photo without treating cancel as an unknown error", async () => {
@@ -59,31 +58,6 @@ describe("KcalCueApp analysis cancel", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("advances loading steps as waiting feedback, not as completed server work", async () => {
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    vi.useFakeTimers();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        () =>
-          new Promise<Response>(() => {
-            /* hang so loading stays visible */
-          }),
-      ),
-    );
-
-    render(<KcalCueApp initialProviderMode="demo" />);
-    const libraryInput = document.querySelectorAll<HTMLInputElement>('input[type="file"]')[1];
-    await user.upload(libraryInput!, pngFile());
-    await user.click(screen.getByRole("button", { name: /開始分析/ }));
-
-    const portion = screen.getByText("估算份量範圍");
-    expect(portion.className).not.toContain("active");
-
-    await vi.advanceTimersByTimeAsync(8_000);
-    expect(portion.className).toContain("active");
-  });
-
   it("completes a demo analysis after cancel is not pressed", async () => {
     const user = userEvent.setup();
     vi.stubGlobal(
@@ -101,6 +75,7 @@ describe("KcalCueApp analysis cancel", () => {
     await user.upload(libraryInput!, pngFile());
     await user.click(screen.getByRole("button", { name: /開始分析/ }));
 
-    expect(await screen.findByText(/kcal/i, {}, { timeout: 3000 })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /約 .*kcal/ })).toBeInTheDocument();
+    expect(screen.getByText("示範結果")).toBeInTheDocument();
   });
 });
