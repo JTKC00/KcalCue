@@ -8,6 +8,7 @@ export const copy = {
   takePhoto: "影相分析",
   choosePhoto: "選擇相片",
   analyze: "開始分析",
+  cancelAnalyze: "取消分析",
   replacePhoto: "更換相片",
   removePhoto: "移除相片",
   demoTitle: "目前為示範模式",

@@ -115,8 +115,15 @@ export interface FoodImageInput {
   mimeType: SupportedImageMimeType;
 }
 
+export interface FoodVisionAnalyzeOptions {
+  signal?: AbortSignal;
+}
+
 export interface FoodVisionProvider {
   readonly id: string;
   readonly mode: "live" | "demo";
-  analyzeImage(image: FoodImageInput): Promise<FoodAnalysis>;
+  analyzeImage(
+    image: FoodImageInput,
+    options?: FoodVisionAnalyzeOptions,
+  ): Promise<FoodAnalysis>;
 }

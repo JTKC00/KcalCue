@@ -69,10 +69,13 @@ export async function POST(request: Request) {
 
     if (provider.mode === "demo") {
       visionStartedAt = performance.now();
-      const analysis = await provider.analyzeImage({
-        data: "",
-        mimeType: "image/jpeg",
-      });
+      const analysis = await provider.analyzeImage(
+        {
+          data: "",
+          mimeType: "image/jpeg",
+        },
+        { signal: request.signal },
+      );
       return NextResponse.json({ analysis, mode: provider.mode });
     }
 
@@ -93,10 +96,13 @@ export async function POST(request: Request) {
     imageMimeType = detectedMimeType;
     imageByteSize = bytes.byteLength;
     visionStartedAt = performance.now();
-    const analysis = await provider.analyzeImage({
-      data: bytes.toString("base64"),
-      mimeType: detectedMimeType,
-    });
+    const analysis = await provider.analyzeImage(
+      {
+        data: bytes.toString("base64"),
+        mimeType: detectedMimeType,
+      },
+      { signal: request.signal },
+    );
 
     return NextResponse.json({ analysis, mode: provider.mode });
   } catch (error) {

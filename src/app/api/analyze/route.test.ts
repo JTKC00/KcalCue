@@ -108,10 +108,13 @@ describe("POST /api/analyze", () => {
     expect(response.status).toBe(200);
     expect(body.mode).toBe("live");
     expect(body.analysis.analysisStatus).toBe("success");
-    expect(analyzeImage).toHaveBeenCalledWith({
-      data: expect.any(String),
-      mimeType: "image/jpeg",
-    });
+    expect(analyzeImage).toHaveBeenCalledWith(
+      {
+        data: expect.any(String),
+        mimeType: "image/jpeg",
+      },
+      { signal: expect.any(AbortSignal) },
+    );
   });
 
   it("maps provider errors to public-safe status codes only", async () => {
@@ -163,10 +166,13 @@ describe("POST /api/analyze", () => {
     const response = await POST(imageRequest(heifBytes("heic"), "meal.heic", "image/heic"));
 
     expect(response.status).toBe(200);
-    expect(analyzeImage).toHaveBeenCalledWith({
-      data: expect.any(String),
-      mimeType: "image/heic",
-    });
+    expect(analyzeImage).toHaveBeenCalledWith(
+      {
+        data: expect.any(String),
+        mimeType: "image/heic",
+      },
+      { signal: expect.any(AbortSignal) },
+    );
   });
 
   it("recovers when a browser leaves the MIME type blank", async () => {
@@ -175,10 +181,13 @@ describe("POST /api/analyze", () => {
     const response = await POST(imageRequest(heifBytes(), "meal.heif", ""));
 
     expect(response.status).toBe(200);
-    expect(analyzeImage).toHaveBeenCalledWith({
-      data: expect.any(String),
-      mimeType: "image/heif",
-    });
+    expect(analyzeImage).toHaveBeenCalledWith(
+      {
+        data: expect.any(String),
+        mimeType: "image/heif",
+      },
+      { signal: expect.any(AbortSignal) },
+    );
   });
 
   it("rejects bytes that are not a supported image container", async () => {

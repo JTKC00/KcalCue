@@ -928,6 +928,19 @@ svg {
   box-shadow: 0 0 0 4px var(--green-light);
 }
 
+.loading-steps .done {
+  color: var(--ink-soft);
+}
+
+.loading-steps .done span {
+  border-color: var(--green);
+  background: var(--mint);
+}
+
+.loading-actions {
+  margin-top: 28px;
+}
+
 .recovery-icon {
   color: var(--coral-dark);
   background: var(--coral-pale);
