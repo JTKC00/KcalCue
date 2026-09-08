@@ -21,12 +21,14 @@ vi.mock("@/lib/server/env", () => ({
 
 import { FoodVisionError } from "@/lib/providers/food-vision/errors";
 import { demoFoodAnalysis } from "@/lib/providers/food-vision/demo";
+import { ANALYZE_RATE_LIMIT, clearRateLimitStore } from "@/lib/server/rate-limit";
 import { POST } from "./route";
 
 function imageRequest(
   bytes: Uint8Array,
   name = "meal.jpg",
   type = "image/jpeg",
+  headers?: HeadersInit,
 ) {
   const form = new FormData();
   const blobBytes = new ArrayBuffer(bytes.byteLength);
@@ -34,12 +36,13 @@ function imageRequest(
   form.set("image", new File([blobBytes], name, { type }));
   return new Request("http://localhost/api/analyze", {
     method: "POST",
+    headers,
     body: form,
   });
 }
 
-function jpegRequest(name = "meal.jpg", type = "image/jpeg") {
-  return imageRequest(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), name, type);
+function jpegRequest(name = "meal.jpg", type = "image/jpeg", headers?: HeadersInit) {
+  return imageRequest(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), name, type, headers);
 }
 
 function heifBytes(brand = "mif1"): Uint8Array {
@@ -54,6 +57,7 @@ function heifBytes(brand = "mif1"): Uint8Array {
 describe("POST /api/analyze", () => {
   beforeEach(() => {
     analyzeImage.mockReset();
+    clearRateLimitStore();
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
@@ -186,6 +190,24 @@ describe("POST /api/analyze", () => {
     expect(response.status).toBe(415);
     expect(body).toEqual({ error: { code: "invalid_file" } });
     expect(analyzeImage).not.toHaveBeenCalled();
+  });
+
+  it("returns 429 after the analyze rate limit is exceeded", async () => {
+    analyzeImage.mockResolvedValue(demoFoodAnalysis);
+    const headers = { "x-forwarded-for": "203.0.113.40, 10.0.0.1" };
+
+    for (let index = 0; index < ANALYZE_RATE_LIMIT.limit; index += 1) {
+      const allowed = await POST(jpegRequest("meal.jpg", "image/jpeg", headers));
+      expect(allowed.status).toBe(200);
+    }
+
+    const blocked = await POST(jpegRequest("meal.jpg", "image/jpeg", headers));
+    const body = await blocked.json();
+
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get("Retry-After")).toBe("60");
+    expect(body).toEqual({ error: { code: "rate_limited" } });
+    expect(analyzeImage).toHaveBeenCalledTimes(ANALYZE_RATE_LIMIT.limit);
   });
 
   it("rejects an oversized multipart request before parsing the body", async () => {

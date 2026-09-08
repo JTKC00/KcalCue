@@ -10,6 +10,12 @@ import {
   detectSupportedImageMimeType,
 } from "@/lib/providers/food-vision/types";
 import { getGeminiServerConfig } from "@/lib/server/env";
+import {
+  ANALYZE_RATE_LIMIT,
+  clientIpFromHeaders,
+  consumeRateLimit,
+  rateLimitedJsonResponse,
+} from "@/lib/server/rate-limit";
 import { elapsedMs, logSafeTiming } from "@/lib/server/timing";
 
 export const runtime = "nodejs";
@@ -40,6 +46,15 @@ export async function POST(request: Request) {
   let visionMode: string | undefined;
 
   try {
+    const ip = clientIpFromHeaders(request.headers);
+    if (!consumeRateLimit(`analyze:${ip}`, ANALYZE_RATE_LIMIT).allowed) {
+      const limited = rateLimitedJsonResponse();
+      return NextResponse.json(limited.body, {
+        status: limited.status,
+        headers: limited.headers,
+      });
+    }
+
     const contentLength = Number(request.headers.get("content-length"));
     if (Number.isFinite(contentLength) && contentLength > MAX_MULTIPART_BYTES) {
       return errorResponse("file_too_large", 413);

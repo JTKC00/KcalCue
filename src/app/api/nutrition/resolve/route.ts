@@ -4,6 +4,12 @@ import { isCompositeIdentity } from "@/lib/nutrition/canonical";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { UsdaNutritionClient, UsdaNutritionError } from "@/lib/nutrition/usda";
 import { getNutritionApiKey } from "@/lib/server/env";
+import {
+  NUTRITION_RATE_LIMIT,
+  clientIpFromHeaders,
+  consumeRateLimit,
+  rateLimitedJsonResponse,
+} from "@/lib/server/rate-limit";
 import type { NutritionMatch } from "@/lib/nutrition/types";
 import { elapsedMs, logSafeTiming } from "@/lib/server/timing";
 import { z } from "zod";
@@ -15,6 +21,15 @@ const requestSchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const ip = clientIpFromHeaders(request.headers);
+  if (!consumeRateLimit(`nutrition:${ip}`, NUTRITION_RATE_LIMIT).allowed) {
+    const limited = rateLimitedJsonResponse();
+    return NextResponse.json(limited.body, {
+      status: limited.status,
+      headers: limited.headers,
+    });
+  }
+
   let body: unknown;
   try {
     body = await request.json();
