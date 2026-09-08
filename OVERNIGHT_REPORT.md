@@ -4,6 +4,8 @@
 分支：`feat/overnight-real-world-readiness`
 基線：`main`，`30904adf9c3307ab4cf2acee29dc8e904b66925c`
 
+> 歷史紀錄。此 sprint 其後已以 PR `#1`（`47a2ef3 Harden real-world image readiness`）合併入 `main`。Handoff 所寫「未 merge」只反映當時分支狀態，不是現況。
+
 ## Scope and guardrails
 
 本 sprint 以 pasted overnight brief 為工作合約，集中處理真實裝置圖片輸入、HEIC / HEIF、CI、nutrition reliability、deterministic evaluation、privacy 及 browser QA。

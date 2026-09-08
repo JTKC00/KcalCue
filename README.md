@@ -17,11 +17,12 @@ KcalCue 是一個 mobile-first Responsive Web App / PWA：使用者影低或選�
 - kcal、Protein、Carbs、Fat 範圍及 High / Medium / Low 可信程度
 - 可編輯食物名稱、份量及單位；可新增／刪除食物
 - 每次修改都在 browser 以 deterministic code 即時重算，不會再次呼叫 AI
-- loading、partial、unable-to-identify、invalid response、network/API error 及 retry/fallback states
+- loading（步驟會隨等待推進，可取消）、partial、unable-to-identify、invalid response、network/API error 及 retry/fallback states
 - 375px 手機、tablet 及 desktop responsive layout
 - semantic HTML、keyboard focus、form labels、ARIA loading/error state 及 reduced-motion support
-- Web App Manifest、icon 及最小 service worker
+- Web App Manifest、SVG／PNG icon、iOS `apple-touch-icon` 及最小 service worker
 - GitHub Actions CI：lint、typecheck、tests、deterministic evaluation 及 production build
+- `/api/analyze` 及 `/api/nutrition/resolve` 的 in-process per-IP rate limit（公開部署時仍應由 gateway 再限一次）
 
 ## 技術棧
 
@@ -133,7 +134,7 @@ Shared result UI + editing + immediate recalculation
 - `src/lib/providers/food-vision/`：只負責「圖片 → structured food analysis」。Gemini SDK、prompt、timeout 及 API error mapping 不會滲入 UI。
 - `src/lib/domain/`：provider-neutral schema、confidence、portion adjustment 及 unit transformation。
 - `src/lib/nutrition/`：`NutritionProvider` interface、本地 browser reference adapter、server-side `UsdaNutritionClient` fallback 及 deterministic range calculation。
-- `src/app/api/analyze/route.ts`：server-only input validation、provider selection 及 public-safe error codes。
+- `src/app/api/analyze/route.ts`：server-only input validation、provider selection、in-process rate limit 及 public-safe error codes。
 - `src/components/`：一套共用 Demo/Live UI flow。
 - `src/content/zh-HK.ts`：集中維護共用狀態及錯誤文案；元件專屬短文案留在相關元件。
 
@@ -174,13 +175,13 @@ npm run eval
 npm run build
 ```
 
-測試涵蓋 calculation ranges、所有 macros、g/ml/piece conversion、portion presets、confidence mapping、uncertainty de-duplication/fallback、schema validation、Gemini error mapping，以及 Demo analysis → nutrition → user correction → updated result integration pipeline。
+測試涵蓋 calculation ranges、所有 macros、g/ml/piece conversion、portion presets、confidence mapping、uncertainty de-duplication/fallback、schema validation、Gemini error mapping、API rate limit，以及 Demo analysis → nutrition → user correction → updated result integration pipeline。Component tests（jsdom）覆蓋 HEIC fallback、取消分析及 partial coverage 文案。
 
 `npm run eval` 會獨立執行 representative food / meal cases，驗證 canonical identity、nutrition match、partial / unresolved coverage、composite dish safety、range ordering、非負值及 deterministic recalculation；不使用 Gemini 或 USDA live API，也不建立精確 kcal golden numbers。
 
 GitHub Actions workflow 位於 `.github/workflows/ci.yml`，只使用 `npm ci` 及 deterministic local checks，不需要 `GEMINI_API_KEY`、`NUTRITION_API_KEY` 或 production secrets。
 
-V0.1 baseline 紀錄見 [GOAL_REPORT.md](./GOAL_REPORT.md)；本次 real-world readiness sprint 的完整驗證紀錄見 [OVERNIGHT_REPORT.md](./OVERNIGHT_REPORT.md)。
+V0.1 baseline 紀錄見 [GOAL_REPORT.md](./GOAL_REPORT.md)；HEIC／CI／evaluation readiness 見 [OVERNIGHT_REPORT.md](./OVERNIGHT_REPORT.md)（該 sprint 其後已經 PR `#1` 合併入 `main`）。
 
 ## Privacy design
 
@@ -191,10 +192,20 @@ V0.1 baseline 紀錄見 [GOAL_REPORT.md](./GOAL_REPORT.md)；本次 real-world r
 - developer-safe timing diagnostics 只記錄 operation、MIME、byte size、計時及 resolved count，不記錄圖片、base64、食物名稱、prompt、個人資料或 secrets。
 - 真正 Live Mode 使用時，圖片仍會由 Google Gemini API 處理；部署者應同時審視其帳戶與資料處理條款。
 
+## Public deploy checklist
+
+正式公開前（hosting 由部署者設定；此 repo 不綁死單一平台）：
+
+1. 只在 server env 放入 `GEMINI_API_KEY`／可選 `NUTRITION_API_KEY`，不要寫進 client 或 git。
+2. 在 gateway／WAF 再加 rate limit。App 內 in-memory token bucket 只保護單一實例；serverless 多實例下會變弱。
+3. 不要開啟圖片 storage、analytics 或 database。
+4. 用真實裝置手測：Live JPEG、HEIC（若裝置支援）、取消分析、429。
+
 ## Known limitations
 
-- 香港／亞洲組合菜式（咖喱、炒飯、火鍋、酒樓菜）coverage 仍然有限；沒有專屬可靠 profile 時會維持 unresolved，而不是套用 generic beef curry。
+- 香港／亞洲組合菜式 coverage 仍然有限。已有專屬保守 profile 的包括炒飯、炒麵、咖喱飯、燴飯、焗飯、餃子、叉燒／燒味飯、煲仔飯、雲吞麵／湯麵、粥、腸粉及港式奶茶。火鍋、車仔麵、壽司拼盤、沙律、果汁、pizza 及無名混合菜式在沒有可靠 profile 時維持 unresolved，而不是套用 generic rice／noodle／meat。
 - USDA 即時查詢是可選的 server-side fallback，對港式食物名稱的命中率有限；沒有可靠克重換算的非克單位不會自動納入總數。
 - Gemini raw inline request 支援 HEIC / HEIF；Safari 17 起由 WebKit 支援 HEIC 預覽。其他瀏覽器是否能直接顯示相片取決於其 image decoder；KcalCue 會在預覽失敗時保留分析入口，不會為了預覽強制轉檔。目標裝置的完整 browser matrix 仍需持續 QA。
 - 單張相片本身無法知道真實重量、隱藏材料、油份、糖份或完整烹調方法；產品刻意以範圍及 uncertainty 表達。
+- App 內 rate limit 是單實例記憶體 bucket，不是跨實例的 abuse-control 系統。
 - V0.1 沒有帳戶、歷史紀錄、雲端圖片保存、醫療建議或個人減重目標。
