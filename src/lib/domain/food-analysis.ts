@@ -64,9 +64,9 @@ export const foodAnalysisSchema = z
 export type FoodEstimate = z.infer<typeof foodEstimateSchema>;
 export type FoodAnalysis = z.infer<typeof foodAnalysisSchema>;
 
-// Gemini 3.7 Flash generateContent rejects the constraint-heavy JSON Schema
-// (additionalProperties/min/max/maxItems) with HTTP 400 INVALID_ARGUMENT.
-// This schema only describes shape for generation. Zod remains authoritative.
+// OpenAI Structured Outputs requires additionalProperties=false on every object
+// and every property to be required. Nullable properties preserve the domain's
+// optional fields; the provider strips nulls before Zod validation.
 export const foodAnalysisJsonSchema = {
   type: "object",
   required: [
@@ -86,17 +86,6 @@ export const foodAnalysisJsonSchema = {
       type: "array",
       items: {
         type: "object",
-        required: [
-          "displayName",
-          "normalizedName",
-          "identityLevel",
-          "portionMin",
-          "portionMax",
-          "unit",
-          "recognitionConfidence",
-          "portionConfidence",
-          "uncertaintyReasons",
-        ],
         properties: {
           displayName: { type: "string" },
           normalizedName: { type: "string" },
@@ -116,13 +105,28 @@ export const foodAnalysisJsonSchema = {
             type: "array",
             items: { type: "string" },
           },
-          preparationMethod: { type: "string" },
+          preparationMethod: { type: ["string", "null"] },
           visibleIngredients: {
-            type: "array",
+            type: ["array", "null"],
             items: { type: "string" },
           },
-          notes: { type: "string" },
+          notes: { type: ["string", "null"] },
         },
+        required: [
+          "displayName",
+          "normalizedName",
+          "identityLevel",
+          "portionMin",
+          "portionMax",
+          "unit",
+          "recognitionConfidence",
+          "portionConfidence",
+          "uncertaintyReasons",
+          "preparationMethod",
+          "visibleIngredients",
+          "notes",
+        ],
+        additionalProperties: false,
       },
     },
     uncertaintyReasons: {
@@ -142,6 +146,7 @@ export const foodAnalysisJsonSchema = {
       items: { type: "string" },
     },
   },
+  additionalProperties: false,
 } as const;
 
 export function validateFoodAnalysis(value: unknown): FoodAnalysis {

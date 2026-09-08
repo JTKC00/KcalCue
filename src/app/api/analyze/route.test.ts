@@ -6,16 +6,16 @@ const analyzeImage = vi.fn();
 
 vi.mock("@/lib/providers/food-vision/factory", () => ({
   createFoodVisionProvider: () => ({
-    id: "gemini",
+    id: "openai",
     mode: "live",
     analyzeImage,
   }),
 }));
 
 vi.mock("@/lib/server/env", () => ({
-  getGeminiServerConfig: () => ({
+  getOpenAIServerConfig: () => ({
     apiKey: "test-only-key",
-    model: "gemini-3.7-flash",
+    model: "gpt-5.6-luna",
   }),
 }));
 
@@ -119,14 +119,14 @@ describe("POST /api/analyze", () => {
 
   it("maps provider errors to public-safe status codes only", async () => {
     analyzeImage.mockRejectedValueOnce(
-      new FoodVisionError("invalid_response", "Gemini returned malformed JSON.", {
+      new FoodVisionError("invalid_response", "OpenAI returned malformed JSON.", {
         diagnostic: {
           stage: "parse_json",
           errorClass: "SyntaxError",
           httpStatus: null,
-          geminiErrorCode: null,
-          safeMessage: "Gemini returned malformed JSON.",
-          model: "gemini-3.7-flash",
+          openaiErrorCode: null,
+          safeMessage: "OpenAI returned malformed JSON.",
+          model: "gpt-5.6-luna",
           imageMimeType: "image/jpeg",
           imageByteSize: 4,
         },
@@ -144,7 +144,7 @@ describe("POST /api/analyze", () => {
   it("logs a development diagnostic for untyped failures without leaking secrets", async () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     analyzeImage.mockRejectedValueOnce(
-      new Error("boom GEMINI_API_KEY=AIzaSyShouldNeverAppearInLogs12345"),
+      new Error("boom OPENAI_API_KEY=sk-proj-ShouldNeverAppearInLogs12345"),
     );
 
     const response = await POST(jpegRequest());
@@ -156,7 +156,7 @@ describe("POST /api/analyze", () => {
     const logged = JSON.stringify(spy.mock.calls);
     expect(logged).toContain("[kcalcue:food-vision]");
     expect(logged).toContain("image/jpeg");
-    expect(logged).not.toContain("AIzaSyShouldNeverAppearInLogs12345");
+    expect(logged).not.toContain("sk-proj-ShouldNeverAppearInLogs12345");
     expect(logged).not.toContain("test-only-key");
   });
 

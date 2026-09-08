@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   base64ByteLength,
-  extractGeminiErrorDetails,
+  extractOpenAIErrorDetails,
   logFoodVisionDiagnostic,
   sanitizeDiagnosticMessage,
 } from "./diagnostics";
@@ -13,34 +13,34 @@ describe("food-vision diagnostics", () => {
 
   it("redacts API keys, bearer tokens and long base64 from messages", () => {
     const message = [
-      "status 400 GEMINI_API_KEY=AIzaSyDummyValueForTestsOnly123456",
-      "Authorization: Bearer ya29.super-secret-token",
+      "status 401 OPENAI_API_KEY=sk-proj-DummyValueForTestsOnly123456789",
+      "Authorization: Bearer super-secret-token",
       "data: /9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=",
     ].join(" ");
 
     const sanitized = sanitizeDiagnosticMessage(message);
-    expect(sanitized).not.toMatch(/AIza/);
-    expect(sanitized).not.toContain("ya29.super-secret-token");
-    expect(sanitized).not.toContain("GEMINI_API_KEY=AIza");
+    expect(sanitized).not.toMatch(/sk-proj-DummyValue/);
+    expect(sanitized).not.toContain("super-secret-token");
+    expect(sanitized).not.toContain("OPENAI_API_KEY=sk-");
     expect(sanitized).toContain("[redacted]");
   });
 
-  it("extracts Gemini HTTP status and error code from an SDK JSON payload", () => {
+  it("extracts OpenAI HTTP status and error code from an SDK JSON payload", () => {
     const error = Object.assign(new Error(
       JSON.stringify({
         error: {
           code: 400,
-          message: "Request contains an invalid argument.",
-          status: "INVALID_ARGUMENT",
+          message: "Request contains an invalid parameter.",
+          type: "invalid_request_error",
         },
       }),
-    ), { name: "ApiError", status: 400 });
+    ), { name: "APIError", status: 400 });
 
-    expect(extractGeminiErrorDetails(error)).toMatchObject({
-      errorClass: "ApiError",
+    expect(extractOpenAIErrorDetails(error)).toMatchObject({
+      errorClass: "APIError",
       httpStatus: 400,
-      geminiErrorCode: "INVALID_ARGUMENT",
-      safeMessage: "Request contains an invalid argument.",
+      openaiErrorCode: "invalid_request_error",
+      safeMessage: "Request contains an invalid parameter.",
     });
   });
 
@@ -53,12 +53,12 @@ describe("food-vision diagnostics", () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     logFoodVisionDiagnostic({
-      stage: "gemini_request",
-      errorClass: "ApiError",
+      stage: "openai_request",
+      errorClass: "APIError",
       httpStatus: 400,
-      geminiErrorCode: "INVALID_ARGUMENT",
-      safeMessage: "Request contains an invalid argument.",
-      model: "gemini-3.7-flash",
+      openaiErrorCode: "invalid_request_error",
+      safeMessage: "Request contains an invalid parameter.",
+      model: "gpt-5.6-luna",
       imageMimeType: "image/jpeg",
       imageByteSize: 2048,
     });
@@ -66,15 +66,15 @@ describe("food-vision diagnostics", () => {
     expect(spy).toHaveBeenCalledOnce();
     expect(spy.mock.calls[0]?.[0]).toBe("[kcalcue:food-vision]");
     expect(spy.mock.calls[0]?.[1]).toEqual({
-      stage: "gemini_request",
-      errorClass: "ApiError",
+      stage: "openai_request",
+      errorClass: "APIError",
       httpStatus: 400,
-      geminiErrorCode: "INVALID_ARGUMENT",
-      safeMessage: "Request contains an invalid argument.",
-      model: "gemini-3.7-flash",
+      openaiErrorCode: "invalid_request_error",
+      safeMessage: "Request contains an invalid parameter.",
+      model: "gpt-5.6-luna",
       imageMimeType: "image/jpeg",
       imageByteSize: 2048,
     });
-    expect(JSON.stringify(spy.mock.calls[0])).not.toMatch(/AIza|inlineData|authorization/i);
+    expect(JSON.stringify(spy.mock.calls[0])).not.toMatch(/sk-|input_image|authorization/i);
   });
 });

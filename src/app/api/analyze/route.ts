@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { DemoFoodVisionProvider } from "@/lib/providers/food-vision/demo";
 import {
-  extractGeminiErrorDetails,
+  extractOpenAIErrorDetails,
   logFoodVisionDiagnostic,
 } from "@/lib/providers/food-vision/diagnostics";
 import { FoodVisionError } from "@/lib/providers/food-vision/errors";
@@ -9,7 +9,7 @@ import { createFoodVisionProvider } from "@/lib/providers/food-vision/factory";
 import {
   detectSupportedImageMimeType,
 } from "@/lib/providers/food-vision/types";
-import { getGeminiServerConfig } from "@/lib/server/env";
+import { getOpenAIServerConfig } from "@/lib/server/env";
 import {
   ANALYZE_RATE_LIMIT,
   clientIpFromHeaders,
@@ -108,14 +108,14 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof FoodVisionError) {
       if (!error.diagnostic) {
-        const details = extractGeminiErrorDetails(error);
+        const details = extractOpenAIErrorDetails(error.cause ?? error);
         logFoodVisionDiagnostic({
           stage: "unknown",
           errorClass: details.errorClass,
           httpStatus: details.httpStatus,
-          geminiErrorCode: details.geminiErrorCode,
+          openaiErrorCode: details.openaiErrorCode,
           safeMessage: details.safeMessage,
-          model: getGeminiServerConfig()?.model ?? "unset",
+          model: getOpenAIServerConfig()?.model ?? "unset",
           imageMimeType,
           imageByteSize,
         });
@@ -123,14 +123,14 @@ export async function POST(request: Request) {
       return errorResponse(error.code, publicErrorStatus[error.code] ?? 500);
     }
 
-    const details = extractGeminiErrorDetails(error);
+    const details = extractOpenAIErrorDetails(error);
     logFoodVisionDiagnostic({
       stage: "unknown",
       errorClass: details.errorClass,
       httpStatus: details.httpStatus,
-      geminiErrorCode: details.geminiErrorCode,
+      openaiErrorCode: details.openaiErrorCode,
       safeMessage: details.safeMessage,
-      model: getGeminiServerConfig()?.model ?? "unset",
+      model: getOpenAIServerConfig()?.model ?? "unset",
       imageMimeType,
       imageByteSize,
     });

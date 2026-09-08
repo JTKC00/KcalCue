@@ -25,7 +25,7 @@ import {
   loadingStepClass,
   loadingStepIndex,
 } from "@/lib/client/analyze-session";
-import { GEMINI_HTTP_TIMEOUT_MS } from "@/lib/providers/food-vision/timeout";
+import { OPENAI_HTTP_TIMEOUT_MS } from "@/lib/providers/food-vision/timeout";
 import {
   inferSupportedImageMimeType,
   isHeicFile,
@@ -457,7 +457,7 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
 
     const timeoutId = window.setTimeout(
       () => controller.abort("timeout"),
-      GEMINI_HTTP_TIMEOUT_MS,
+      OPENAI_HTTP_TIMEOUT_MS,
     );
 
     try {

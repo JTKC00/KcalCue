@@ -1,6 +1,6 @@
-import { getGeminiServerConfig } from "@/lib/server/env";
+import { getOpenAIServerConfig } from "@/lib/server/env";
 import { DemoFoodVisionProvider } from "./demo";
-import { GeminiFoodVisionProvider } from "./gemini";
+import { OpenAIFoodVisionProvider } from "./openai";
 import type { FoodVisionProvider } from "./types";
 
 export function getFoodVisionProviderMode(): FoodVisionProvider["mode"] {
@@ -8,8 +8,8 @@ export function getFoodVisionProviderMode(): FoodVisionProvider["mode"] {
 }
 
 export function createFoodVisionProvider(): FoodVisionProvider {
-  const config = getGeminiServerConfig();
+  const config = getOpenAIServerConfig();
   return config
-    ? new GeminiFoodVisionProvider(config)
+    ? new OpenAIFoodVisionProvider(config)
     : new DemoFoodVisionProvider();
 }
