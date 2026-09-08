@@ -1,5 +1,9 @@
 import { foodAnalysisSchema, type FoodAnalysis } from "@/lib/domain/food-analysis";
-import type { FoodImageInput, FoodVisionProvider } from "./types";
+import type {
+  FoodImageInput,
+  FoodVisionAnalyzeOptions,
+  FoodVisionProvider,
+} from "./types";
 
 export const demoFoodAnalysis: FoodAnalysis = foodAnalysisSchema.parse({
   analysisStatus: "success",
@@ -69,8 +73,12 @@ export class DemoFoodVisionProvider implements FoodVisionProvider {
   readonly id = "demo";
   readonly mode = "demo" as const;
 
-  async analyzeImage(image: FoodImageInput): Promise<FoodAnalysis> {
+  async analyzeImage(
+    image: FoodImageInput,
+    options?: FoodVisionAnalyzeOptions,
+  ): Promise<FoodAnalysis> {
     void image;
+    options?.signal?.throwIfAborted();
     return foodAnalysisSchema.parse(structuredClone(demoFoodAnalysis));
   }
 }

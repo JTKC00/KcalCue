@@ -17,12 +17,32 @@ import {
   FOOD_VISION_SYSTEM_INSTRUCTION,
   FOOD_VISION_USER_PROMPT,
 } from "./prompt";
-import type { FoodImageInput, FoodVisionProvider } from "./types";
+import type {
+  FoodImageInput,
+  FoodVisionAnalyzeOptions,
+  FoodVisionProvider,
+} from "./types";
+import { GEMINI_ABORT_TIMEOUT_MS, GEMINI_HTTP_TIMEOUT_MS } from "./timeout";
 
-// Gemini 3.7 Flash is a thinking model; a tiny structured response already
-// exceeded the previous 15s HTTP timeout in live reproduction.
-export const GEMINI_HTTP_TIMEOUT_MS = 90_000;
-export const GEMINI_ABORT_TIMEOUT_MS = 100_000;
+export { GEMINI_ABORT_TIMEOUT_MS, GEMINI_HTTP_TIMEOUT_MS } from "./timeout";
+
+function mergeAbortSignals(signals: AbortSignal[]): AbortSignal {
+  const active = signals.filter((signal) => signal);
+  if (active.length === 1) return active[0];
+  if (typeof AbortSignal.any === "function") return AbortSignal.any(active);
+
+  const controller = new AbortController();
+  for (const signal of active) {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+      return controller.signal;
+    }
+    signal.addEventListener("abort", () => controller.abort(signal.reason), {
+      once: true,
+    });
+  }
+  return controller.signal;
+}
 
 function mapGeminiError(error: unknown): FoodVisionError {
   if (error instanceof FoodVisionError) return error;
@@ -154,7 +174,10 @@ export class GeminiFoodVisionProvider implements FoodVisionProvider {
     this.client = new GoogleGenAI({ apiKey: config.apiKey });
   }
 
-  async analyzeImage(image: FoodImageInput): Promise<FoodAnalysis> {
+  async analyzeImage(
+    image: FoodImageInput,
+    options?: FoodVisionAnalyzeOptions,
+  ): Promise<FoodAnalysis> {
     const startedAt = performance.now();
     const context = {
       model: this.config.model,
@@ -180,7 +203,10 @@ export class GeminiFoodVisionProvider implements FoodVisionProvider {
           systemInstruction: FOOD_VISION_SYSTEM_INSTRUCTION,
           responseMimeType: "application/json",
           responseJsonSchema: foodAnalysisJsonSchema,
-          abortSignal: AbortSignal.timeout(GEMINI_ABORT_TIMEOUT_MS),
+          abortSignal: mergeAbortSignals([
+            AbortSignal.timeout(GEMINI_ABORT_TIMEOUT_MS),
+            ...(options?.signal ? [options.signal] : []),
+          ]),
           httpOptions: {
             timeout: GEMINI_HTTP_TIMEOUT_MS,
             retryOptions: {

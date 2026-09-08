@@ -20,6 +20,13 @@ import {
 import { normalizeFoodName } from "@/lib/nutrition/canonical";
 import type { NutritionMatch } from "@/lib/nutrition/types";
 import {
+  DEMO_ANALYZE_DELAY_MS,
+  analyzeAbortOutcome,
+  loadingStepClass,
+  loadingStepIndex,
+} from "@/lib/client/analyze-session";
+import { GEMINI_HTTP_TIMEOUT_MS } from "@/lib/providers/food-vision/timeout";
+import {
   inferSupportedImageMimeType,
   isHeicFile,
   type FoodVisionProvider,
@@ -57,6 +64,25 @@ interface KcalCueAppProps {
 }
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+
+function delay(ms: number, signal?: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
+
+    const timer = window.setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        window.clearTimeout(timer);
+        reject(new DOMException("Aborted", "AbortError"));
+      },
+      { once: true },
+    );
+  });
+}
 
 function getError(code: string): AppError {
   const message = errorCopy[code] ?? errorCopy.unknown;
@@ -186,12 +212,24 @@ function LoadingView({
   previewFailed,
   isHeic,
   demoMode,
+  onCancel,
 }: {
   previewUrl: string | null;
   previewFailed: boolean;
   isHeic: boolean;
   demoMode: boolean;
+  onCancel: () => void;
 }) {
+  const [step, setStep] = useState(0);
+
+  useEffect(() => {
+    const startedAt = Date.now();
+    const tick = () => setStep(loadingStepIndex(Date.now() - startedAt));
+    tick();
+    const interval = window.setInterval(tick, 500);
+    return () => window.clearInterval(interval);
+  }, []);
+
   return (
     <main className="state-page" id="main-content">
       <section className="loading-card" aria-live="polite" aria-busy="true">
@@ -215,10 +253,15 @@ function LoadingView({
           <h1>{copy.loadingTitle}</h1>
           <p>{copy.loadingBody}</p>
           <ol className="loading-steps">
-            <li className="active"><span />辨認可見食物</li>
-            <li><span />估算份量範圍</li>
-            <li><span />配對營養參考資料</li>
+            <li className={loadingStepClass(step, 0)}><span />辨認可見食物</li>
+            <li className={loadingStepClass(step, 1)}><span />估算份量範圍</li>
+            <li className={loadingStepClass(step, 2)}><span />配對營養參考資料</li>
           </ol>
+          <div className="loading-actions">
+            <button className="button button-secondary" type="button" onClick={onCancel}>
+              {copy.cancelAnalyze}
+            </button>
+          </div>
         </div>
       </section>
     </main>
@@ -325,6 +368,7 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
   const [appError, setAppError] = useState<AppError | null>(null);
   const nutritionProvider = useMemo(() => new LocalNutritionProvider(), []);
   const nameEditTimers = useRef(new Map<string, number>());
+  const analyzeAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
@@ -342,6 +386,7 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
       for (const timer of timers.values()) {
         window.clearTimeout(timer);
       }
+      analyzeAbortRef.current?.abort("unmount");
     };
   }, []);
 
@@ -387,6 +432,13 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
     setStage("input");
   };
 
+  const cancelAnalyze = () => {
+    analyzeAbortRef.current?.abort("cancelled");
+    analyzeAbortRef.current = null;
+    setStage("input");
+    setAppError(null);
+  };
+
   const analyze = async (forceDemo = false) => {
     if (!file) {
       setAppError(getError("missing_image"));
@@ -394,10 +446,19 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
       return;
     }
 
+    analyzeAbortRef.current?.abort("superseded");
+    const controller = new AbortController();
+    analyzeAbortRef.current = controller;
+
     const demoRequest = initialProviderMode === "demo" || forceDemo;
     setActiveMode(demoRequest ? "demo" : "live");
     setStage("analyzing");
     setAppError(null);
+
+    const timeoutId = window.setTimeout(
+      () => controller.abort("timeout"),
+      GEMINI_HTTP_TIMEOUT_MS,
+    );
 
     try {
       const formData = new FormData();
@@ -407,15 +468,13 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
         formData.set("image", file);
       }
 
-      const request = fetch("/api/analyze", {
-        method: "POST",
-        body: formData,
-      });
       const [response] = await Promise.all([
-        request,
-        demoRequest
-          ? new Promise<void>((resolve) => window.setTimeout(resolve, 650))
-          : Promise.resolve(),
+        fetch("/api/analyze", {
+          method: "POST",
+          body: formData,
+          signal: controller.signal,
+        }),
+        demoRequest ? delay(DEMO_ANALYZE_DELAY_MS, controller.signal) : Promise.resolve(),
       ]);
       const body = (await response.json()) as AnalyzeResponse;
 
@@ -446,6 +505,14 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
         setStage("result");
       }
     } catch (error) {
+      if (controller.signal.aborted) {
+        if (analyzeAbortOutcome(controller.signal.reason) === "timeout") {
+          setAppError(getError("network_timeout"));
+          setStage("error");
+        }
+        return;
+      }
+
       const safeError =
         typeof error === "object" &&
         error !== null &&
@@ -455,10 +522,17 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
           : getError("unknown");
       setAppError(safeError);
       setStage("error");
+    } finally {
+      window.clearTimeout(timeoutId);
+      if (analyzeAbortRef.current === controller) {
+        analyzeAbortRef.current = null;
+      }
     }
   };
 
   const reset = () => {
+    analyzeAbortRef.current?.abort("cancelled");
+    analyzeAbortRef.current = null;
     for (const timer of nameEditTimers.current.values()) {
       window.clearTimeout(timer);
     }
@@ -627,6 +701,7 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
           previewFailed={previewFailed}
           isHeic={isHeicFile(file?.name ?? "", file?.type)}
           demoMode={activeMode === "demo"}
+          onCancel={cancelAnalyze}
         />
       ) : null}
 
