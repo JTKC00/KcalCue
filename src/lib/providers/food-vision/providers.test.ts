@@ -74,6 +74,7 @@ describe("GeminiFoodVisionProvider structured response handling", () => {
     expect(FOOD_VISION_SYSTEM_INSTRUCTION).toContain(
       "visibleIngredients must never become separate food entries",
     );
+    expect(FOOD_VISION_SYSTEM_INSTRUCTION).toContain("Milk tea is a beverage dish");
   });
 
   it("maps malformed JSON to an invalid_response error without a network call", async () => {

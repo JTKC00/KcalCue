@@ -82,9 +82,31 @@ const IDENTITY_RULES: TermRule[] = [
     kind: "named_dish",
     qualifiers: ["composite"],
   },
+  {
+    keys: [
+      "char siu rice",
+      "cha siu rice",
+      "char siu with rice",
+      "siu mei rice",
+      "叉燒飯",
+      "叉燒白飯",
+      "燒味飯",
+    ],
+    canonicalName: "siu-mei-rice",
+    category: "mixed",
+    kind: "named_dish",
+    qualifiers: ["composite"],
+  },
+  { keys: ["claypot rice", "clay pot rice", "煲仔飯"], canonicalName: "claypot-rice", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
   { keys: ["donburi", "丼飯", "丼"], canonicalName: "donburi", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
   { keys: ["bibimbap", "石鍋拌飯", "拌飯"], canonicalName: "bibimbap", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
   { keys: ["chow mein", "lo mein", "fried noodles", "stir-fried noodles", "stir fried noodles", "炒麵", "撈麵"], canonicalName: "fried-noodles", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
+  { keys: ["wonton noodles", "wonton noodle soup", "wonton mein", "雲吞麵", "餛飩麵"], canonicalName: "noodle-soup", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
+  { keys: ["noodle soup", "湯麵"], canonicalName: "noodle-soup", category: "mixed", kind: "dish_class", qualifiers: ["composite"] },
+  { keys: ["rice noodle roll", "rice rolls", "cheung fun", "腸粉"], canonicalName: "rice-noodle-roll", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
+  { keys: ["century egg pork congee", "pork congee", "皮蛋瘦肉粥"], canonicalName: "congee", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
+  { keys: ["congee", "rice porridge", "白粥", "粥"], canonicalName: "congee", category: "mixed", kind: "dish_class", qualifiers: ["composite"] },
+  { keys: ["hong kong milk tea", "milk tea", "港式奶茶", "奶茶"], canonicalName: "milk-tea", category: "dairy", kind: "named_dish", qualifiers: ["composite"] },
   { keys: ["carbonara", "spaghetti carbonara"], canonicalName: "carbonara", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
   { keys: ["bolognese", "spaghetti bolognese", "肉醬意粉", "肉醬意大利粉", "肉醬麵", "肉醬"], canonicalName: "bolognese", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
   { keys: ["ramen", "拉麵"], canonicalName: "ramen", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
@@ -131,9 +153,15 @@ const COMPOSITE_CANONICALS = new Set([
   "braised-rice",
   "fried-rice",
   "curry-rice",
+  "siu-mei-rice",
+  "claypot-rice",
   "donburi",
   "bibimbap",
   "fried-noodles",
+  "noodle-soup",
+  "rice-noodle-roll",
+  "congee",
+  "milk-tea",
   "carbonara",
   "bolognese",
   "pasta",
@@ -317,9 +345,14 @@ function familyOf(canonicalName: string): IdentityFamily {
     case "baked-rice":
     case "braised-rice":
     case "fried-rice":
+    case "siu-mei-rice":
+    case "claypot-rice":
+    case "congee":
     case "donburi":
     case "bibimbap":
     case "fried-noodles":
+    case "noodle-soup":
+    case "rice-noodle-roll":
     case "rice-dish":
     case "noodle-dish":
     case "bread-dish":
