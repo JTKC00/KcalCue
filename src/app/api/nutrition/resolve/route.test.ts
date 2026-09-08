@@ -7,6 +7,7 @@ vi.mock("@/lib/server/env", () => ({
 }));
 
 import { getNutritionApiKey } from "@/lib/server/env";
+import { NUTRITION_RATE_LIMIT, clearRateLimitStore } from "@/lib/server/rate-limit";
 import { clearUsdaCache } from "@/lib/nutrition/usda";
 import { POST } from "./route";
 
@@ -25,6 +26,7 @@ const banana = {
 describe("POST /api/nutrition/resolve", () => {
   beforeEach(() => {
     vi.mocked(getNutritionApiKey).mockReturnValue(null);
+    clearRateLimitStore();
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
@@ -129,5 +131,36 @@ describe("POST /api/nutrition/resolve", () => {
     expect(body.matches[1].includedInTotal).toBe(false);
     expect(body.warnings).toEqual([{ index: 1, code: "rate_limited" }]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns 429 after the nutrition rate limit is exceeded", async () => {
+    const headers = {
+      "Content-Type": "application/json",
+      "x-forwarded-for": "198.51.100.9",
+    };
+
+    for (let index = 0; index < NUTRITION_RATE_LIMIT.limit; index += 1) {
+      const allowed = await POST(
+        new Request("http://localhost/api/nutrition/resolve", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ foods: [banana] }),
+        }),
+      );
+      expect(allowed.status).toBe(200);
+    }
+
+    const blocked = await POST(
+      new Request("http://localhost/api/nutrition/resolve", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ foods: [banana] }),
+      }),
+    );
+    const body = await blocked.json();
+
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get("Retry-After")).toBe("60");
+    expect(body).toEqual({ error: { code: "rate_limited" } });
   });
 });
