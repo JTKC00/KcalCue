@@ -69,6 +69,33 @@ describe("live composite regression", () => {
   });
 });
 
+describe("new HK dishes do not inherit generic bases", () => {
+  it("does not treat char siu rice as plain rice or pork", () => {
+    const food = makeFood("叉燒飯", "char siu rice", { identityLevel: "dish" });
+    const match = provider.resolve(food);
+    expect(match.includedInTotal).toBe(true);
+    expect(match.profile?.id).toBe("siu-mei-rice");
+    expect(match.profile?.canonicalName).not.toBe("rice");
+    expect(match.profile?.canonicalName).not.toBe("pork");
+  });
+
+  it("does not treat milk tea as whole milk", () => {
+    const tea = provider.resolve(makeFood("港式奶茶", "hong kong milk tea", { identityLevel: "dish" }));
+    const milk = provider.resolve(makeFood("牛奶", "whole milk"));
+    expect(tea.profile?.id).toBe("milk-tea");
+    expect(milk.profile?.id).toBe("whole-milk");
+    expect(tea.profile?.id).not.toBe(milk.profile?.id);
+  });
+
+  it("does not treat soup noodles as plain noodles", () => {
+    const match = provider.resolve(
+      makeFood("雲吞麵", "wonton noodles", { identityLevel: "dish" }),
+    );
+    expect(match.profile?.id).toBe("noodle-soup");
+    expect(match.profile?.canonicalName).not.toBe("noodles");
+  });
+});
+
 describe("simple base foods still resolve", () => {
   it.each([
     ["白飯", "cooked white rice", "rice", "white-rice-cooked"],
@@ -123,6 +150,24 @@ describe("composite identity precedence", () => {
     expect(canonicalizeFood(makeFood("炒麵", "fried noodles"))).toMatchObject({
       canonicalName: "fried-noodles",
     });
+    expect(canonicalizeFood(makeFood("叉燒飯", "char siu rice"))).toMatchObject({
+      canonicalName: "siu-mei-rice",
+    });
+    expect(canonicalizeFood(makeFood("煲仔飯", "claypot rice"))).toMatchObject({
+      canonicalName: "claypot-rice",
+    });
+    expect(canonicalizeFood(makeFood("雲吞麵", "wonton noodles"))).toMatchObject({
+      canonicalName: "noodle-soup",
+    });
+    expect(canonicalizeFood(makeFood("白粥", "congee"))).toMatchObject({
+      canonicalName: "congee",
+    });
+    expect(canonicalizeFood(makeFood("腸粉", "cheung fun"))).toMatchObject({
+      canonicalName: "rice-noodle-roll",
+    });
+    expect(canonicalizeFood(makeFood("港式奶茶", "milk tea"))).toMatchObject({
+      canonicalName: "milk-tea",
+    });
   });
 
   it("does not let protein or rice substrings steal a mixed dish", () => {
@@ -167,6 +212,15 @@ describe("composite vocabulary without recipe aliases", () => {
     ["pizza", "pizza", "pizza"],
     ["burrito", "burrito", "burrito"],
     ["三文治", "ham sandwich", "sandwich"],
+    ["叉燒飯", "char siu rice", "siu-mei-rice"],
+    ["燒味飯", "siu mei rice", "siu-mei-rice"],
+    ["煲仔飯", "claypot rice", "claypot-rice"],
+    ["雲吞麵", "wonton noodles", "noodle-soup"],
+    ["湯麵", "noodle soup", "noodle-soup"],
+    ["白粥", "congee", "congee"],
+    ["皮蛋瘦肉粥", "pork congee", "congee"],
+    ["腸粉", "cheung fun", "rice-noodle-roll"],
+    ["奶茶", "milk tea", "milk-tea"],
   ] as const)("classifies %s as a dish, not a generic ingredient", (displayName, normalizedName, canonical) => {
     const identity = canonicalizeFood(makeFood(displayName, normalizedName));
     expect(identity.canonicalName).toBe(canonical);
