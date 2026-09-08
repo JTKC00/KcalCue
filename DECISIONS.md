@@ -156,3 +156,23 @@ Invariant：若 Canonical Identity 表示 composite dish，而 Nutrition Catalog
 Precedence 不再靠 array ordering：`named_dish` > `dish_class` > `specific_food` > `generic_ingredient`，同層再比 matched key 長度。Cross-family 組合（starch + protein / sauce）及 rice leftover 分析會把「蘑菇飯」「牛肉麵」提升為 dish，但「白飯」「紅米飯」「steamed rice」仍是 simple rice。
 
 Compatibility：`dish → dish` 與 `ingredient → ingredient` 才可計入；`dish → ingredient` 一律 unresolved，文案說明找到相近基礎食材但不足以代表整道菜。USDA live fallback 對 composite identity 不查詢。不為每道餐廳菜加 alias，也不把所有含「飯」的名稱都當 unresolved。
+
+## 23. In-process public API rate limit（2026-09-08）
+
+`/api/analyze` 每 IP 每分鐘 5 次，`/api/nutrition/resolve` 每 IP 每分鐘 20 次，使用記憶體 token bucket。IP 取 `x-forwarded-for` 最左值。這是公開部署前的最小 abuse 防護，不是帳戶系統，也不是跨 serverless 實例的全域限流；正式公開時仍應由 gateway 再限一次。
+
+## 24. Live 分析可取消，不縮短 Gemini timeout（2026-09-08）
+
+保留 90 秒 HTTP timeout。Client 用 `AbortController` 對齊該上限，並提供取消。Loading 步驟只隨等待時間推進，不宣稱 server 已完成該步。取消不當成 `unknown` error。
+
+## 25. 有界港式 catalog 擴充（2026-09-08）
+
+新增有來源、寬範圍的 composite profile：叉燒／燒味飯、煲仔飯、雲吞麵／湯麵、粥、腸粉、港式奶茶。火鍋、果汁、pizza 等維持 unresolved。港式奶茶不得套用全脂奶 profile。
+
+## 26. PWA PNG icons（2026-09-08）
+
+iOS 主畫面需要 PNG `apple-touch-icon`。保留 SVG，另提供 192／512 PNG。Service worker 仍不 cache 相片或 API response。
+
+## 27. CSP 與現有 preview 共存（2026-09-08）
+
+加入 `Content-Security-Policy`：`img-src` 允許 `'self' blob: data:`，以支援本機 object URL preview。`script-src` 暫時包含 `'unsafe-inline'`，以便與 Next.js App Router hydration 共存，而不引入 nonce middleware。
