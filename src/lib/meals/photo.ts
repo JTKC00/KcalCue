@@ -1,4 +1,4 @@
-import { authorizedFetch } from "@/lib/supabase/client";
+import { authorizedFetch } from "@/lib/firebase/client";
 
 export async function preparePhoto(
   file: File,

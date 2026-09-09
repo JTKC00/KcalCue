@@ -1,7 +1,8 @@
 import { authenticated, apiError, HttpError } from "@/lib/server/auth";
 import { mealInputSchema, type MealRecord } from "@/lib/meals/types";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
-import { NutritionService } from "@/lib/nutrition/service";
+import { listMeals, previousMeal, commitMeal } from "@/lib/firebase/meals";
+import { accountPath } from "@/lib/firebase/admin";
 import { createEditableFoodItems } from "@/lib/domain/editable-meal";
 import { canReuseNutritionMatchForNameEdit } from "@/lib/nutrition/client";
 import { UsdaNutritionClient } from "@/lib/nutrition/usda";
@@ -9,21 +10,17 @@ import { getNutritionApiKey } from "@/lib/server/env";
 
 export async function GET(request: Request) {
   try {
-    const { db } = await authenticated(request);
-    const records: MealRecord[] = [];
-    for (let offset = 0; ; offset += 500) {
-      const { data, error } = await db
-        .from("meals")
-        .select("record")
-        .is("deleted_at", null)
-        .order("id")
-        .range(offset, offset + 499);
-      if (error) throw new HttpError(503, "load_failed");
-      records.push(...data.map((row) => row.record as MealRecord));
-      if (data.length < 500) break;
-    }
+    const { db, user } = await authenticated(request);
+    const revision =
+      (await db.doc(accountPath(user.id)).get()).data()?.revision ?? "empty";
+    if (new URL(request.url).searchParams.get("since") === revision)
+      return Response.json(
+        { revision },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    const records = await listMeals(db, user.id);
     return Response.json(
-      { records },
+      { records, revision },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {
@@ -44,34 +41,17 @@ export async function POST(request: Request) {
     const parsed = mealInputSchema.safeParse(json);
     if (!parsed.success) throw new HttpError(400, "invalid_request");
     const input = parsed.data;
-    const { data: existing, error: readError } = await db
-      .from("meals")
-      .select("record,deleted_at")
-      .eq("id", input.id)
-      .maybeSingle();
-    if (readError) throw new HttpError(503, "load_failed");
-    const previous = existing?.record as MealRecord | undefined;
-    if (existing?.deleted_at) throw new HttpError(409, "conflict");
+    const existing = await previousMeal(db, user.id, input.id);
+    const previous = existing?.record;
+    if (existing?.deleted) throw new HttpError(409, "conflict");
     if (previous?.mutationId === input.mutationId)
-      return Response.json({ record: previous });
+      return Response.json(
+        { record: previous },
+        { headers: { "Cache-Control": "no-store" } },
+      );
     if ((previous?.version ?? 0) !== input.version)
       throw new HttpError(409, "conflict");
-    if (
-      input.photoPath &&
-      !new RegExp(`^${user.id}/${input.id}/[a-f0-9-]+\\.jpg$`).test(
-        input.photoPath,
-      )
-    )
-      throw new HttpError(400, "invalid_photo");
-    if (input.photoPath) {
-      const { data } = await db
-        .from("meal_photos")
-        .select("path")
-        .eq("path", input.photoPath)
-        .eq("ready", true)
-        .maybeSingle();
-      if (!data) throw new HttpError(400, "invalid_photo");
-    }
+    if (input.photoPath) throw new HttpError(400, "photos_not_stored");
     const local = new LocalNutritionProvider();
     const key = getNutritionApiKey();
     const usda = key ? new UsdaNutritionClient(key) : null;
@@ -112,46 +92,9 @@ export async function POST(request: Request) {
       version: input.version + 1,
       updatedAt: new Date().toISOString(),
     };
-    const totals = new NutritionService(local).calculateMeal(items);
-    const row = {
-      id: record.id,
-      user_id: user.id,
-      version: record.version,
-      record,
-      totals: {
-        ranges: totals.totals,
-        includedCount: totals.includedCount,
-        totalCount: totals.totalCount,
-      },
-      date: record.date,
-    };
-    const operation = previous
-      ? db
-          .from("meals")
-          .update(row)
-          .eq("id", input.id)
-          .eq("version", input.version)
-          .is("deleted_at", null)
-      : db.from("meals").insert(row);
-    const { data, error } = await operation.select("record").maybeSingle();
-    if (error || !data) {
-      const latest = await db
-        .from("meals")
-        .select("record,deleted_at")
-        .eq("id", input.id)
-        .maybeSingle();
-      if (
-        !latest.data?.deleted_at &&
-        latest.data?.record?.mutationId === input.mutationId
-      )
-        return Response.json({ record: latest.data.record });
-      throw new HttpError(
-        error && error.code !== "23505" ? 503 : 409,
-        error && error.code !== "23505" ? "save_failed" : "conflict",
-      );
-    }
+    const saved = await commitMeal(db, user.id, record, input.version);
     return Response.json(
-      { record: data.record },
+      { record: saved },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

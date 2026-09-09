@@ -62,7 +62,7 @@ describe("meal records and local drafts", () => {
       "none",
     );
   });
-  it("restores a draft and clears only the signed-out account including private photos", async () => {
+  it("restores a temporary image draft and clears only the signed-out account", async () => {
     const draft = {
       ...newDraft(),
       photo: new Blob(["compressed jpeg"], { type: "image/jpeg" }),
@@ -73,15 +73,9 @@ describe("meal records and local drafts", () => {
       draft: newDraft(),
       syncedAt: null,
     });
-    await localMeals.putPhoto("a", "meal/photo.jpg", draft.photo);
     expect((await localMeals.read("a")).draft?.id).toBe(draft.id);
-    expect((await localMeals.photo("a", "meal/photo.jpg"))?.type).toBe(
-      "image/jpeg",
-    );
-    expect(await localMeals.photo("b", "meal/photo.jpg")).toBeUndefined();
     await localMeals.clear("a");
     expect((await localMeals.read("a")).draft).toBeNull();
-    expect(await localMeals.photo("a", "meal/photo.jpg")).toBeUndefined();
     expect((await localMeals.read("b")).draft).not.toBeNull();
   });
 });

@@ -42,6 +42,15 @@ jobs:
       - name: Deterministic evaluation
         run: npm run eval
 
+      - name: Set up Java for Firestore emulator
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Firestore transactions, account isolation and rules
+        run: npx --yes firebase-tools@15.29.0 emulators:exec --only firestore --project demo-kcalcue "npm run test:firestore"
+
       - name: Production build
         run: npm run build
 

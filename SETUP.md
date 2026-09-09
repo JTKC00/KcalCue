@@ -1,61 +1,84 @@
-# KcalCue 帳戶與記錄設定
+# KcalCue Firebase 設定
 
-## 1. 建立獨立 Supabase 專案
+## 專案與費用
 
-在自己的 Supabase organization 建立 `KcalCue`。香港試用者可優先考慮 Singapore 區域；建立前檢查帳戶方案與專案費用。本次程式實作沒有建立付費資源，也沒有改動 DevRoom AI 或 ECHOES Playtest。
+建議建立獨立的 KcalCue Firebase 專案，並在需要 Blaze 時連到現有的 Cloud Billing 帳戶。Blaze 是按專案啟用的用量計費方案，另一個專案已有 Blaze 不會自動替新專案啟用。本次改動沒有建立或修改任何雲端專案。
 
-在新專案 SQL Editor 執行 `supabase/migrations/20260909025204_meal_journal.sql`，或使用 Supabase CLI 的 migration 部署流程。Migration 包括：
+KcalCue 使用 Firebase Authentication 與 Cloud Firestore（Standard / Native mode）。**不需要建立 Firebase Storage bucket；不會上傳或保存食物圖片到 Storage。** 離線能力由應用程式的本機佇列提供，不依賴 Blaze。Firebase 用量、Email 寄信額度及 hosting 費用仍依實際方案計算。
 
-- `meals`：餐點、server 計算的營養摘要、版本號、日期與資料快照。
-- `meal_photos`：私人照片及待完成上傳的追蹤資料。
-- `meal-photos` 私人 bucket：只允許 JPEG，最大 5 MiB。
-- 每張表的 RLS、明確權限及擁有人／日期索引；Storage 只能讀寫自己的路徑。
+若選擇共用其他 App 的 Firebase 專案，Authentication 使用者與專案設定也會共用；不能直接覆蓋該專案的 rules。本 repo 的 rules 以獨立 KcalCue 專案為部署目標。
 
-Migration 不應套到其他產品的既有資料庫。請保留 SQL migration 作為環境版本紀錄；不要把生產 database password 放在 shell history。
+參考：[Firebase 計費](https://firebase.google.com/docs/projects/billing/firebase-pricing-plans)、[價格與免費額度](https://firebase.google.com/pricing)。
 
-## 2. 環境變數
+## Firebase Console
+
+1. 註冊 Web App，取得 apiKey、authDomain、projectId 和 appId。
+2. 建立 Firestore Standard / Native mode 資料庫，按試用者與 hosting 所在位置選擇區域。不要啟用測試模式的公開讀寫規則。
+3. Authentication → Sign-in method：啟用 Email/Password 及其 Email link 選項，同時啟用 Google provider 並設定支援 Email。
+4. 在 Authorized domains 加入正式 HTTPS 網域。開發時另外加入 localhost 或實際開發 host；不要把測試網域當成正式環境。
+5. 設定 Email 寄件名稱、範本及 Google 同意畫面的 App 品牌。
+6. 為獨立專案部署 `firestore.rules`：
+
+```sh
+npx firebase-tools@15.29.0 deploy --only firestore:rules --project YOUR_KCALCUE_PROJECT_ID
+```
+
+Rules 拒絕所有 Web SDK 直接讀寫。資料存取經 Next.js API：Firebase Admin 驗證 ID token、撤銷狀態、Email 驗證狀態與試用名單，再只使用 token 的 UID 存取 `kcalcueUsers/{uid}/meals/{mealId}`。客戶端傳入的 userId 不決定資料擁有人。Admin SDK 不受 rules 限制，因此 API 授權不可移除。
+
+資料儲存時自動建立，沒有 SQL migration。不需要建立 Storage、Cloud Functions 或 Firebase Hosting 才能使用這份程式。
+
+## 環境變數與 hosting
 
 複製 `.env.example` 為 `.env.local`，填入：
 
 ```dotenv
-NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=YOUR_PUBLISHABLE_KEY
+NEXT_PUBLIC_FIREBASE_API_KEY=YOUR_WEB_API_KEY
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=YOUR_KCALCUE_PROJECT_ID
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=YOUR_KCALCUE_PROJECT_ID.firebaseapp.com
+NEXT_PUBLIC_FIREBASE_APP_ID=YOUR_WEB_APP_ID
+KCALCUE_ALLOWED_EMAILS=tester1@example.com,tester2@example.com
 OPENAI_API_KEY=YOUR_SERVER_ONLY_KEY
 OPENAI_MODEL=gpt-5.6-luna
 NUTRITION_API_KEY=
 ```
 
-Supabase URL 和 publishable key 可出現在 browser；資料隔離依靠 RLS。**不要使用 service_role／secret key 代替 publishable key，也不要加上 `NEXT_PUBLIC_` 暴露 OpenAI key。** 目前實作不需要 Supabase service_role key。
+Web App 的四個公開設定可以出現在瀏覽器。試用名單由 server 判斷，空白時拒絕 API 存取；成功登入不代表自動取得试用權限。Email Link 與 Google 帳戶均需通過相同檢查。
 
-修改公開環境變數後必須重新 build；CSP 只允許這個 Supabase origin。部署時把相同變數放在 hosting 的環境設定，`.env.local` 不提交 git。
+Firebase Admin 需要伺服器憑證：Google Cloud hosting 優先使用 Application Default Credentials；其他 hosting 可使用專用 service account，將 `FIREBASE_ADMIN_CLIENT_EMAIL` 與 `FIREBASE_ADMIN_PRIVATE_KEY` 放入伺服器 secret environment variables。Private key 可包含實際換行或 `\n`。服務帳戶需要 Firestore 資料存取及讀取 Firebase Auth 使用者的權限；不需要 Storage 權限。不要將 service account JSON、private key 或 OpenAI key 放進 `NEXT_PUBLIC_`、git 或聊天。
 
-沒有 Supabase 設定時，App 顯示無法同步，仍可用 Demo、手動編輯和本機草稿；Live 圖片分析必須有已驗證帳戶。没有 OpenAI key 時只回傳明確標示的示範結果，Demo 不加入正式記錄。
+沿用可執行 Next.js Node runtime、sharp 和 AI 請求的 HTTPS hosting。修改公開環境變數後重新 build；CSP 會允許指定 authDomain 與 Firebase Auth 所需的 Google origins。
 
-## 3. Email 驗證碼與試用帳戶
+## 登入行為
 
-1. 在 Auth 設定關閉公開註冊，只由管理員預建試用帳戶並確認 Email。
-2. 設定自己的 SMTP 寄信服務、寄件網域與寄件地址。新 Free 專案使用預設 SMTP 時可能無法修改 Email template，因此 OTP 試用應配置自訂 SMTP。
-3. Email 的 Magic Link template 改為顯示 `{{ .Token }}`，例如「KcalCue 驗證碼：{{ .Token }}」。這裡使用輸入驗證碼登入，不需要點擊郵件連結返回 PWA。
-4. 設定正式 HTTPS Site URL、開發與試用站的合法 redirect URLs；使用短效 OTP 和寄信限流。UI 重寄倒數為 60 秒，server 設定應一致。
-5. 用兩個真正試用帳戶確認寄信、錯誤／過期 OTP、登入保持、重新登入及資料隔離。
+- Email：寄出登入連結，在同一裝置開啟。跨裝置或沒有本機 Email 記錄時，畫面要求再次輸入收信的 Email，不會從 URL 推斷 Email。登入完成後移除 callback query。
+- Google：使用 Firebase Google OAuth popup，讓使用者選擇帳戶。若瀏覽器攔截 popup，可允許後重試或使用 Email 連結。
+- Email 連結可能在一般瀏覽器開啟，而非已安裝 PWA；兩者是否共用網站儲存由平台決定。草稿保留在原來的瀏覽器／PWA，不能保證自動跨容器搬移。
+- 首次登入需要連線。已登入的装置可離線讀写。重新登入同一帳戶後自動重試待同步操作。
+- 登出前須完成同步或處理衝突，避免清除未上傳修改。登出會清除該帳戶的本機草稿和餐點快取；其他帳戶的資料不會顯示於目前帳戶。
 
-參考：[Email OTP](https://supabase.com/docs/guides/auth/auth-email-passwordless)、[Supabase changelog](https://supabase.com/changelog)、[私人 Storage](https://supabase.com/docs/guides/storage/buckets/fundamentals)。
+參考：[Email Link](https://firebase.google.com/docs/auth/web/email-link-auth)、[Google 登入](https://firebase.google.com/docs/auth/web/google-signin)。
 
-## 4. 儲存與離線行為
+## 離線與同步設計
 
-App 使用 browser Supabase Auth session，API 每次用 bearer token 向 Auth 驗證使用者，再以該使用者的權限存取資料；首頁 HTML 不包含個人資料。所有 API 回應不進入 service worker 快取。
+App 使用帳戶分隔的 IndexedDB 保存草稿、雲端快照與待同步操作。新增、修改及刪除先完成本機持久寫入，立即更新畫面；寫入完成不等於雲端已確認，畫面會列出待同步數量。
 
-草稿和已同步記錄使用帳戶分隔的 IndexedDB。可預覽的圖片先在 browser 壓縮成 JPEG；Live HEIC／HEIF 無法解碼時使用已登入的 server 轉換。儲存照片前 server 再檢查檔案、校正方向、縮到最長邊 1600px 並去除 EXIF。Demo 不上傳原圖。
+應用開啟、恢復連線、返回前景及前景期間會嘗試同步：有待同步操作時每 5 秒重試，沒有操作時每 30 秒檢查版本。**關閉瀏覽器／PWA 後不保證背景上傳；下次開啟會繼續。** API 先檢查一份帳戶版本文件，無變更時不重新查詢整份餐點歷史；資料變更時才讀取最新記錄。
 
-離線不自動提交新增／修改／刪除；重新連線或重新登入後，由使用者再次確認儲存。記錄保留原來的日期與 IANA 時區，不會因旅行而搬到另一天。日總數是已計入食物的範圍之和；資料不足時明示部分估算或未知。
+本實作刻意使用應用層 outbox 和 server Firestore transactions，並非直接使用 Firestore Web SDK 的 last-write-wins 離線寫入：這樣能保留伺服器營養重算、Email 試用名單、刪除標記和明確的版本衝突。請勿改成瀏覽器直接寫資料而繞過驗證。
 
-修改使用版本比較；同一草稿重試保留 mutation ID，避免重複新增。衝突保留本機草稿，使用者可載入最新記錄再修改。刪除後清除餐點內容，只保留 ID、擁有人、版本等刪除標記，防止舊請求把資料復活。
+每個操作保留固定 mutation ID；重試不會重複新增。多分頁以 Web Locks 排序同步，同一份本機資料的讀改寫使用單一 IndexedDB transaction。需要支援 IndexedDB 與 Web Locks 的現代瀏覽器。
 
-照片清理失敗會提示重試。清除全部記錄也會檢查未連到記錄的照片，包括失敗上傳。不要手動刪除 `meal_photos` rows 代替 Storage API 刪除，否則會留下無法追蹤的檔案。
+若另一裝置已修改同一餐，伺服器拒絕舊版本，佇列保留本機修改，停止該餐的後續操作；其他餐仍可同步。使用者可保留修改為新餐點草稿，或放棄待同步修改並使用雲端版本。刪除只在雲端留下 ID、版本與 mutation ID 等最小標記，餐點內容會移除，阻止過期請求復活資料。
 
-PWA 需要首次連線載入才能離線啟動。離線只保證已下載的記錄與照片可讀；瀏覽器仍可能因裝置空間不足而清除本機快取，雲端已儲存記錄不受影響。
+離線只保證已下載記錄可讀，AI 分析仍需要連線。首次使用 PWA 必須先連線載入。瀏覽器可能因空間壓力或使用者清理網站資料而刪除本機資料；尚未同步的修改只存在該裝置。
 
-## 5. 檢查與試用發布
+## 圖片處理與資料最小化
+
+食物圖片以 multipart 傳至 backend，在記憶體處理並送到 OpenAI 分析；KcalCue 不將原圖、壓縮圖、base64 或 image payload 寫入 Firestore、Storage、檔案或應用程式日誌。OpenAI Responses 請求保留 `store: false`；供應商資料處理仍依 OpenAI 帳戶政策。
+
+本機尚未儲存的草稿可暫存壓縮圖片，方便關閉後繼續；正式儲存或放棄草稿後清除。儲存 API 只接受餐點 metadata 和營養分析欄位，photoPath 不能指向任何圖片；同步佇列不包含 Blob。已儲存記錄不顯示照片縮圖，也不能用原圖重新分析，需要重新選圖。
+
+## 驗證
 
 ```sh
 npm ci
@@ -64,13 +87,15 @@ npm run typecheck
 npm test
 npm run eval
 npm run build
-npm start
+npm run test:e2e
 ```
 
-`npm run test:e2e` 使用測試专用公開設定重新 build，啟動 3100 port，以模擬 Auth／meal API 及瀏覽器真實 IndexedDB／service worker 驗證流程，不會使用真正 API keys。Windows 使用已安裝的 Edge；Linux／CI 先執行 `npx playwright install --with-deps chromium`。測試後需執行正常 `npm run build`，才可部署。
+E2E 使用合成 Firebase Web config、Firebase Auth/API 網絡替身，以及真正 browser IndexedDB、Web Locks、service worker；不寄 Email，不開真實 Google OAuth 或呼叫 OpenAI。E2E 會以測試公開設定重新 build，完成後執行正常 `npm run build` 才可部署。
 
-測試碼不建立真正雲端帳戶。`npm test` 中的 PGlite 會執行實際 PostgreSQL migration 與 RLS，但 Auth／Storage 平台表是測試替身；正式 Supabase 套用後仍須跑 Security Advisor 並以兩個帳戶驗收。
+Firestore 交易與 rules 使用官方模擬器（需要 Java 21）：
 
-使用能執行 Next.js Node runtime、sharp 和長時間 AI 請求的 HTTPS hosting。保留目前 API 請求限流；本輪只提供小範圍試用，正式公開流量仍需要額外的跨實例 gateway 限流。
+```sh
+npx firebase-tools@15.29.0 emulators:exec --only firestore --project demo-kcalcue "npm run test:firestore"
+```
 
-實機驗收項目與尚未完成的外部設定見 `ACCEPTANCE.md`。
+模擬器測試只接受本機 `FIRESTORE_EMULATOR_HOST`，固定使用 demo project，拒絕連到真實專案。CI 也會執行。真實登入、hosting 設定及 iPhone／Android 的待驗收項目見 `ACCEPTANCE.md`。

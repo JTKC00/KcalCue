@@ -9,8 +9,8 @@ KcalCue 是一個 mobile-first Responsive Web App / PWA：使用者影低或選�
 ## 功能
 
 - 今日／新增／歷史導覽，按日期和餐次保存記錄，修正後更新每日營養範圍
-- Supabase Email OTP、私人壓縮照片、跨裝置同步與版本衝突保護
-- IndexedDB 本機草稿及已下載記錄，離線查看／編輯草稿，上線後確認儲存
+- Firebase Email Link／Google 登入、離線讀寫、重連自動同步與版本衝突保護
+- IndexedDB 本機草稿及已下載記錄，離線新增／修改／刪除餐點，重連後自動同步
 - PWA 安裝引導、離線殼與每次 build 自動更新版本；更新前先保存草稿
 - 雲端與試用帳戶設定見 [SETUP.md](./SETUP.md)，實機驗收見 [ACCEPTANCE.md](./ACCEPTANCE.md)
 
@@ -66,7 +66,7 @@ npm start
 
 ## OpenAI Live Mode
 
-Live 分析需要先登入 Supabase 試用帳戶。請先完成 [SETUP.md](./SETUP.md) 的独立 project、migration 及 Email OTP 設定。
+Live 分析需要先登入 Firebase 試用帳戶。請先完成 [SETUP.md](./SETUP.md) 的 Firebase Web App、Email Link／Google 登入與伺服器設定。
 
 1. 複製範例檔：
 
@@ -93,8 +93,12 @@ Live 分析需要先登入 Supabase 試用帳戶。請先完成 [SETUP.md](./SET
 | `OPENAI_API_KEY` | Live Mode 必須 | 空白 | 只由 server route 讀取；空白時使用 Demo Mode |
 | `OPENAI_MODEL` | 否 | `gpt-5.6-luna` | 集中設定 OpenAI multimodal model |
 | `NUTRITION_API_KEY` | 否 | 空白 | 可選 USDA FoodData Central key；空白時只用本地 reference |
-| `NEXT_PUBLIC_SUPABASE_URL` | 帳戶／同步必須 | 空白 | 獨立 Supabase project URL |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | 帳戶／同步必須 | 空白 | Publishable key；擁有人隔離由 RLS 控制 |
+| `NEXT_PUBLIC_FIREBASE_API_KEY` | 帳戶／同步必須 | 空白 | Firebase Web API key |
+| `NEXT_PUBLIC_FIREBASE_PROJECT_ID` | 帳戶／同步必須 | 空白 | Firebase project ID |
+| `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` | 帳戶／同步必須 | 空白 | Firebase Auth domain |
+| `NEXT_PUBLIC_FIREBASE_APP_ID` | 帳戶／同步必須 | 空白 | Firebase Web App ID |
+| `KCALCUE_ALLOWED_EMAILS` | API 必須 | 空白（拒絕存取） | 逗號分隔的試用 Email |
+| `FIREBASE_ADMIN_CLIENT_EMAIL` / `FIREBASE_ADMIN_PRIVATE_KEY` | 無 ADC 的 hosting 必須 | 空白 | 只放在 server secret environment |
 
 預設模型選擇原因記錄在 [DECISIONS.md](./DECISIONS.md)。OpenAI 官方資料：[GPT-5.6 Luna model page](https://developers.openai.com/api/docs/models/gpt-5.6-luna)、[structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs)、[images and vision](https://developers.openai.com/api/docs/guides/images-vision)。
 
@@ -196,11 +200,11 @@ V0.1 baseline 紀錄見 [GOAL_REPORT.md](./GOAL_REPORT.md)；HEIC／CI／evaluat
 
 ## Privacy design
 
-- 使用 Supabase Auth／Postgres 與私人 Storage；沒有 analytics 或 public image storage。
+- 使用 Firebase Authentication／Firestore；不使用 Firebase Storage，沒有 analytics。
 - Demo Mode 不會將圖片傳到 server；可解碼相片會壓縮為本機草稿照片，Demo 結果不加入正式記錄。
 - Live Mode 圖片以 multipart request 暫時傳到 KcalCue server，再以 data URL 傳給 OpenAI；HEIC／HEIF 會先在 memory 轉 JPEG。
-- 確認儲存後，server 會校正方向、去除 EXIF，以最長邊 1600px 的 JPEG 保存到私人 bucket；不保存原圖或 base64，也不記錄 image payload。
-- 本機草稿、已同步記錄與已下載照片按帳戶分隔；登出清除該帳戶本機資料。刪除餐點後保留最小刪除標記，阻止過期請求重建記錄。
+- 只保存餐點及營養分析結果。圖片只在分析請求期間於 memory 處理，不寫入雲端、檔案或日誌；OpenAI Responses 使用 `store: false`。
+- 本機草稿、記錄和待同步操作按帳戶分隔；草稿壓縮圖在儲存或放棄後清除。待同步修改須先處理才可登出，登出清除該帳戶本機資料。刪除後保留最小標記，阻止過期請求重建記錄。
 - developer-safe timing diagnostics 只記錄 operation、MIME、byte size、計時及 resolved count，不記錄圖片、base64、食物名稱、prompt、個人資料或 secrets。
 - 真正 Live Mode 使用時，圖片仍會由 OpenAI API 處理；部署者應同時審視其帳戶與資料處理條款。
 
@@ -210,7 +214,7 @@ V0.1 baseline 紀錄見 [GOAL_REPORT.md](./GOAL_REPORT.md)；HEIC／CI／evaluat
 
 1. 只在 server env 放入 `OPENAI_API_KEY`／可選 `NUTRITION_API_KEY`，不要寫進 client 或 git。
 2. 在 gateway／WAF 再加 rate limit。App 內 in-memory token bucket 只保護單一實例；serverless 多實例下會變弱。
-3. 套用 Supabase migration，保持照片 bucket 私人，關閉公開註冊，預建試用帳戶並設定 SMTP／OTP；驗證 RLS。
+3. 設定 Firebase Email Link／Google provider、授權網域、Admin 憑證及試用名單；在獨立專案部署 Firestore deny-all client rules，資料由 API 授權。
 4. 用真實裝置手測：Live JPEG、HEIC（若裝置支援）、取消分析、429。
 
 ## Known limitations
@@ -220,5 +224,6 @@ V0.1 baseline 紀錄見 [GOAL_REPORT.md](./GOAL_REPORT.md)；HEIC／CI／evaluat
 - OpenAI API 不直接接受 HEIC / HEIF；KcalCue 會在 server memory 以 `sharp` 轉成 JPEG。Safari 17 起由 WebKit 支援 HEIC 預覽，其他瀏覽器是否能直接顯示相片取決於其 image decoder；KcalCue 仍會在預覽失敗時保留分析入口。目標裝置的完整 browser matrix 仍需持續 QA。
 - 單張相片本身無法知道真實重量、隱藏材料、油份、糖份或完整烹調方法；產品刻意以範圍及 uncertainty 表達。
 - App 內 rate limit 是單實例記憶體 bucket，不是跨實例的 abuse-control 系統。
-- 尚未在真正 KcalCue Supabase project、SMTP、OpenAI key 或 iPhone／Android 實機完成驗收；自動化替身測試不代表這些項目已通過。
-- 不提供完整離線自動同步、醫療建議、個人減重目標、社交或付費功能。
+- 尚未在真正 KcalCue Firebase project、Email／Google OAuth、OpenAI key 或 iPhone／Android 實機完成驗收；自動化替身測試不代表這些項目已通過。
+- 離線讀寫由持久 outbox 提供，應用開啟或恢復連線後自動同步；關閉 App 時不保證背景同步，AI 分析需要連線。
+- 不提供醫療建議、個人減重目標、社交或付費功能。

@@ -2,10 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  browserSupabase,
-  authorizedFetch,
+  firebaseAuth,
+  onAuthStateChanged,
+  signOut,
+  hasEmailLink,
   cloudConfigured,
-} from "@/lib/supabase/client";
+} from "@/lib/firebase/client";
+import { Account } from "./firebase-account";
+import { clearSyncState, type PendingMeal } from "@/lib/meals/outbox";
 import { localMeals, type LocalMeals } from "@/lib/meals/cache";
 import { MealRepository, RepositoryError } from "@/lib/meals/repository";
 import {
@@ -23,172 +27,23 @@ import { PwaControls } from "./pwa-controls";
 
 const repository = new MealRepository();
 const messages: Record<string, string> = {
-  login_required: "登入已過期，請重新輸入驗證碼。草稿仍保留，登入後再按儲存。",
+  login_required: "登入已過期，請重新登入。待同步修改仍保留，登入後自動重試。",
   conflict:
-    "這餐已在另一個裝置修改或刪除。你的草稿仍保留；請載入最新記錄後再修改。",
+    "這餐已在另一個裝置修改或刪除。你的修改仍保留；可保留為新餐點草稿，或放棄待同步修改。",
   invalid_request: "請檢查食物名稱、份量及日期時間。每餐最多 12 項食物。",
-  photo_failed: "照片未能上傳，可再試一次，或選擇不保存照片。",
-  cleanup_failed: "記錄已處理，但照片清理尚未完成。請按「重試照片清理」。",
-  cloud_unavailable: "尚未設定 Supabase，目前只能保存本機草稿。",
+  photo_failed: "照片未能處理，可再試一次，或移除草稿圖片。",
+  trial_access_required:
+    "這個 Email 尚未獲得試用權限，修改保留於本機。請聯絡管理員開通後重試。",
+  browser_unsupported:
+    "此瀏覽器不支援安全的多分頁同步，請更新 Chrome、Safari 或 Firefox。",
+  cloud_unavailable: "尚未設定 Firebase，目前只能保存本機草稿。",
 };
 function errorText(error: unknown) {
   return error instanceof RepositoryError
-    ? (messages[error.code] ?? "未能連接雲端，草稿仍保留。請稍後再試。")
-    : "未能完成操作，請檢查網絡後再試。";
+    ? (messages[error.code] ??
+        "未能連接雲端，修改仍保留於本機，稍後會自動重試。")
+    : "未能完成操作，請檢查網絡後再試。已保留的修改不會被清除。";
 }
-function Account({ onDone }: { onDone: () => void }) {
-  const [email, setEmail] = useState("");
-  const [code, setCode] = useState("");
-  const [sent, setSent] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
-  const [retryAt, setRetryAt] = useState(0);
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-  async function send() {
-    const client = browserSupabase();
-    if (!client || busy || Date.now() < retryAt) return;
-    setBusy(true);
-    setMessage("");
-    try {
-      const { error } = await client.auth.signInWithOtp({
-        email: email.trim(),
-        options: { shouldCreateUser: false },
-      });
-      if (error) {
-        setMessage("未能寄出驗證碼。請確認你已加入試用名單，稍後再試。");
-        return;
-      }
-      setSent(true);
-      setRetryAt(Date.now() + 60_000);
-      setMessage("已寄出驗證碼，請查看收件箱及垃圾郵件。");
-    } catch {
-      setMessage("暫時未能連線，請再試。");
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function verify() {
-    const client = browserSupabase();
-    if (!client || busy) return;
-    setBusy(true);
-    try {
-      const { error } = await client.auth.verifyOtp({
-        email: email.trim(),
-        token: code.trim(),
-        type: "email",
-      });
-      if (error) setMessage("驗證碼不正確或已過期，請重試或重新寄送。");
-      else onDone();
-    } catch {
-      setMessage("暫時未能連線，請再試。");
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <form
-      className="journal-card account-form"
-      onSubmit={(e) => {
-        e.preventDefault();
-        void (sent ? verify() : send());
-      }}
-    >
-      <h2>登入你的記錄</h2>
-      <p>輸入試用帳戶的 Email，在這個畫面完成驗證。</p>
-      <label>
-        Email
-        <input
-          type="email"
-          autoComplete="email"
-          required
-          value={email}
-          disabled={busy || sent}
-          onChange={(e) => setEmail(e.target.value)}
-        />
-      </label>
-      {sent && (
-        <label>
-          驗證碼
-          <input
-            autoComplete="one-time-code"
-            inputMode="numeric"
-            pattern="[0-9]{6,10}"
-            required
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-          />
-        </label>
-      )}
-      <button
-        className="button button-primary"
-        disabled={busy || !cloudConfigured()}
-      >
-        {busy ? "處理中…" : sent ? "驗證並登入" : "寄出驗證碼"}
-      </button>
-      {sent && (
-        <div className="journal-actions">
-          <button
-            type="button"
-            className="button button-secondary"
-            disabled={busy || now < retryAt}
-            onClick={() => void send()}
-          >
-            重新寄送
-            {now < retryAt ? `（${Math.ceil((retryAt - now) / 1000)}秒）` : ""}
-          </button>
-          <button
-            type="button"
-            className="button button-ghost"
-            onClick={() => {
-              setSent(false);
-              setCode("");
-            }}
-          >
-            更改 Email
-          </button>
-        </div>
-      )}
-      <p role="status">{message}</p>
-    </form>
-  );
-}
-function MealPhoto({ record, userId }: { record: MealRecord; userId: string }) {
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
-    let alive = true;
-    let objectUrl: string | undefined;
-    void (async () => {
-      if (!record.photoPath) return;
-      let blob = await localMeals.photo(userId, record.photoPath);
-      if (!blob && navigator.onLine) {
-        blob = await repository.photo(record.photoPath);
-        if (alive) await localMeals.putPhoto(userId, record.photoPath, blob);
-      }
-      if (blob && alive) {
-        objectUrl = URL.createObjectURL(blob);
-        setUrl(objectUrl);
-      }
-    })().catch(() => {});
-    return () => {
-      alive = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [record.photoPath, userId]);
-  // The source is a private local Blob, never a public storage URL.
-  return url ? (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img className="meal-thumbnail" src={url} alt="餐點照片" />
-  ) : (
-    <span className="meal-thumbnail photo-placeholder">
-      {record.photoPath ? "照片未下載" : "手動記錄"}
-    </span>
-  );
-}
-
 export function MealJournal({
   initialProviderMode,
 }: {
@@ -196,6 +51,7 @@ export function MealJournal({
 }) {
   const [tab, setTab] = useState("today");
   const [account, setAccount] = useState(false);
+  const [reauth, setReauth] = useState(false);
   const [userId, setUserId] = useState("guest");
   const [email, setEmail] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
@@ -212,9 +68,14 @@ export function MealJournal({
   const [preparing, setPreparing] = useState(false);
   const [photoFailed, setPhotoFailed] = useState(false);
   const [conflict, setConflict] = useState(false);
-  const [cleanup, setCleanup] = useState<
-    Array<{ path?: string; record?: MealRecord }>
-  >([]);
+  const [pending, setPending] = useState<PendingMeal[]>([]);
+  const [syncing, setSyncing] = useState(false);
+  const syncingRef = useRef(false);
+  const pendingRef = useRef(0);
+  const lastAttempt = useRef(0);
+  useEffect(() => {
+    pendingRef.current = pending.filter((job) => !job.error).length;
+  }, [pending]);
   const current = useRef({ userId, draft, records, syncedAt });
   useEffect(() => {
     current.current = { userId, draft, records, syncedAt };
@@ -226,23 +87,42 @@ export function MealJournal({
   const refreshGeneration = useRef(0);
   const busyRef = useRef(false);
   const allowUpdateReload = useRef(false);
-  useEffect(() => { allowUpdateReload.current = false; }, [draft]);
+  useEffect(() => {
+    allowUpdateReload.current = false;
+  }, [draft]);
 
   const refresh = useCallback(async () => {
     const id = current.current.userId;
-    if (id === "guest" || !navigator.onLine || busyRef.current) return;
-    const generation = ++refreshGeneration.current;
+    if (id === "guest" || syncingRef.current) return;
+    lastAttempt.current = Date.now();
+    syncingRef.current = true;
+    setSyncing(true);
     try {
-      const next = await repository.list();
-      if (
-        current.current.userId !== id ||
-        generation !== refreshGeneration.current
-      )
-        return;
-      setRecords(next);
-      setSyncedAt(new Date().toISOString());
+      if (navigator.onLine) {
+        await repository.sync(id);
+        if (current.current.userId === id) setOnline(true);
+      }
     } catch (error) {
-      if (current.current.userId === id) setNotice(errorText(error));
+      if (current.current.userId === id) {
+        setNotice(errorText(error));
+        if (error instanceof TypeError) setOnline(false);
+      }
+    } finally {
+      try {
+        const [next, state] = await Promise.all([
+          repository.list(id),
+          repository.state(id),
+        ]);
+        if (current.current.userId === id) {
+          setRecords(next);
+          setPending(state.jobs);
+          setSyncedAt(state.syncedAt);
+        }
+      } catch {
+        setNotice("本機儲存不可用，請勿關閉頁面。");
+      }
+      syncingRef.current = false;
+      setSyncing(false);
     }
   }, []);
 
@@ -255,11 +135,17 @@ export function MealJournal({
       refreshGeneration.current++;
       const oldId = current.current.userId;
       const guestDraft =
-        oldId === "guest" && id !== "guest" ? current.current.draft : null;
+        oldId === "guest" && id !== "guest"
+          ? (current.current.draft ??
+            (await localMeals.read("guest").catch(() => ({ draft: null })))
+              .draft)
+          : null;
       if (oldId !== "guest" && oldId !== id) {
         cacheEnabled.current = false;
         await writes.current;
-        await localMeals.clear(oldId);
+        // Account changes preserve unsynced work; explicit logout clears local data.
+        if (localStorage.getItem("kcalcue-logout")?.split(":")[0] === oldId)
+          await localMeals.clear(oldId);
       }
       const local = await localMeals.read(id).catch(() => {
         setNotice("本機儲存不可用，請勿在儲存到雲端前關閉頁面。");
@@ -276,48 +162,44 @@ export function MealJournal({
         await writes.current;
         await localMeals.clear("guest");
       }
-      current.current = { userId: id, ...local };
+      const [visibleRecords, syncState] =
+        id === "guest"
+          ? [[], { jobs: [] }]
+          : await Promise.all([repository.list(id), repository.state(id)]);
+      // A later sign-in may finish while IndexedDB is reading the previous account.
+      if (!active || generation !== loadGeneration) return;
+      current.current = { userId: id, ...local, records: visibleRecords };
       cacheEnabled.current = true;
       setUserId(id);
       setEmail(address);
-      setRecords(local.records);
+      setRecords(visibleRecords);
       setDraft(local.draft);
       setInitialDraft(local.draft ?? undefined);
       setEditorKey((key) => key + 1);
       setSyncedAt(local.syncedAt);
       setReady(true);
-      if (id !== "guest") localStorage.setItem("kcalcue-account", id);
+      setPending(syncState.jobs);
       void refresh();
     }
-    const client = browserSupabase();
-    void (async () => {
-      const session = await client?.auth.getSession();
-      if (!active) return;
-      await load(
-        session?.data.session?.user.id ??
-          localStorage.getItem("kcalcue-account") ??
-          "guest",
-        session?.data.session?.user.email ?? null,
-      );
-    })().catch(() => {
-      if (active)
-        void load(localStorage.getItem("kcalcue-account") ?? "guest", null);
-    });
-    const subscription = client?.auth.onAuthStateChange((event, session) => {
-      if (event === "SIGNED_IN" && session) {
-        if (session.user.id === current.current.userId) {
-          setEmail(session.user.email ?? null);
-          void refresh();
-        } else
-          setTimeout(() => {
-            if (active) void load(session.user.id, session.user.email ?? null);
-          }, 0);
-      }
-      if (event === "SIGNED_OUT") {
-        setEmail(null);
-      }
-    });
+    const auth = firebaseAuth();
+    const subscription = auth
+      ? onAuthStateChanged(auth, (user) => {
+          if (!active) return;
+          if (user?.uid === current.current.userId) {
+            setEmail(user.email);
+            void refresh();
+          } else void load(user?.uid ?? "guest", user?.email ?? null);
+        })
+      : undefined;
+    if (!auth) void load("guest", null);
+    // The callback URL is browser state unavailable during server rendering.
+    if (hasEmailLink()) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setAccount(true);
+      setReauth(true);
+    }
     const connection = () => {
+      lastAttempt.current = Date.now();
       setOnline(navigator.onLine);
       if (navigator.onLine) {
         void fetch("/api/status", {
@@ -388,6 +270,19 @@ export function MealJournal({
       }
       setTab(next);
     };
+    const queued = () => {
+      void refresh();
+    };
+    const syncTimer = setInterval(() => {
+      if (
+        document.visibilityState === "visible" &&
+        Date.now() - lastAttempt.current >=
+          (pendingRef.current ? 5_000 : 30_000)
+      )
+        connection();
+    }, 1_000);
+    window.addEventListener("kcalcue-sync", queued);
+    window.addEventListener("storage", queued);
     connection();
     navigate();
     window.addEventListener("online", connection);
@@ -397,7 +292,10 @@ export function MealJournal({
     window.addEventListener("storage", signedOutElsewhere);
     return () => {
       active = false;
-      subscription?.data.subscription.unsubscribe();
+      subscription?.();
+      clearInterval(syncTimer);
+      window.removeEventListener("kcalcue-sync", queued);
+      window.removeEventListener("storage", queued);
       window.removeEventListener("online", connection);
       window.removeEventListener("offline", connection);
       window.removeEventListener("hashchange", navigate);
@@ -428,7 +326,8 @@ export function MealJournal({
   }, []);
 
   function go(next: string) {
-    location.hash = next;
+    // State is updated here; hashchange is reserved for browser back/forward.
+    window.history.pushState(null, "", `#${next}`);
     setTab(next);
     setAccount(false);
   }
@@ -500,7 +399,7 @@ export function MealJournal({
           if (generation === photoGeneration.current) {
             setPhotoFailed(true);
             setNotice(
-              "照片壓縮未完成，原相只保留於本次頁面。可重試或不保存照片。",
+              "照片壓縮未完成，原相只保留於本次頁面。可重試或移除草稿圖片。",
             );
           }
         })
@@ -511,17 +410,8 @@ export function MealJournal({
     [initialProviderMode],
   );
 
-  async function cleanPhoto(path: string) {
-    const response = await authorizedFetch(
-      `/api/meals/photo?path=${encodeURIComponent(path)}`,
-      { method: "DELETE" },
-    );
-    if (!response.ok)
-      throw new RepositoryError("cleanup_failed", response.status);
-    await localMeals.removePhoto(current.current.userId, path).catch(() => {});
-  }
   async function save() {
-    if (!draft || busyRef.current || preparing || photoFailed) return;
+    if (!draft || busyRef.current) return;
     const invalid = document.querySelector<HTMLInputElement>(
       ".journal-editor input:invalid",
     );
@@ -534,10 +424,6 @@ export function MealJournal({
       setNotice("示範結果不會加入正式記錄。");
       return;
     }
-    if (!online) {
-      setNotice("草稿已留在本機，連線後請再次按儲存。");
-      return;
-    }
     if (!email) {
       setNotice("請先登入，然後回到草稿按儲存。");
       setAccount(true);
@@ -547,16 +433,9 @@ export function MealJournal({
     setBusy(true);
     refreshGeneration.current++;
     const id = userId;
-    const old = records.find((record) => record.id === draft.id);
     let next = draft;
     try {
-      if (next.photo && !next.photoPath && !next.removePhoto) {
-        const path = await repository.upload(next.id, next.photo);
-        next = { ...next, photoPath: path };
-        setDraft(next);
-      }
-      if (next.removePhoto)
-        next = { ...next, photoPath: null, photo: undefined };
+      next = { ...next, photoPath: null, photo: undefined };
       const fingerprint = JSON.stringify({
         ...next,
         photo: undefined,
@@ -567,30 +446,26 @@ export function MealJournal({
           ? next.pendingMutation
           : { fingerprint, id: crypto.randomUUID() };
       next = { ...next, pendingMutation };
-      setDraft(next);
-      const saved = await repository.save(next, pendingMutation.id);
+      setDraft({ ...draft, pendingMutation });
+      const saved = await repository.save(next, pendingMutation.id, id);
       if (current.current.userId !== id) return;
-      if (next.photo && saved.photoPath)
-        await localMeals
-          .putPhoto(id, saved.photoPath, next.photo)
-          .catch(() => {});
       setRecords((value) => [
         ...value.filter((record) => record.id !== saved.id),
         saved,
       ]);
-      setSyncedAt(new Date().toISOString());
       setDraft(null);
       setInitialDraft(undefined);
-      setNotice("已儲存並同步。");
+      setNotice("已儲存到本機，連線時會自動同步。圖片不會保存到雲端。");
       go("today");
-      if (old?.photoPath && old.photoPath !== saved.photoPath) {
-        try {
-          await cleanPhoto(old.photoPath);
-        } catch {
-          setCleanup((value) => [...value, { path: old.photoPath! }]);
-          setNotice(messages.cleanup_failed);
-        }
-      }
+      await writes.current;
+      await localMeals.write(id, {
+        records: await repository.list(id),
+        draft: null,
+        syncedAt: null,
+      });
+      preparedFile.current = null;
+      photoGeneration.current++;
+      void refresh();
     } catch (error) {
       setNotice(errorText(error));
       if (error instanceof RepositoryError && error.code === "conflict")
@@ -607,37 +482,23 @@ export function MealJournal({
       !confirm("已有另一份草稿。放棄它並開啟這餐？")
     )
       return;
-    let photo: Blob | undefined;
-    try {
-      if (record.photoPath) {
-        photo = await localMeals.photo(userId, record.photoPath);
-        if (!photo && online) photo = await repository.photo(record.photoPath);
-      }
-    } catch {
-      setNotice("照片暫未下載，仍可修正記錄。");
-    }
-    openDraft({ ...record, photo });
+    openDraft({ ...record, photoPath: null });
   }
   async function discard() {
     if (!confirm("放棄這份草稿？已儲存的記錄不會改變。")) return;
-    const path = draft?.photoPath;
-    if (path && !records.some((r) => r.photoPath === path)) {
-      try {
-        await cleanPhoto(path);
-      } catch {
-        setCleanup((value) => [...value, { path }]);
-      }
-    }
     photoGeneration.current++;
+    preparedFile.current = null;
     setDraft(null);
     setInitialDraft(undefined);
+    await writes.current;
+    await localMeals.write(userId, { records, draft: null, syncedAt });
     go("today");
   }
   async function remove(record: MealRecord, ask = true) {
-    if (ask && !confirm("刪除這餐及照片？此操作無法復原。")) return;
+    if (ask && !confirm("刪除這餐？連線後會同步刪除。")) return;
     await repository.delete(record);
-    if (record.photoPath)
-      await localMeals.removePhoto(userId, record.photoPath).catch(() => {});
+    setNotice("刪除已保留於本機，連線時自動同步。");
+    void refresh();
     setRecords((value) => value.filter((r) => r.id !== record.id));
     if (draft?.id === record.id) setDraft(null);
   }
@@ -650,8 +511,6 @@ export function MealJournal({
       await remove(record);
     } catch (error) {
       setNotice(errorText(error));
-      if (error instanceof RepositoryError && error.code === "cleanup_failed")
-        setCleanup((value) => [...value, { record }]);
     } finally {
       busyRef.current = false;
       setBusy(false);
@@ -659,9 +518,10 @@ export function MealJournal({
   }
   async function clearAll() {
     if (
-      !online ||
       busyRef.current ||
-      !confirm("永久刪除全部餐點、照片及本機草稿？")
+      !confirm(
+        "刪除本機可見的全部餐點及草稿？連線後會自動同步刪除。其他裝置尚未同步的新增記錄不包含在內。",
+      )
     )
       return;
     busyRef.current = true;
@@ -669,18 +529,12 @@ export function MealJournal({
     refreshGeneration.current++;
     try {
       for (const record of await repository.list()) await remove(record, false);
-      const candidates = await authorizedFetch("/api/meals/cleanup", {
-        cache: "no-store",
-      });
-      if (!candidates.ok)
-        throw new RepositoryError("cleanup_failed", candidates.status);
-      for (const path of (await candidates.json()).paths as string[])
-        await cleanPhoto(path);
       await writes.current;
       await localMeals.clear(userId);
       setDraft(null);
       setRecords([]);
-      setNotice("全部記錄已刪除。");
+      setNotice("刪除已保留於本機，連線時自動同步。");
+      void refresh();
     } catch (error) {
       setNotice(errorText(error));
     } finally {
@@ -695,24 +549,31 @@ export function MealJournal({
         !confirm("登出會清除這個帳戶的本機草稿、照片及快取。仍要登出？"))
     )
       return;
+    if ((await repository.state(userId)).jobs.length) {
+      setNotice("仍有待同步或衝突的修改。請先連線完成同步或處理衝突，再登出。");
+      return;
+    }
     busyRef.current = true;
     setBusy(true);
     cacheEnabled.current = false;
     refreshGeneration.current++;
     photoGeneration.current++;
     try {
-      await writes.current;
-      await localMeals.clear(userId);
-      setDraft(null);
-      setRecords([]);
-      current.current = { ...current.current, draft: null, records: [] };
-      const result = await browserSupabase()?.auth.signOut({ scope: "local" });
-      if (result?.error) {
-        const session = await browserSupabase()?.auth.getSession();
-        if (session?.data.session) throw result.error;
-      }
-      localStorage.removeItem("kcalcue-account");
-      localStorage.setItem("kcalcue-logout", `${userId}:${Date.now()}`);
+      await navigator.locks.request(`kcalcue-sync-${userId}`, () =>
+        navigator.locks.request(`kcalcue-account-${userId}`, async () => {
+          if ((await repository.state(userId)).jobs.length)
+            throw new Error("pending_sync");
+          await writes.current;
+          await localMeals.clear(userId);
+          await clearSyncState(userId);
+          setDraft(null);
+          setRecords([]);
+          current.current = { ...current.current, draft: null, records: [] };
+          localStorage.setItem("kcalcue-logout", `${userId}:${Date.now()}`);
+          const auth = firebaseAuth();
+          if (auth) await signOut(auth);
+        }),
+      );
       location.reload();
     } catch {
       cacheEnabled.current = true;
@@ -724,8 +585,7 @@ export function MealJournal({
   }
   async function latest() {
     try {
-      const next = await repository.list();
-      setRecords(next);
+      const next = (await repository.state()).remote;
       const record = next.find((r) => r.id === draft?.id);
       if (!record) {
         setNotice("這餐已被刪除。你可保留目前草稿，或放棄它。");
@@ -771,7 +631,7 @@ export function MealJournal({
           ? syncedAt
             ? `上次同步：${new Date(syncedAt).toLocaleString("zh-HK")}`
             : "連線中 · 尚未同步"
-          : "離線中 · 可查看已下載記錄及保留草稿"}
+          : "離線中 · 可新增、修改及刪除，重連後自動同步"}
         {!cloudConfigured() && <span> · 雲端尚未設定，無法登入或同步</span>}
       </div>
       {notice && (
@@ -782,30 +642,85 @@ export function MealJournal({
           </button>
         </div>
       )}
-      {!!cleanup.length && (
-        <button
-          className="button button-secondary"
-          disabled={!online || busy}
-          onClick={() => {
-            void (async () => {
-              const failed: typeof cleanup = [];
-              for (const job of cleanup) {
-                try {
-                  if (job.path) await cleanPhoto(job.path);
-                  if (job.record) await remove(job.record, false);
-                } catch {
-                  failed.push(job);
-                }
-              }
-              setCleanup(failed);
-              setNotice(
-                failed.length ? messages.cleanup_failed : "照片清理完成。",
-              );
-            })();
-          }}
-        >
-          重試照片清理
-        </button>
+      {!!pending.length && (
+        <section className="journal-card">
+          <p>
+            {pending.length} 項修改待同步{syncing ? " · 同步中…" : ""}
+          </p>
+          <button
+            className="button button-secondary"
+            disabled={!online || syncing}
+            onClick={() => {
+              void repository
+                .sync(userId, true)
+                .catch((error) => setNotice(errorText(error)))
+                .finally(() => void refresh());
+            }}
+          >
+            重試同步
+          </button>
+          {pending
+            .filter(
+              (job, index, jobs) =>
+                job.error &&
+                jobs.findIndex(
+                  (other) => other.record.id === job.record.id && other.error,
+                ) === index,
+            )
+            .map((job) => (
+              <div key={job.id}>
+                <p>
+                  {job.record.items.map((item) => item.displayName).join("、")}
+                  ：{messages[job.error!] ?? "同步未完成，修改仍保留於本機。"}
+                </p>
+                {job.kind === "save" && (
+                  <button
+                    className="button button-secondary"
+                    disabled={busy || syncing}
+                    onClick={() => {
+                      const last = [...pending]
+                        .reverse()
+                        .find((other) => other.record.id === job.record.id)!;
+                      if (
+                        draft &&
+                        !confirm("取代目前草稿並將這份修改保留為新餐點？")
+                      )
+                        return;
+                      const copy = {
+                        ...last.record,
+                        id: crypto.randomUUID(),
+                        version: 0,
+                        pendingMutation: undefined,
+                      };
+                      void localMeals
+                        .write(userId, { records, draft: copy, syncedAt })
+                        .then(() => repository.discardPending(job.record.id))
+                        .then(() => {
+                          openDraft(copy);
+                          void refresh();
+                        })
+                        .catch((error) => setNotice(errorText(error)));
+                    }}
+                  >
+                    保留修改為新餐點草稿
+                  </button>
+                )}
+                <button
+                  className="button button-ghost"
+                  disabled={busy || syncing}
+                  onClick={() => {
+                    if (confirm("放棄這餐尚未同步的修改／刪除，使用雲端版本？"))
+                      void repository
+                        .discardPending(job.record.id)
+                        .then(() => refresh())
+                        .catch((error) => setNotice(errorText(error)));
+                  }}
+                >
+                  放棄待同步修改
+                </button>
+              </div>
+            ))}
+        </section>
       )}
       <PwaControls
         visible={account}
@@ -824,9 +739,16 @@ export function MealJournal({
       {account ? (
         <main className="journal-main">
           <h1>帳戶與資料</h1>
-          {email ? (
+          {email && !reauth ? (
             <section className="journal-card">
               <p>{email}</p>
+              <button
+                className="button button-secondary"
+                disabled={busy}
+                onClick={() => setReauth(true)}
+              >
+                重新登入
+              </button>
               <button
                 className="button button-secondary"
                 disabled={busy}
@@ -836,7 +758,7 @@ export function MealJournal({
               </button>
               <button
                 className="button button-ghost danger"
-                disabled={!online || busy}
+                disabled={busy}
                 onClick={() => void clearAll()}
               >
                 清除全部記錄
@@ -846,6 +768,7 @@ export function MealJournal({
             <Account
               onDone={() => {
                 setAccount(false);
+                setReauth(false);
                 setNotice("登入成功。草稿需要你確認後才會儲存。");
               }}
             />
@@ -853,8 +776,10 @@ export function MealJournal({
           <section className="journal-card">
             <h2>照片與私隱</h2>
             <p>
-              Live 分析會將相片傳送至 AI
-              服務。草稿及已下載的記錄可保留於本機；確認儲存後，餐點與壓縮照片會私人保存到你的帳戶。你可以刪除照片或整餐記錄。
+              Live 分析會將相片傳送至 AI 服務。圖片只用於分析請求，不會存入
+              Firebase
+              Storage；雲端只保存餐點及營養分析結果。本機草稿可暫存壓縮圖片，儲存或放棄草稿後清除。AI
+              分析需要連線。
             </p>
           </section>
         </main>
@@ -965,11 +890,15 @@ export function MealJournal({
                     className="button button-secondary"
                     disabled={busy}
                     onClick={() => {
-                      onPhotoSelected(null);
-                      setNotice("儲存後會移除雲端照片。");
+                      openDraft({
+                        ...draft,
+                        photo: undefined,
+                        photoPath: null,
+                      });
+                      setNotice("已移除草稿圖片。");
                     }}
                   >
-                    不保存照片
+                    移除草稿圖片
                   </button>
                 )}
                 {!!draft.originalItems.length && (
@@ -1008,15 +937,11 @@ export function MealJournal({
                 <button
                   className="button button-primary"
                   disabled={
-                    busy ||
-                    preparing ||
-                    photoFailed ||
-                    !draft.items.length ||
-                    draft.mode === "demo"
+                    busy || !draft.items.length || draft.mode === "demo"
                   }
                   onClick={() => void save()}
                 >
-                  {busy ? "儲存中…" : !online ? "保留離線草稿" : "儲存餐點"}
+                  {busy ? "儲存中…" : !online ? "離線儲存餐點" : "儲存餐點"}
                 </button>
               </div>
             </>
@@ -1122,7 +1047,6 @@ export function MealJournal({
                 <div className="meal-list">
                   {meals.map((record) => (
                     <article className="journal-card meal-row" key={record.id}>
-                      <MealPhoto record={record} userId={userId} />
                       <div>
                         <p>
                           {record.time} · {mealTypes[record.mealType]}
@@ -1142,7 +1066,7 @@ export function MealJournal({
                           </button>
                           <button
                             className="button button-ghost danger"
-                            disabled={!online || busy}
+                            disabled={busy}
                             onClick={() => void deleting(record)}
                           >
                             刪除

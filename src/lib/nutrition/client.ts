@@ -55,7 +55,7 @@ export async function enrichUnresolvedMatches(
   if (unresolvedIndexes.length === 0) return localMatches;
 
   try {
-    const { authorizedFetch } = await import("@/lib/supabase/client");
+    const { authorizedFetch } = await import("@/lib/firebase/client");
     const response = await authorizedFetch("/api/nutrition/resolve", {
       signal,
       method: "POST",

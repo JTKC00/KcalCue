@@ -1,11 +1,17 @@
 import { spawn } from "node:child_process";
 
 // Test-only public configuration; all auth/cloud calls are intercepted by the test browser.
-// No credentials or real Supabase projects are used by this server.
+// No credentials or real Firebase projects are used by this server.
 const env = {
   ...process.env,
-  NEXT_PUBLIC_SUPABASE_URL: "https://kcalcue-test.supabase.co",
-  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "test-publishable-key",
+  NEXT_PUBLIC_FIREBASE_API_KEY: "test-firebase-key",
+  NEXT_PUBLIC_FIREBASE_PROJECT_ID: "demo-kcalcue",
+  NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: "demo-kcalcue.firebaseapp.com",
+  NEXT_PUBLIC_FIREBASE_APP_ID: "1:123456:web:test",
+  FIREBASE_ADMIN_CLIENT_EMAIL: "",
+  FIREBASE_ADMIN_PRIVATE_KEY: "",
+  KCALCUE_ALLOWED_EMAILS: "",
+
   OPENAI_API_KEY: "",
   NUTRITION_API_KEY: "",
 };

@@ -41,7 +41,7 @@ import {
   SparklesIcon,
 } from "./icons";
 import { ResultView } from "./result-view";
-import { authorizedFetch } from "@/lib/supabase/client";
+import { authorizedFetch } from "@/lib/firebase/client";
 import type { MealDraft } from "@/lib/meals/types";
 
 type AppStage = "input" | "analyzing" | "result" | "unable" | "error";

@@ -8,10 +8,12 @@ export interface LocalMeals {
 const empty = (): LocalMeals => ({ records: [], draft: null, syncedAt: null });
 function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open("kcalcue-private", 1);
+    const request = indexedDB.open("kcalcue-private", 2);
     request.onupgradeneeded = () => {
-      request.result.createObjectStore("accounts");
-      request.result.createObjectStore("photos");
+      if (!request.result.objectStoreNames.contains("accounts"))
+        request.result.createObjectStore("accounts");
+      if (request.result.objectStoreNames.contains("photos"))
+        request.result.deleteObjectStore("photos");
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -45,24 +47,7 @@ export const localMeals = {
   async write(userId: string, state: LocalMeals) {
     await transact("accounts", "readwrite", (s) => s.put(state, userId));
   },
-  async photo(userId: string, path: string): Promise<Blob | undefined> {
-    return transact("photos", "readonly", (s) => s.get(`${userId}/${path}`));
-  },
-  async putPhoto(userId: string, path: string, blob: Blob) {
-    await transact("photos", "readwrite", (s) =>
-      s.put(blob, `${userId}/${path}`),
-    );
-  },
-  async removePhoto(userId: string, path: string) {
-    await transact("photos", "readwrite", (s) => s.delete(`${userId}/${path}`));
-  },
   async clear(userId: string) {
     await transact("accounts", "readwrite", (s) => s.delete(userId));
-    const keys = await transact<IDBValidKey[]>("photos", "readonly", (s) =>
-      s.getAllKeys(),
-    );
-    for (const key of keys)
-      if (String(key).startsWith(`${userId}/`))
-        await transact("photos", "readwrite", (s) => s.delete(key));
   },
 };

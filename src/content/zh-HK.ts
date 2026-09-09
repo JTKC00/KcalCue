@@ -15,10 +15,10 @@ export const copy = {
   demoBody: "未有實際 AI 圖片分析。你可完整體驗結果、修正同重新計算。",
   demoPrivacy: "示範模式下，相片只留喺你部裝置作預覽。",
   liveTitle: "AI Live Mode",
-  liveBody: "相片會傳送至 AI 分析服務；確認儲存後，壓縮照片會私人保存到你的帳戶。",
+  liveBody: "相片只傳送至 AI 分析服務；雲端只保存餐點及營養分析結果，不保存圖片。",
   manualTitle: "手動輸入",
   manualBody: "結果只根據你輸入嘅食物同份量計算，並非 AI 圖片分析。",
-  privacyShort: "草稿可保留於本機；確認儲存後，餐點及壓縮照片會私人保存到你的帳戶，可隨時刪除。",
+  privacyShort: "圖片只用於分析，不保存到雲端。未儲存草稿可暫存本機壓縮圖，儲存或放棄草稿後清除；雲端只保存餐點及營養結果。",
   selectedTitle: "相片準備好喇",
   selectedBody: "檢查相片清楚見到整餐，再開始分析。",
   loadingTitle: "分析緊你嘅餐點…",
@@ -67,8 +67,10 @@ export const unitCopy = {
 } as const;
 
 export const errorCopy: Record<string, { title: string; body: string }> = {
-  login_required: { title: "請先登入", body: "到帳戶輸入 Email 驗證碼後，再試一次。相片仍保留。" },
-  cloud_unavailable: { title: "雲端尚未設定", body: "目前可使用示範及手動草稿；設定 Supabase 後即可登入和同步。" },
+  login_required: { title: "請先登入", body: "到帳戶使用 Email 登入連結或 Google 登入後，再試一次。相片仍保留於目前頁面。" },
+  trial_access_required: { title: "尚未開通試用權限", body: "請聯絡管理員為這個 Email 開通試用權限，再試一次。" },
+  email_unverified: { title: "請驗證 Email", body: "請使用 Email 登入連結或已驗證的 Google 帳戶重新登入。" },
+  cloud_unavailable: { title: "雲端尚未設定", body: "目前可使用示範及手動草稿；設定 Firebase 後即可登入和同步。" },
   missing_image: {
     title: "請先選擇相片",
     body: "影低或者選擇一張餐點相片，再開始分析。",

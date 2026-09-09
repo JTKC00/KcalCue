@@ -1,0 +1,8 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // All application access goes through the authenticated Next.js API.
+    // Admin SDK authorization is enforced by UID paths and the trial allowlist.
+    match /{document=**} { allow read, write: if false; }
+  }
+}

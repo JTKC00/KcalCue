@@ -3,6 +3,8 @@ node_modules/
 .npm-cache/
 test-results/
 playwright-report/
+.tooling/
+.firebase/
 supabase/.temp/
 
 # Next.js output

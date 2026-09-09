@@ -1,4 +1,4 @@
-import { expect, test, type BrowserContext } from "@playwright/test";
+import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import sharp from "sharp";
 
 const userId = "11111111-1111-4111-8111-111111111111";
@@ -12,36 +12,65 @@ function cloud() {
   const records = new Map<string, TestRecord>();
   const saves: TestRecord[] = [];
   let failSave = false;
+  const offline = new WeakSet<BrowserContext>();
   async function install(context: BrowserContext) {
+    const token = `${Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url")}.${Buffer.from(JSON.stringify({ sub: userId, user_id: userId, email: "tester@example.com", email_verified: true, iat: Math.floor(Date.now() / 1000), auth_time: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 3600, aud: "demo-kcalcue", iss: "https://securetoken.google.com/demo-kcalcue", firebase: { sign_in_provider: "password" } })).toString("base64url")}.test`;
     await context.route(
-      "https://kcalcue-test.supabase.co/**",
+      "https://identitytoolkit.googleapis.com/**",
       async (route) => {
-        const user = {
-          id: userId,
-          aud: "authenticated",
-          role: "authenticated",
-          email: "tester@example.com",
-          app_metadata: {},
-          user_metadata: {},
-          created_at: new Date().toISOString(),
-        };
-        if (route.request().url().includes("/otp")) {
-          await route.fulfill({ json: {} });
-          return;
-        }
-        const token = `${Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url")}.${Buffer.from(JSON.stringify({ sub: userId, exp: Math.floor(Date.now() / 1000) + 3600 })).toString("base64url")}.test`;
-        await route.fulfill({
+        if (offline.has(context)) return route.abort("internetdisconnected");
+        const url = route.request().url();
+        if (url.includes("sendOobCode"))
+          return route.fulfill({ json: { email: "tester@example.com" } });
+        if (url.includes("lookup"))
+          return route.fulfill({
+            json: {
+              users: [
+                {
+                  localId: userId,
+                  email: "tester@example.com",
+                  emailVerified: true,
+                  providerUserInfo: [
+                    {
+                      providerId: "password",
+                      email: "tester@example.com",
+                      federatedId: "tester@example.com",
+                    },
+                  ],
+                  lastLoginAt: String(Date.now()),
+                  createdAt: String(Date.now()),
+                },
+              ],
+            },
+          });
+        return route.fulfill({
           json: {
-            access_token: token,
-            refresh_token: "test-refresh",
-            token_type: "bearer",
-            expires_in: 3600,
-            user,
+            localId: userId,
+            email: "tester@example.com",
+            idToken: token,
+            refreshToken: "test-refresh",
+            expiresIn: "3600",
+            isNewUser: false,
           },
         });
       },
     );
+    await context.route("https://securetoken.googleapis.com/**", (route) =>
+      offline.has(context)
+        ? route.abort("internetdisconnected")
+        : route.fulfill({
+            json: {
+              user_id: userId,
+              id_token: token,
+              refresh_token: "test-refresh",
+              expires_in: "3600",
+              token_type: "Bearer",
+              project_id: "demo-kcalcue",
+            },
+          }),
+    );
     await context.route("**/api/meals**", async (route) => {
+      if (offline.has(context)) return route.abort("internetdisconnected");
       const req = route.request();
       const url = new URL(req.url());
       if (url.pathname === "/api/meals/photo" && req.method() === "POST") {
@@ -49,10 +78,6 @@ function cloud() {
           status: 503,
           json: { error: { code: "photo_failed" } },
         });
-        return;
-      }
-      if (url.pathname === "/api/meals/cleanup") {
-        await route.fulfill({ json: { paths: [] } });
         return;
       }
       if (req.method() === "GET") {
@@ -104,95 +129,120 @@ function cloud() {
     records,
     saves,
     install,
+    setOffline: async (context: BrowserContext, value: boolean) => {
+      if (value) offline.add(context);
+      else offline.delete(context);
+      await context.setOffline(value);
+    },
     failNextSave: () => {
       failSave = true;
     },
   };
 }
 
-test("manual draft survives navigation, login, retry and history correction", async ({
+async function login(page: Page) {
+  await page.getByRole("button", { name: "帳戶與安裝", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "使用 Google 登入", exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("textbox", { name: "Email", exact: true })
+    .fill("tester@example.com");
+  await page.getByRole("button", { name: "寄出登入連結", exact: true }).click();
+  await expect(page.getByText(/已寄出登入連結/)).toBeVisible();
+  await page.goto("/?apiKey=test-firebase-key&oobCode=test-code&mode=signIn");
+  await expect(
+    page.getByRole("heading", { name: "今日飲食", exact: true }),
+  ).toBeVisible();
+  await expect.poll(() => page.url()).not.toContain("oobCode");
+}
+async function rice(page: Page) {
+  await page.getByRole("button", { name: "手動記一餐", exact: true }).click();
+  await page
+    .getByRole("combobox", { name: "食物名稱", exact: true })
+    .fill("白飯");
+}
+
+test("Email link login restores a guest draft and automatically retries a failed save", async ({
   page,
   context,
 }) => {
   const backend = cloud();
   await backend.install(context);
   await page.goto("/");
-  await page.getByRole("button", { name: "手動記一餐", exact: true }).click();
-  await page
-    .getByRole("combobox", { name: "食物名稱", exact: true })
-    .fill("白飯");
-  await page
-    .getByRole("spinbutton", { name: "最少份量", exact: true })
-    .fill("");
-  await page.getByRole("spinbutton", { name: "最多份量", exact: true }).click();
-  await expect(
-    page.getByText("請輸入 0.1 至 5000 的份量。", { exact: true }),
-  ).toBeVisible();
+  await rice(page);
   await page
     .getByRole("spinbutton", { name: "最少份量", exact: true })
     .fill("120");
   await page.getByRole("button", { name: "今日", exact: true }).click();
+  await login(page);
   await page.getByRole("button", { name: "繼續草稿", exact: true }).click();
   await expect(
     page.getByRole("spinbutton", { name: "最少份量", exact: true }),
   ).toHaveValue("120");
-  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
-  await page
-    .getByRole("textbox", { name: "Email", exact: true })
-    .fill("tester@example.com");
-  await page.getByRole("button", { name: "寄出驗證碼", exact: true }).click();
-  await page
-    .getByRole("textbox", { name: "驗證碼", exact: true })
-    .fill("123456");
-  await page.getByRole("button", { name: "驗證並登入", exact: true }).click();
-  await expect(
-    page.getByRole("combobox", { name: "食物名稱", exact: true }),
-  ).toHaveValue("白飯");
   backend.failNextSave();
   await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
-  await expect(
-    page.getByText("未能連接雲端，草稿仍保留。請稍後再試。", { exact: true }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: "今日飲食", exact: true }),
-  ).toBeVisible();
-  expect(backend.saves[0].id).toBe(backend.saves[1].id);
+  await expect(page.getByText(/1 項修改待同步/)).toBeVisible();
+  await expect.poll(() => backend.records.size, { timeout: 12_000 }).toBe(1);
+  await expect(page.getByText(/1 項修改待同步/)).not.toBeVisible();
   expect(backend.saves[0].mutationId).toBe(backend.saves[1].mutationId);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > innerWidth,
+    ),
+  ).toBe(false);
+});
+
+test("offline creation, edit and deletion survive reload and synchronize on reconnection", async ({
+  page,
+  context,
+}) => {
+  const backend = cloud();
+  await backend.install(context);
+  await page.goto("/");
+  await login(page);
   await page.evaluate(async () => {
     await navigator.serviceWorker.ready;
   });
-  await context.setOffline(true);
-  await page.reload();
+  await backend.setOffline(context, true);
+  await rice(page);
+  await page.getByRole("button", { name: "離線儲存餐點", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "查看／修正", exact: true }),
   ).toBeVisible();
-  await context.setOffline(false);
+  expect(backend.records.size).toBe(0);
   await page.reload();
-  await page.getByRole("button", { name: "歷史", exact: true }).click();
   await page.getByRole("button", { name: "查看／修正", exact: true }).click();
   await page
     .getByRole("spinbutton", { name: "最多份量", exact: true })
     .fill("200");
-  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  await page.getByRole("button", { name: "離線儲存餐點", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "今日飲食", exact: true }),
   ).toBeVisible();
-  expect([...backend.records.values()][0].version).toBe(2);
-  await expect(page.locator(".day-summary")).toContainText("260");
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth > innerWidth,
-  );
-  expect(overflow).toBe(false);
+  await page.reload();
+  await expect(page.getByText(/2 項修改待同步/)).toBeVisible();
+  await backend.setOffline(context, false);
+  await expect
+    .poll(() => [...backend.records.values()][0]?.version, { timeout: 12_000 })
+    .toBe(2);
+  await expect(page.getByText(/項修改待同步/)).not.toBeVisible();
+  await backend.setOffline(context, true);
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "刪除", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "今日未有記錄", exact: true }),
   ).toBeVisible();
-  expect(backend.records.size).toBe(0);
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "今日未有記錄", exact: true }),
+  ).toBeVisible();
+  expect(backend.records.size).toBe(1);
+  await backend.setOffline(context, false);
+  await expect.poll(() => backend.records.size, { timeout: 12_000 }).toBe(0);
 });
 
-test("cross-device conflict preserves draft instead of silently overwriting", async ({
+test("cross-device conflict preserves the offline edit for recovery", async ({
   browser,
 }) => {
   const backend = cloud();
@@ -205,50 +255,38 @@ test("cross-device conflict preserves draft instead of silently overwriting", as
       await backend.install(context);
       const page = await context.newPage();
       await page.goto("/");
-      await page
-        .getByRole("button", { name: "帳戶與安裝", exact: true })
-        .click();
-      await page
-        .getByRole("textbox", { name: "Email", exact: true })
-        .fill("tester@example.com");
-      await page
-        .getByRole("button", { name: "寄出驗證碼", exact: true })
-        .click();
-      await page
-        .getByRole("textbox", { name: "驗證碼", exact: true })
-        .fill("123456");
-      await page
-        .getByRole("button", { name: "驗證並登入", exact: true })
-        .click();
+      await login(page);
       return page;
     }),
   );
   const [first, second] = pages;
-  await first.getByRole("button", { name: "手動記一餐", exact: true }).click();
-  await first
-    .getByRole("combobox", { name: "食物名稱", exact: true })
-    .fill("白飯");
+  await rice(first);
   await first.getByRole("button", { name: "儲存餐點", exact: true }).click();
-  await expect(
-    first.getByRole("button", { name: "查看／修正", exact: true }),
-  ).toBeVisible();
+  await expect.poll(() => backend.records.size).toBe(1);
   await second.reload();
   for (const page of pages)
     await page.getByRole("button", { name: "查看／修正", exact: true }).click();
+  await backend.setOffline(contexts[1], true);
+  await second
+    .getByRole("spinbutton", { name: "最多份量", exact: true })
+    .fill("300");
+  await second
+    .getByRole("button", { name: "離線儲存餐點", exact: true })
+    .click();
   await first
     .getByRole("spinbutton", { name: "最多份量", exact: true })
     .fill("200");
   await first.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  await expect
+    .poll(() => [...backend.records.values()][0]?.version, { timeout: 12_000 })
+    .toBe(2);
+  await backend.setOffline(contexts[1], false);
   await expect(
-    first.getByRole("heading", { name: "今日飲食", exact: true }),
+    second.getByRole("button", { name: "保留修改為新餐點草稿", exact: true }),
   ).toBeVisible();
   await second
-    .getByRole("spinbutton", { name: "最多份量", exact: true })
-    .fill("300");
-  await second.getByRole("button", { name: "儲存餐點", exact: true }).click();
-  await expect(
-    second.getByRole("button", { name: "載入最新記錄", exact: true }),
-  ).toBeVisible();
+    .getByRole("button", { name: "保留修改為新餐點草稿", exact: true })
+    .click();
   await expect(
     second.getByRole("spinbutton", { name: "最多份量", exact: true }),
   ).toHaveValue("300");
@@ -256,41 +294,38 @@ test("cross-device conflict preserves draft instead of silently overwriting", as
   await Promise.all(contexts.map((context) => context.close()));
 });
 
-test("PWA shell reopens offline and restores a locally saved draft", async ({
-  page,
-  context,
-}) => {
+test("PWA shell restores a guest draft offline", async ({ page, context }) => {
   await page.goto("/");
   await page.evaluate(async () => {
     await navigator.serviceWorker.ready;
   });
-  await page.getByRole("button", { name: "手動記一餐", exact: true }).click();
-  await page
-    .getByRole("combobox", { name: "食物名稱", exact: true })
-    .fill("白飯");
+  await rice(page);
   await page.getByRole("button", { name: "今日", exact: true }).click();
-  await expect(
-    page.getByRole("button", { name: "繼續草稿", exact: true }),
-  ).toBeVisible();
   await context.setOffline(true);
   await page.reload();
-  await expect(
-    page.getByText(/離線中 · 可查看已下載記錄及保留草稿/),
-  ).toBeVisible();
+  await expect(page.getByText(/離線中 · 可新增、修改及刪除/)).toBeVisible();
   await page.getByRole("button", { name: "繼續草稿", exact: true }).click();
   await expect(
     page.getByRole("combobox", { name: "食物名稱", exact: true }),
   ).toHaveValue("白飯");
-  await context.setOffline(false);
 });
 
-test("a photo upload failure allows explicit save without the photo", async ({
+test("saving a meal never uploads or persists its source image", async ({
   page,
   context,
 }) => {
   const backend = cloud();
   await backend.install(context);
   await page.goto("/");
+  await login(page);
+  const uploads: string[] = [];
+  page.on("request", (request) => {
+    if (
+      request.url().includes("/api/meals/photo") ||
+      request.url().includes("firebasestorage")
+    )
+      uploads.push(request.url());
+  });
   await page.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
   const png = await sharp({
     create: { width: 80, height: 60, channels: 3, background: "green" },
@@ -306,25 +341,17 @@ test("a photo upload failure allows explicit save without the photo", async ({
     .getByRole("combobox", { name: "食物名稱", exact: true })
     .fill("白飯");
   await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
-  await page
-    .getByRole("textbox", { name: "Email", exact: true })
-    .fill("tester@example.com");
-  await page.getByRole("button", { name: "寄出驗證碼", exact: true }).click();
-  await page
-    .getByRole("textbox", { name: "驗證碼", exact: true })
-    .fill("123456");
-  await page.getByRole("button", { name: "驗證並登入", exact: true }).click();
-  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  await expect.poll(() => backend.records.size).toBe(1);
+  expect(uploads).toEqual([]);
+  const saved = [...backend.records.values()][0];
+  expect(saved.photoPath).toBeNull();
+  expect(saved).not.toHaveProperty("photo");
+  await page.reload();
   await expect(
-    page.getByText("照片未能上傳，可再試一次，或選擇不保存照片。", {
-      exact: true,
-    }),
-  ).toBeVisible();
-  expect(backend.records.size).toBe(0);
-  await page.getByRole("button", { name: "不保存照片", exact: true }).click();
-  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+    page.getByRole("button", { name: "繼續草稿", exact: true }),
+  ).not.toBeVisible();
+  await page.getByRole("button", { name: "查看／修正", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "查看／修正", exact: true }),
-  ).toBeVisible();
-  expect([...backend.records.values()][0].photoPath).toBeNull();
+    page.getByRole("button", { name: "移除草稿圖片", exact: true }),
+  ).not.toBeVisible();
 });
