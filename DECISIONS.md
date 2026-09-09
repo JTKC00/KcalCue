@@ -176,3 +176,13 @@ iOS 主畫面需要 PNG `apple-touch-icon`。保留 SVG，另提供 192／512 PN
 ## 27. CSP 與現有 preview 共存（2026-09-08）
 
 加入 `Content-Security-Policy`：`img-src` 允許 `'self' blob: data:`，以支援本機 object URL preview。`script-src` 暫時包含 `'unsafe-inline'`，以便與 Next.js App Router hydration 共存，而不引入 nonce middleware。
+
+## 28. OpenAI food-vision provider migration（2026-09-03）
+
+目前 Live provider 由 Gemini 改為 OpenAI Responses API；`FoodVisionProvider`、domain model、nutrition layer、calculation engine 及 UI contract 保持不變。`OpenAIFoodVisionProvider` 集中擁有 OpenAI SDK、model config、prompt、strict structured output、timeout、image preparation 及 error translation；API key 只由 server-side `OPENAI_API_KEY` 讀取，沒有 key 時仍由 factory 選 Demo provider。
+
+預設 model 選用 `gpt-5.6-luna`，原因是官方 model guide 將它定位為 cost-sensitive、high-volume workload，並確認支援 image input 及 Structured Outputs；可由 `OPENAI_MODEL` 覆寫。Responses API 使用 `input_image` data URL、`text.format` 的 `json_schema` strict mode 及 `store: false`，回覆仍要經 JSON parse 及 Zod second validation。
+
+OpenAI image input 官方支援 PNG、JPEG、WEBP 及非動畫 GIF，不包括現有產品允許的 HEIC／HEIF。為保留既有上載及 preview fallback contract，HEIC／HEIF 只在 server memory 以 `sharp` 轉 JPEG 後送出；轉換失敗回傳 public-safe `image_rejected`，不會把圖片寫入 disk。此前 Gemini-specific provider details 保留作歷史紀錄，以上決定為目前 runtime 行為。
+
+整合補充（2026-09-08）：OpenAI provider 接受 request AbortSignal，與原有 100 秒 abort timeout 合併；client 與 SDK HTTP timeout 維持 90 秒。

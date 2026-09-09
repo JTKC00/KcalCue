@@ -1,4 +1,3 @@
-// Gemini 3.7 Flash is a thinking model; a tiny structured response already
-// exceeded the previous 15s HTTP timeout in live reproduction.
-export const GEMINI_HTTP_TIMEOUT_MS = 90_000;
-export const GEMINI_ABORT_TIMEOUT_MS = 100_000;
+// Shared client and provider deadlines; keep SDK dependencies on the server.
+export const OPENAI_HTTP_TIMEOUT_MS = 90_000;
+export const OPENAI_ABORT_TIMEOUT_MS = 100_000;

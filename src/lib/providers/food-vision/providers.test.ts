@@ -1,33 +1,80 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { generateContentMock, MockApiError } = vi.hoisted(() => {
-  class HoistedMockApiError extends Error {
-    constructor(public readonly status: number, message = `API error ${status}`) {
+const {
+  responsesCreateMock,
+  MockAPIError,
+  MockAPIConnectionError,
+  MockAPIConnectionTimeoutError,
+  MockAPIUserAbortError,
+} = vi.hoisted(() => {
+  class HoistedMockAPIError extends Error {
+    readonly code: string | null = null;
+    readonly type: string | undefined;
+    readonly error: unknown;
+
+    constructor(
+      public readonly status: number,
+      message = `API error ${status}`,
+      error?: unknown,
+    ) {
       super(message);
+      this.name = "APIError";
+      this.type = undefined;
+      this.error = error;
+    }
+  }
+
+  class HoistedMockAPIConnectionError extends Error {
+    constructor(message = "Connection error.") {
+      super(message);
+      this.name = "APIConnectionError";
+    }
+  }
+
+  class HoistedMockAPIConnectionTimeoutError extends HoistedMockAPIConnectionError {
+    constructor(message = "Request timed out.") {
+      super(message);
+      this.name = "APIConnectionTimeoutError";
+    }
+  }
+
+  class HoistedMockAPIUserAbortError extends HoistedMockAPIError {
+    constructor(message = "Request was aborted.") {
+      super(undefined as never, message);
+      this.name = "APIUserAbortError";
     }
   }
 
   return {
-    generateContentMock: vi.fn(),
-    MockApiError: HoistedMockApiError,
+    responsesCreateMock: vi.fn(),
+    MockAPIError: HoistedMockAPIError,
+    MockAPIConnectionError: HoistedMockAPIConnectionError,
+    MockAPIConnectionTimeoutError: HoistedMockAPIConnectionTimeoutError,
+    MockAPIUserAbortError: HoistedMockAPIUserAbortError,
   };
 });
 
-vi.mock("@google/genai", () => ({
-  ApiError: MockApiError,
-  GoogleGenAI: class MockGoogleGenAI {
-    readonly models = { generateContent: generateContentMock };
+vi.mock("openai", () => ({
+  __esModule: true,
+  default: class MockOpenAI {
+    readonly responses = { create: responsesCreateMock };
   },
+  APIError: MockAPIError,
+  APIConnectionError: MockAPIConnectionError,
+  APIConnectionTimeoutError: MockAPIConnectionTimeoutError,
+  APIUserAbortError: MockAPIUserAbortError,
 }));
 
+import sharp from "sharp";
 import { foodAnalysisJsonSchema } from "@/lib/domain/food-analysis";
 import { DemoFoodVisionProvider, demoFoodAnalysis } from "./demo";
 import {
-  GEMINI_ABORT_TIMEOUT_MS,
-  GEMINI_HTTP_TIMEOUT_MS,
-  GeminiFoodVisionProvider,
-} from "./gemini";
+  OPENAI_ABORT_TIMEOUT_MS,
+  OPENAI_HTTP_TIMEOUT_MS,
+  OpenAIFoodVisionProvider,
+} from "./openai";
 import { FOOD_VISION_SYSTEM_INSTRUCTION } from "./prompt";
+import { createFoodVisionProvider, getFoodVisionProviderMode } from "./factory";
 
 describe("DemoFoodVisionProvider", () => {
   it("returns a validated independent copy of the deterministic demo result", async () => {
@@ -48,9 +95,9 @@ describe("DemoFoodVisionProvider", () => {
   });
 });
 
-describe("GeminiFoodVisionProvider structured response handling", () => {
+describe("OpenAIFoodVisionProvider structured response handling", () => {
   beforeEach(() => {
-    generateContentMock.mockReset();
+    responsesCreateMock.mockReset();
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
@@ -58,8 +105,8 @@ describe("GeminiFoodVisionProvider structured response handling", () => {
     vi.restoreAllMocks();
   });
 
-  function provider(): GeminiFoodVisionProvider {
-    return new GeminiFoodVisionProvider({
+  function provider(): OpenAIFoodVisionProvider {
+    return new OpenAIFoodVisionProvider({
       apiKey: "test-only-key",
       model: "test-only-model",
     });
@@ -78,22 +125,22 @@ describe("GeminiFoodVisionProvider structured response handling", () => {
   });
 
   it("maps malformed JSON to an invalid_response error without a network call", async () => {
-    generateContentMock.mockResolvedValueOnce({ text: "{not-json" });
+    responsesCreateMock.mockResolvedValueOnce({ output_text: "{not-json" });
 
     await expect(
       provider().analyzeImage({ data: "base64-data", mimeType: "image/webp" }),
     ).rejects.toMatchObject({
       name: "FoodVisionError",
       code: "invalid_response",
-      message: "Gemini returned malformed JSON.",
+      message: "OpenAI returned malformed JSON.",
     });
 
-    expect(generateContentMock).toHaveBeenCalledOnce();
+    expect(responsesCreateMock).toHaveBeenCalledOnce();
   });
 
   it("maps schema-invalid structured JSON to an invalid_response error", async () => {
-    generateContentMock.mockResolvedValueOnce({
-      text: JSON.stringify({
+    responsesCreateMock.mockResolvedValueOnce({
+      output_text: JSON.stringify({
         analysisStatus: "success",
         foods: [],
         uncertaintyReasons: [],
@@ -108,65 +155,152 @@ describe("GeminiFoodVisionProvider structured response handling", () => {
     ).rejects.toMatchObject({
       name: "FoodVisionError",
       code: "invalid_response",
-      message: "Gemini returned data that failed server validation.",
+      message: "OpenAI returned data that failed server validation.",
     });
 
-    expect(generateContentMock).toHaveBeenCalledOnce();
+    expect(responsesCreateMock).toHaveBeenCalledOnce();
   });
 
   it("rejects an empty model response", async () => {
-    generateContentMock.mockResolvedValueOnce({ text: "" });
+    responsesCreateMock.mockResolvedValueOnce({ output_text: "" });
 
     await expect(
       provider().analyzeImage({ data: "base64-data", mimeType: "image/png" }),
     ).rejects.toMatchObject({ code: "invalid_response" });
   });
 
-  it("uses the configured model, inline image and JSON Schema output", async () => {
-    generateContentMock.mockResolvedValueOnce({
-      text: JSON.stringify(demoFoodAnalysis),
+  it("uses the configured model, data URL image and strict JSON Schema output", async () => {
+    responsesCreateMock.mockResolvedValueOnce({
+      output_text: JSON.stringify(demoFoodAnalysis),
     });
 
     await expect(
       provider().analyzeImage({ data: "raw-base64", mimeType: "image/png" }),
     ).resolves.toEqual(demoFoodAnalysis);
 
-    expect(generateContentMock).toHaveBeenCalledWith(
+    expect(responsesCreateMock).toHaveBeenCalledWith(
       expect.objectContaining({
         model: "test-only-model",
-        contents: expect.arrayContaining([
+        instructions: FOOD_VISION_SYSTEM_INSTRUCTION,
+        input: [
           {
-            inlineData: {
-              data: "raw-base64",
-              mimeType: "image/png",
-            },
+            role: "user",
+            content: [
+              { type: "input_text", text: expect.any(String) },
+              {
+                type: "input_image",
+                image_url: "data:image/png;base64,raw-base64",
+                detail: "auto",
+              },
+            ],
           },
-        ]),
-        config: expect.objectContaining({
-          responseMimeType: "application/json",
-          responseJsonSchema: expect.any(Object),
-        }),
+        ],
+        text: {
+          format: {
+            type: "json_schema",
+            name: "food_analysis",
+            strict: true,
+            schema: foodAnalysisJsonSchema,
+          },
+        },
+        max_output_tokens: 4_000,
+        store: false,
+      }),
+      expect.objectContaining({
+        maxRetries: 2,
+        timeout: OPENAI_HTTP_TIMEOUT_MS,
       }),
     );
 
-    const request = generateContentMock.mock.calls[0]?.[0];
-    expect(request.config).not.toHaveProperty("temperature");
-    expect(request.config).not.toHaveProperty("topP");
-    expect(request.config).not.toHaveProperty("topK");
-    expect(request.config.httpOptions.timeout).toBe(GEMINI_HTTP_TIMEOUT_MS);
-    expect(request.config.abortSignal).toBeInstanceOf(AbortSignal);
-    expect(GEMINI_HTTP_TIMEOUT_MS).toBeGreaterThanOrEqual(60_000);
-    expect(GEMINI_ABORT_TIMEOUT_MS).toBeGreaterThan(GEMINI_HTTP_TIMEOUT_MS);
-    expect(request.config.responseJsonSchema).toEqual(foodAnalysisJsonSchema);
+    const request = responsesCreateMock.mock.calls[0]?.[0];
+    const options = responsesCreateMock.mock.calls[0]?.[1];
+    expect(options.signal).toBeInstanceOf(AbortSignal);
+    expect(options.signal).not.toBe(request.signal);
+    expect(OPENAI_ABORT_TIMEOUT_MS).toBeGreaterThan(OPENAI_HTTP_TIMEOUT_MS);
   });
 
-  it("strips unknown Gemini fields before returning the analysis", async () => {
-    generateContentMock.mockResolvedValueOnce({
-      text: JSON.stringify({
+  it("forwards cancellation to an in-flight OpenAI request", async () => {
+    const controller = new AbortController();
+    responsesCreateMock.mockImplementationOnce((_body, options) => {
+      return new Promise((_resolve, reject) => {
+        options.signal.addEventListener("abort", () => reject(new MockAPIUserAbortError()), { once: true });
+        controller.abort();
+      });
+    });
+
+    await expect(provider().analyzeImage(
+      { data: "base64-data", mimeType: "image/png" },
+      { signal: controller.signal },
+    )).rejects.toMatchObject({ code: "network_timeout" });
+    expect(responsesCreateMock.mock.calls[0][1].signal.aborted).toBe(true);
+  });
+
+  it("does not send a request when already cancelled", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(provider().analyzeImage(
+      { data: "base64-data", mimeType: "image/png" },
+      { signal: controller.signal },
+    )).rejects.toMatchObject({ code: "network_timeout" });
+    expect(responsesCreateMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the provider abort deadline when a caller signal is supplied", async () => {
+    const deadline = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+    responsesCreateMock.mockImplementationOnce((_body, options) => {
+      return new Promise((_resolve, reject) => {
+        options.signal.addEventListener("abort", () => reject(new MockAPIUserAbortError()), { once: true });
+        deadline.abort();
+      });
+    });
+    await expect(provider().analyzeImage(
+      { data: "base64-data", mimeType: "image/png" },
+      { signal: new AbortController().signal },
+    )).rejects.toMatchObject({ code: "network_timeout" });
+    expect(timeout).toHaveBeenCalledWith(OPENAI_ABORT_TIMEOUT_MS);
+  });
+
+  it("converts HEIC/HEIF input to JPEG before sending it to OpenAI", async () => {
+    responsesCreateMock.mockResolvedValueOnce({
+      output_text: JSON.stringify(demoFoodAnalysis),
+    });
+    const png = await sharp({
+      create: {
+        width: 1,
+        height: 1,
+        channels: 4,
+        background: { r: 255, g: 0, b: 0, alpha: 1 },
+      },
+    })
+      .png()
+      .toBuffer();
+
+    await provider().analyzeImage({
+      data: png.toString("base64"),
+      mimeType: "image/heic",
+    });
+
+    const request = responsesCreateMock.mock.calls[0]?.[0];
+    expect(request.input[0].content[1]).toMatchObject({
+      type: "input_image",
+      detail: "auto",
+    });
+    expect(request.input[0].content[1].image_url).toMatch(
+      /^data:image\/jpeg;base64,/,
+    );
+  });
+
+  it("strips unknown fields and nullable optional fields before validation", async () => {
+    responsesCreateMock.mockResolvedValueOnce({
+      output_text: JSON.stringify({
         ...demoFoodAnalysis,
         extraModelField: "ignored",
         foods: demoFoodAnalysis.foods.map((food) => ({
           ...food,
+          preparationMethod: null,
+          visibleIngredients: null,
+          notes: null,
           calories: 999,
         })),
       }),
@@ -177,30 +311,18 @@ describe("GeminiFoodVisionProvider structured response handling", () => {
       mimeType: "image/jpeg",
     });
 
-    expect(analysis).toEqual(demoFoodAnalysis);
+    expect(analysis).toMatchObject({
+      analysisStatus: "success",
+      foods: expect.any(Array),
+    });
     expect(analysis).not.toHaveProperty("extraModelField");
     expect(analysis.foods[0]).not.toHaveProperty("calories");
-  });
-
-  it("accepts optional null fields from Gemini without loosening Zod rules", async () => {
-    generateContentMock.mockResolvedValueOnce({
-      text: JSON.stringify({
-        ...demoFoodAnalysis,
-        foods: demoFoodAnalysis.foods.map((food) => ({
-          ...food,
-          preparationMethod: null,
-          notes: null,
-        })),
-      }),
-    });
-
-    await expect(
-      provider().analyzeImage({ data: "raw-base64", mimeType: "image/jpeg" }),
-    ).resolves.toMatchObject({ analysisStatus: "success" });
+    expect(analysis.foods[0]).not.toHaveProperty("preparationMethod");
+    expect(analysis.foods[0]).not.toHaveProperty("visibleIngredients");
   });
 
   it("attaches a safe diagnostic for malformed JSON", async () => {
-    generateContentMock.mockResolvedValueOnce({ text: "{not-json" });
+    responsesCreateMock.mockResolvedValueOnce({ output_text: "{not-json" });
 
     const error = await provider()
       .analyzeImage({ data: "abc", mimeType: "image/webp" })
@@ -216,18 +338,18 @@ describe("GeminiFoodVisionProvider structured response handling", () => {
         imageByteSize: 2,
       },
     });
-    expect(JSON.stringify(error)).not.toMatch(/test-only-key|raw-base64|AIza/);
+    expect(JSON.stringify(error)).not.toMatch(/test-only-key|raw-base64|AIza|sk-/);
   });
 
-  it("classifies Gemini HTTP 400 invalid argument as unknown and records the Gemini code", async () => {
-    generateContentMock.mockRejectedValueOnce(
-      new MockApiError(
+  it("classifies OpenAI HTTP 400 invalid request as unknown and records the error code", async () => {
+    responsesCreateMock.mockRejectedValueOnce(
+      new MockAPIError(
         400,
         JSON.stringify({
           error: {
-            code: 400,
-            message: "Request contains an invalid argument.",
-            status: "INVALID_ARGUMENT",
+            message: "Request contains an invalid parameter.",
+            type: "invalid_request_error",
+            code: "invalid_parameter",
           },
         }),
       ),
@@ -241,10 +363,10 @@ describe("GeminiFoodVisionProvider structured response handling", () => {
       name: "FoodVisionError",
       code: "unknown",
       diagnostic: {
-        stage: "gemini_request",
+        stage: "openai_request",
         httpStatus: 400,
-        geminiErrorCode: "INVALID_ARGUMENT",
-        safeMessage: "Request contains an invalid argument.",
+        openaiErrorCode: "invalid_parameter",
+        safeMessage: "Request contains an invalid parameter.",
       },
     });
   });
@@ -253,6 +375,8 @@ describe("GeminiFoodVisionProvider structured response handling", () => {
     [401, "invalid_key"],
     [403, "invalid_key"],
     [404, "model_unavailable"],
+    [408, "network_timeout"],
+    [422, "image_rejected"],
     [429, "rate_limited"],
     [400, "unknown"],
     [413, "image_rejected"],
@@ -260,8 +384,8 @@ describe("GeminiFoodVisionProvider structured response handling", () => {
     [500, "service_unavailable"],
     [503, "service_unavailable"],
     [504, "network_timeout"],
-  ])("maps Gemini HTTP %i to %s", async (status, code) => {
-    generateContentMock.mockRejectedValueOnce(new MockApiError(status));
+  ])("maps OpenAI HTTP %i to %s", async (status, code) => {
+    responsesCreateMock.mockRejectedValueOnce(new MockAPIError(status));
 
     await expect(
       provider().analyzeImage({ data: "base64-data", mimeType: "image/jpeg" }),
@@ -269,28 +393,53 @@ describe("GeminiFoodVisionProvider structured response handling", () => {
   });
 
   it.each([
-    ["API key not valid. Please pass a valid API key.", "invalid_key"],
-    ["The requested model is not supported", "model_unavailable"],
+    ["Incorrect API key provided", "invalid_key"],
+    ["The model `gpt-5.6-luna` does not exist", "model_unavailable"],
     ["Unsupported image MIME type", "image_rejected"],
-  ])("classifies Gemini HTTP 400 from its message: %s", async (message, code) => {
-    generateContentMock.mockRejectedValueOnce(new MockApiError(400, message));
+  ])("classifies OpenAI HTTP 400 from its message: %s", async (message, code) => {
+    responsesCreateMock.mockRejectedValueOnce(new MockAPIError(400, message));
 
     await expect(
       provider().analyzeImage({ data: "base64-data", mimeType: "image/jpeg" }),
     ).rejects.toMatchObject({ name: "FoodVisionError", code });
   });
 
-  it("maps timeout aborts separately from unknown failures", async () => {
-    generateContentMock.mockRejectedValueOnce(
-      new DOMException("Timed out", "TimeoutError"),
-    );
+  it("maps connection and timeout failures separately from unknown failures", async () => {
+    responsesCreateMock.mockRejectedValueOnce(new MockAPIConnectionTimeoutError());
     await expect(
       provider().analyzeImage({ data: "base64-data", mimeType: "image/jpeg" }),
     ).rejects.toMatchObject({ code: "network_timeout" });
 
-    generateContentMock.mockRejectedValueOnce(new TypeError("network failed"));
+    responsesCreateMock.mockRejectedValueOnce(new MockAPIUserAbortError());
+    await expect(
+      provider().analyzeImage({ data: "base64-data", mimeType: "image/jpeg" }),
+    ).rejects.toMatchObject({ code: "network_timeout" });
+
+    responsesCreateMock.mockRejectedValueOnce(new MockAPIConnectionError());
+    await expect(
+      provider().analyzeImage({ data: "base64-data", mimeType: "image/jpeg" }),
+    ).rejects.toMatchObject({ code: "service_unavailable" });
+
+    responsesCreateMock.mockRejectedValueOnce(new TypeError("network failed"));
     await expect(
       provider().analyzeImage({ data: "base64-data", mimeType: "image/jpeg" }),
     ).rejects.toMatchObject({ code: "unknown" });
+  });
+});
+
+
+describe("food vision provider selection", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("uses Demo when the OpenAI key is missing", () => {
+    vi.stubEnv("OPENAI_API_KEY", "");
+    expect(createFoodVisionProvider()).toBeInstanceOf(DemoFoodVisionProvider);
+    expect(getFoodVisionProviderMode()).toBe("demo");
+  });
+
+  it("uses OpenAI when a key is configured", () => {
+    vi.stubEnv("OPENAI_API_KEY", "test-only-key");
+    expect(createFoodVisionProvider()).toBeInstanceOf(OpenAIFoodVisionProvider);
+    expect(getFoodVisionProviderMode()).toBe("live");
   });
 });

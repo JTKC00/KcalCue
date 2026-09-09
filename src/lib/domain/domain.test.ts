@@ -242,12 +242,21 @@ describe("structured food analysis validation", () => {
     expect(validated.foods[0]).not.toHaveProperty("calories");
   });
 
-  it("keeps Gemini JSON Schema limited to generation-safe keywords", () => {
+  it("keeps the OpenAI Structured Outputs schema strict and generation-safe", () => {
     const json = JSON.stringify(foodAnalysisJsonSchema);
-    expect(json).not.toContain("additionalProperties");
+    expect(json).toContain("additionalProperties");
     expect(json).not.toContain("minimum");
     expect(json).not.toContain("maximum");
     expect(json).not.toContain("maxItems");
+    expect(foodAnalysisJsonSchema.additionalProperties).toBe(false);
+    expect(foodAnalysisJsonSchema.required).toEqual([
+      "analysisStatus",
+      "foods",
+      "uncertaintyReasons",
+      "visibleEvidence",
+      "estimatedInformation",
+      "unknownInformation",
+    ]);
     expect(foodAnalysisJsonSchema.properties.analysisStatus.enum).toEqual([
       "success",
       "unable_to_identify",
@@ -257,6 +266,12 @@ describe("structured food analysis validation", () => {
     ).toEqual(["g", "ml", "piece", "bowl", "cup"]);
     expect(foodAnalysisJsonSchema.properties.foods.items.required).toContain(
       "identityLevel",
+    );
+    expect(foodAnalysisJsonSchema.properties.foods.items.required).toContain(
+      "preparationMethod",
+    );
+    expect(foodAnalysisJsonSchema.properties.foods.items.additionalProperties).toBe(
+      false,
     );
     expect(
       foodAnalysisJsonSchema.properties.foods.items.properties.identityLevel.enum,

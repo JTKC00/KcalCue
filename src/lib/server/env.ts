@@ -1,17 +1,17 @@
-const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite";
+const DEFAULT_OPENAI_MODEL = "gpt-5.6-luna";
 
-export interface GeminiServerConfig {
+export interface OpenAIServerConfig {
   apiKey: string;
   model: string;
 }
 
-export function getGeminiServerConfig(): GeminiServerConfig | null {
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
+export function getOpenAIServerConfig(): OpenAIServerConfig | null {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
   if (!apiKey) return null;
 
   return {
     apiKey,
-    model: process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL,
+    model: process.env.OPENAI_MODEL?.trim() || DEFAULT_OPENAI_MODEL,
   };
 }
 

@@ -304,7 +304,7 @@ describe("nutrition matching", () => {
     });
   });
 
-  it("matches synonyms without requiring the exact Gemini string", () => {
+  it("matches synonyms without requiring the exact provider output string", () => {
     const breast = provider.resolve(
       makeFood({ displayName: "煎雞胸", normalizedName: "chicken breast" }),
     );
