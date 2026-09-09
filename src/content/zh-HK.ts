@@ -15,10 +15,10 @@ export const copy = {
   demoBody: "未有實際 AI 圖片分析。你可完整體驗結果、修正同重新計算。",
   demoPrivacy: "示範模式下，相片只留喺你部裝置作預覽。",
   liveTitle: "AI Live Mode",
-  liveBody: "相片會經 KcalCue server 暫時傳送至已設定嘅 AI 圖片分析服務，不會由 KcalCue 保存。",
+  liveBody: "相片會傳送至 AI 分析服務；確認儲存後，壓縮照片會私人保存到你的帳戶。",
   manualTitle: "手動輸入",
   manualBody: "結果只根據你輸入嘅食物同份量計算，並非 AI 圖片分析。",
-  privacyShort: "相片只用於今次分析，KcalCue 不會建立相片紀錄或持久保存。",
+  privacyShort: "草稿可保留於本機；確認儲存後，餐點及壓縮照片會私人保存到你的帳戶，可隨時刪除。",
   selectedTitle: "相片準備好喇",
   selectedBody: "檢查相片清楚見到整餐，再開始分析。",
   loadingTitle: "分析緊你嘅餐點…",
@@ -67,6 +67,8 @@ export const unitCopy = {
 } as const;
 
 export const errorCopy: Record<string, { title: string; body: string }> = {
+  login_required: { title: "請先登入", body: "到帳戶輸入 Email 驗證碼後，再試一次。相片仍保留。" },
+  cloud_unavailable: { title: "雲端尚未設定", body: "目前可使用示範及手動草稿；設定 Supabase 後即可登入和同步。" },
   missing_image: {
     title: "請先選擇相片",
     body: "影低或者選擇一張餐點相片，再開始分析。",

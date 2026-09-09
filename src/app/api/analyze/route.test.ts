@@ -3,6 +3,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const analyzeImage = vi.fn();
+const authorize = vi.fn();
+vi.mock("@/lib/server/auth", async importOriginal => ({
+  ...await importOriginal<typeof import("@/lib/server/auth")>(), authenticated: (...args: unknown[]) => authorize(...args),
+}));
 
 vi.mock("@/lib/providers/food-vision/factory", () => ({
   createFoodVisionProvider: () => ({
@@ -57,6 +61,7 @@ function heifBytes(brand = "mif1"): Uint8Array {
 describe("POST /api/analyze", () => {
   beforeEach(() => {
     analyzeImage.mockReset();
+    authorize.mockReset().mockResolvedValue({ user: { id: "test-user" } });
     clearRateLimitStore();
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
@@ -80,6 +85,15 @@ describe("POST /api/analyze", () => {
     expect(response.status).toBe(200);
     expect(body.mode).toBe("demo");
     expect(body.analysis.analysisStatus).toBe("success");
+    expect(analyzeImage).not.toHaveBeenCalled();
+    expect(authorize).not.toHaveBeenCalled();
+  });
+
+  it("requires a verified account before live image analysis", async () => {
+    const { HttpError } = await import("@/lib/server/auth");
+    authorize.mockRejectedValueOnce(new HttpError(401, "login_required"));
+    const response = await POST(jpegRequest());
+    expect(response.status).toBe(401);
     expect(analyzeImage).not.toHaveBeenCalled();
   });
 

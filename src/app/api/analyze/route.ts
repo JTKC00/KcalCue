@@ -17,6 +17,7 @@ import {
   rateLimitedJsonResponse,
 } from "@/lib/server/rate-limit";
 import { elapsedMs, logSafeTiming } from "@/lib/server/timing";
+import { authenticated, apiError } from "@/lib/server/auth";
 
 export const runtime = "nodejs";
 
@@ -66,6 +67,10 @@ export async function POST(request: Request) {
       ? new DemoFoodVisionProvider()
       : createFoodVisionProvider();
     visionMode = provider.mode;
+
+    if (provider.mode === "live") {
+      try { await authenticated(request); } catch (error) { return apiError(error); }
+    }
 
     if (provider.mode === "demo") {
       visionStartedAt = performance.now();

@@ -1,5 +1,7 @@
 # KcalCue V0.1 — Autonomous Decisions
 
+> 2026-09-09 核心流程更新：原 V0.1「沒有帳戶、歷史或持久照片」「最小 service worker」的限制已被本輪取代。現在使用 Supabase Auth／Postgres／私人 Storage，以及帳戶隔離的 IndexedDB 草稿與版本化 PWA 殼；細節以 SETUP.md 和目前程式為準。下文保留歷史決策脈絡。
+
 日期：2026-08-13（Asia/Hong_Kong）
 
 ## 1. 使用 Next.js 單體 Web App

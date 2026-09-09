@@ -40,7 +40,7 @@ export function ImageInput({
   const libraryInput = useRef<HTMLInputElement>(null);
 
   const receiveFile = (input: HTMLInputElement) => {
-    onFileSelected(input.files?.[0] ?? null);
+    if (input.files?.[0]) onFileSelected(input.files[0]);
     input.value = "";
   };
 
@@ -135,6 +135,7 @@ export function ImageInput({
               <span>{imageMimeLabel(file.name, file.type)}</span>
             </div>
             <div className="selected-actions">
+              <button className="button button-secondary" type="button" onClick={() => cameraInput.current?.click()}>重拍</button>
               <button
                 className="button button-primary button-large"
                 type="button"

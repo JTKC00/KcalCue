@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 import { confidenceCopy, copy, unitCopy } from "@/content/zh-HK";
 import { confidenceLevel } from "@/lib/domain/confidence";
 import {
@@ -25,6 +27,19 @@ const presetLabels: Record<PortionPreset, string> = {
   regular: "普通",
   large: "多",
 };
+
+function PortionInput({ id, value, onCommit }: { id: string; value: number; onCommit: (value: number) => void }) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+  return <><input id={id} type="number" inputMode="decimal" min="0.1" max="5000" step="any" required
+    value={editing ?? value} aria-invalid={error || undefined} aria-describedby={error ? `${id}-error` : undefined}
+    onChange={event => { setEditing(event.target.value); setError(false); }}
+    onBlur={event => {
+      const number = Number(event.target.value);
+      if (!event.target.value || !Number.isFinite(number) || number < .1 || number > 5000) { setError(true); return; }
+      onCommit(number); setEditing(null); setError(false);
+    }} />{error && <small id={`${id}-error`} role="alert">請輸入 0.1 至 5000 的份量。</small>}</>;
+}
 
 function calorieRange(calculation: CalculatedFood): string {
   if (!calculation.ranges) return "暫未能計算";
@@ -60,6 +75,8 @@ export function FoodEditor({
             value={item.displayName}
             placeholder="例如：白飯"
             autoComplete="off"
+            required
+            maxLength={80}
             onChange={(event) => onNameChange(event.currentTarget.value)}
           />
         </div>
@@ -105,16 +122,10 @@ export function FoodEditor({
       <div className="portion-fields">
         <div className="field-group">
           <label htmlFor={`${fieldId}-min`}>最少份量</label>
-          <input
+          <PortionInput
             id={`${fieldId}-min`}
-            type="number"
-            inputMode="decimal"
-            min="0.1"
-            step={item.unit === "g" || item.unit === "ml" ? "1" : "0.1"}
             value={item.portionMin}
-            onChange={(event) =>
-              onPortionChange("portionMin", event.currentTarget.valueAsNumber)
-            }
+            onCommit={value => onPortionChange("portionMin", value)}
           />
         </div>
         <div className="range-divider" aria-hidden="true">
@@ -122,16 +133,10 @@ export function FoodEditor({
         </div>
         <div className="field-group">
           <label htmlFor={`${fieldId}-max`}>最多份量</label>
-          <input
+          <PortionInput
             id={`${fieldId}-max`}
-            type="number"
-            inputMode="decimal"
-            min="0.1"
-            step={item.unit === "g" || item.unit === "ml" ? "1" : "0.1"}
             value={item.portionMax}
-            onChange={(event) =>
-              onPortionChange("portionMax", event.currentTarget.valueAsNumber)
-            }
+            onCommit={value => onPortionChange("portionMax", value)}
           />
         </div>
         <div className="field-group unit-field">

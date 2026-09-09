@@ -1,4 +1,4 @@
-# KcalCue V0.1
+# KcalCue — 每日餐點記錄
 
 KcalCue 是一個 mobile-first Responsive Web App / PWA：使用者影低或選擇一張餐點相片，KcalCue 會辨認可見食物、估算合理份量範圍，再由獨立營養服務及 deterministic calculation engine 計算卡路里與主要營養素範圍。
 
@@ -7,6 +7,12 @@ KcalCue 是一個 mobile-first Responsive Web App / PWA：使用者影低或選�
 主結果不會包裝成單一精確量度，而會顯示「約 565–765 kcal」、可信程度及造成範圍的主要原因。KcalCue 只供一般參考，並非醫療建議。
 
 ## 功能
+
+- 今日／新增／歷史導覽，按日期和餐次保存記錄，修正後更新每日營養範圍
+- Supabase Email OTP、私人壓縮照片、跨裝置同步與版本衝突保護
+- IndexedDB 本機草稿及已下載記錄，離線查看／編輯草稿，上線後確認儲存
+- PWA 安裝引導、離線殼與每次 build 自動更新版本；更新前先保存草稿
+- 雲端與試用帳戶設定見 [SETUP.md](./SETUP.md)，實機驗收見 [ACCEPTANCE.md](./ACCEPTANCE.md)
 
 - 手機拍照及裝置圖片選擇
 - JPEG / PNG / WebP / HEIC / HEIF 選擇、更換、移除及 client/server validation
@@ -17,10 +23,10 @@ KcalCue 是一個 mobile-first Responsive Web App / PWA：使用者影低或選�
 - kcal、Protein、Carbs、Fat 範圍及 High / Medium / Low 可信程度
 - 可編輯食物名稱、份量及單位；可新增／刪除食物
 - 每次修改都在 browser 以 deterministic code 即時重算，不會再次呼叫 AI
-- loading（步驟會隨等待推進，可取消）、partial、unable-to-identify、invalid response、network/API error 及 retry/fallback states
+- loading（不模擬未知進度，可取消）、partial、unable-to-identify、invalid response、network/API error 及 retry/fallback states
 - 375px 手機、tablet 及 desktop responsive layout
 - semantic HTML、keyboard focus、form labels、ARIA loading/error state 及 reduced-motion support
-- Web App Manifest、SVG／PNG icon、iOS `apple-touch-icon` 及最小 service worker
+- Web App Manifest、SVG／PNG icon、iOS `apple-touch-icon` 及版本化離線 service worker
 - GitHub Actions CI：lint、typecheck、tests、deterministic evaluation 及 production build
 - `/api/analyze` 及 `/api/nutrition/resolve` 的 in-process per-IP rate limit（公開部署時仍應由 gateway 再限一次）
 
@@ -60,6 +66,8 @@ npm start
 
 ## OpenAI Live Mode
 
+Live 分析需要先登入 Supabase 試用帳戶。請先完成 [SETUP.md](./SETUP.md) 的独立 project、migration 及 Email OTP 設定。
+
 1. 複製範例檔：
 
    ```bash
@@ -85,6 +93,8 @@ npm start
 | `OPENAI_API_KEY` | Live Mode 必須 | 空白 | 只由 server route 讀取；空白時使用 Demo Mode |
 | `OPENAI_MODEL` | 否 | `gpt-5.6-luna` | 集中設定 OpenAI multimodal model |
 | `NUTRITION_API_KEY` | 否 | 空白 | 可選 USDA FoodData Central key；空白時只用本地 reference |
+| `NEXT_PUBLIC_SUPABASE_URL` | 帳戶／同步必須 | 空白 | 獨立 Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | 帳戶／同步必須 | 空白 | Publishable key；擁有人隔離由 RLS 控制 |
 
 預設模型選擇原因記錄在 [DECISIONS.md](./DECISIONS.md)。OpenAI 官方資料：[GPT-5.6 Luna model page](https://developers.openai.com/api/docs/models/gpt-5.6-luna)、[structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs)、[images and vision](https://developers.openai.com/api/docs/guides/images-vision)。
 
@@ -186,10 +196,11 @@ V0.1 baseline 紀錄見 [GOAL_REPORT.md](./GOAL_REPORT.md)；HEIC／CI／evaluat
 
 ## Privacy design
 
-- 沒有 database、帳戶、history、analytics 或 public image storage。
-- Demo Mode 不會將圖片傳到 server；圖片 object URL 只用於 browser preview，離開／更換後即 revoke。
+- 使用 Supabase Auth／Postgres 與私人 Storage；沒有 analytics 或 public image storage。
+- Demo Mode 不會將圖片傳到 server；可解碼相片會壓縮為本機草稿照片，Demo 結果不加入正式記錄。
 - Live Mode 圖片以 multipart request 暫時傳到 KcalCue server，再以 data URL 傳給 OpenAI；HEIC／HEIF 會先在 memory 轉 JPEG。
-- KcalCue 不寫入圖片檔案、不持久保存 base64，也不記錄 image payload。
+- 確認儲存後，server 會校正方向、去除 EXIF，以最長邊 1600px 的 JPEG 保存到私人 bucket；不保存原圖或 base64，也不記錄 image payload。
+- 本機草稿、已同步記錄與已下載照片按帳戶分隔；登出清除該帳戶本機資料。刪除餐點後保留最小刪除標記，阻止過期請求重建記錄。
 - developer-safe timing diagnostics 只記錄 operation、MIME、byte size、計時及 resolved count，不記錄圖片、base64、食物名稱、prompt、個人資料或 secrets。
 - 真正 Live Mode 使用時，圖片仍會由 OpenAI API 處理；部署者應同時審視其帳戶與資料處理條款。
 
@@ -199,7 +210,7 @@ V0.1 baseline 紀錄見 [GOAL_REPORT.md](./GOAL_REPORT.md)；HEIC／CI／evaluat
 
 1. 只在 server env 放入 `OPENAI_API_KEY`／可選 `NUTRITION_API_KEY`，不要寫進 client 或 git。
 2. 在 gateway／WAF 再加 rate limit。App 內 in-memory token bucket 只保護單一實例；serverless 多實例下會變弱。
-3. 不要開啟圖片 storage、analytics 或 database。
+3. 套用 Supabase migration，保持照片 bucket 私人，關閉公開註冊，預建試用帳戶並設定 SMTP／OTP；驗證 RLS。
 4. 用真實裝置手測：Live JPEG、HEIC（若裝置支援）、取消分析、429。
 
 ## Known limitations
@@ -209,4 +220,5 @@ V0.1 baseline 紀錄見 [GOAL_REPORT.md](./GOAL_REPORT.md)；HEIC／CI／evaluat
 - OpenAI API 不直接接受 HEIC / HEIF；KcalCue 會在 server memory 以 `sharp` 轉成 JPEG。Safari 17 起由 WebKit 支援 HEIC 預覽，其他瀏覽器是否能直接顯示相片取決於其 image decoder；KcalCue 仍會在預覽失敗時保留分析入口。目標裝置的完整 browser matrix 仍需持續 QA。
 - 單張相片本身無法知道真實重量、隱藏材料、油份、糖份或完整烹調方法；產品刻意以範圍及 uncertainty 表達。
 - App 內 rate limit 是單實例記憶體 bucket，不是跨實例的 abuse-control 系統。
-- V0.1 沒有帳戶、歷史紀錄、雲端圖片保存、醫療建議或個人減重目標。
+- 尚未在真正 KcalCue Supabase project、SMTP、OpenAI key 或 iPhone／Android 實機完成驗收；自動化替身測試不代表這些項目已通過。
+- 不提供完整離線自動同步、醫療建議、個人減重目標、社交或付費功能。
