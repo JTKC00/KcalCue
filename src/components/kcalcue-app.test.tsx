@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import "../test/setup";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -77,5 +77,25 @@ describe("KcalCueApp analysis cancel", () => {
 
     expect(await screen.findByRole("heading", { name: /約 .*kcal/ })).toBeInTheDocument();
     expect(screen.getByText("示範結果")).toBeInTheDocument();
+  });
+
+  it("does not show a late nutrition response after the user cancels", async () => {
+    const user = userEvent.setup();
+    let completeNutrition: (response: Response) => void = () => {};
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/analyze") return Response.json({ mode: "live", analysis: {
+        ...demoFoodAnalysis, foods: [{ ...demoFoodAnalysis.foods[0], displayName: "未知餐點", normalizedName: "未知餐點" }],
+      } });
+      return new Promise<Response>(resolve => { completeNutrition = resolve; });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<KcalCueApp initialProviderMode="live" />);
+    await user.upload(document.querySelectorAll<HTMLInputElement>('input[type="file"]')[1], pngFile());
+    await user.click(screen.getByRole("button", { name: /開始分析/ }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await user.click(screen.getByRole("button", { name: "取消分析" }));
+    await act(async () => { completeNutrition(Response.json({ matches: [] })); });
+    expect(screen.getByRole("button", { name: /開始分析/ })).toBeEnabled();
+    expect(screen.queryByText("食物明細")).not.toBeInTheDocument();
   });
 });

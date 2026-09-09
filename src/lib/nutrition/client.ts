@@ -46,6 +46,7 @@ export function canReuseNutritionMatchForNameEdit(
 export async function enrichUnresolvedMatches(
   foods: FoodEstimate[],
   localMatches: NutritionMatch[],
+  signal?: AbortSignal,
 ): Promise<NutritionMatch[]> {
   const unresolvedIndexes = localMatches
     .map((match, index) => (match.includedInTotal ? -1 : index))
@@ -54,7 +55,9 @@ export async function enrichUnresolvedMatches(
   if (unresolvedIndexes.length === 0) return localMatches;
 
   try {
-    const response = await fetch("/api/nutrition/resolve", {
+    const { authorizedFetch } = await import("@/lib/firebase/client");
+    const response = await authorizedFetch("/api/nutrition/resolve", {
+      signal,
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -97,7 +100,8 @@ export async function enrichUnresolvedMatches(
 export async function resolveNutritionMatchWithFallback(
   food: FoodEstimate,
   localMatch: NutritionMatch,
+  signal?: AbortSignal,
 ): Promise<NutritionMatch> {
-  const [match] = await enrichUnresolvedMatches([food], [localMatch]);
+  const [match] = await enrichUnresolvedMatches([food], [localMatch], signal);
   return match ?? localMatch;
 }

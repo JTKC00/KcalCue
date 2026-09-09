@@ -1,5 +1,7 @@
 # KcalCue V0.1 — Autonomous Decisions
 
+> 2026-09-09 更新：改用 Firebase Authentication（Email Link／Google）與 Firestore。應用層 IndexedDB outbox 支援離線讀寫和重連後自動同步，伺服器交易保留版本衝突保護。圖片只用於分析，不保存到雲端；未儲存草稿可暫存本機壓縮圖。SETUP.md 與目前程式為準，下文保留歷史決策脈絡。
+
 日期：2026-08-13（Asia/Hong_Kong）
 
 ## 1. 使用 Next.js 單體 Web App

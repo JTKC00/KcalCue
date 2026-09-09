@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { copy, errorCopy } from "@/content/zh-HK";
 import { foodAnalysisSchema, type FoodAnalysis, type PortionUnit } from "@/lib/domain/food-analysis";
@@ -23,7 +23,6 @@ import {
   DEMO_ANALYZE_DELAY_MS,
   analyzeAbortOutcome,
   loadingStepClass,
-  loadingStepIndex,
 } from "@/lib/client/analyze-session";
 import { OPENAI_HTTP_TIMEOUT_MS } from "@/lib/providers/food-vision/timeout";
 import {
@@ -42,6 +41,8 @@ import {
   SparklesIcon,
 } from "./icons";
 import { ResultView } from "./result-view";
+import { authorizedFetch } from "@/lib/firebase/client";
+import type { MealDraft } from "@/lib/meals/types";
 
 type AppStage = "input" | "analyzing" | "result" | "unable" | "error";
 type ProviderMode = FoodVisionProvider["mode"];
@@ -61,6 +62,11 @@ interface AnalyzeResponse {
 
 interface KcalCueAppProps {
   initialProviderMode: ProviderMode;
+  initialDraft?: MealDraft;
+  onDraftChange?: (change: Pick<MealDraft, "items" | "analysis" | "mode">, file: File | null) => void;
+  onExit?: () => void;
+  manual?: boolean;
+  onPhotoSelected?: (file: File | null) => void;
 }
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -220,15 +226,7 @@ function LoadingView({
   demoMode: boolean;
   onCancel: () => void;
 }) {
-  const [step, setStep] = useState(0);
-
-  useEffect(() => {
-    const startedAt = Date.now();
-    const tick = () => setStep(loadingStepIndex(Date.now() - startedAt));
-    tick();
-    const interval = window.setInterval(tick, 500);
-    return () => window.clearInterval(interval);
-  }, []);
+  const step = 0;
 
   return (
     <main className="state-page" id="main-content">
@@ -252,11 +250,7 @@ function LoadingView({
           <p className="eyebrow">{demoMode ? "準備示範結果" : "AI 圖片分析"}</p>
           <h1>{copy.loadingTitle}</h1>
           <p>{copy.loadingBody}</p>
-          <ol className="loading-steps">
-            <li className={loadingStepClass(step, 0)}><span />辨認可見食物</li>
-            <li className={loadingStepClass(step, 1)}><span />估算份量範圍</li>
-            <li className={loadingStepClass(step, 2)}><span />配對營養參考資料</li>
-          </ol>
+          <p className={loadingStepClass(step, 0)}>等候分析及營養配對完成，通常需要一段時間。</p>
           <div className="loading-actions">
             <button className="button button-secondary" type="button" onClick={onCancel}>
               {copy.cancelAnalyze}
@@ -355,20 +349,32 @@ function SiteFooter() {
   );
 }
 
-export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
-  const [stage, setStage] = useState<AppStage>("input");
-  const [file, setFile] = useState<File | null>(null);
+export function KcalCueApp({ initialProviderMode, initialDraft, onDraftChange, onExit, manual, onPhotoSelected }: KcalCueAppProps) {
+  const [stage, setStage] = useState<AppStage>(initialDraft?.items.length || manual ? "result" : "input");
+  const [file, setFile] = useState<File | null>(() => initialDraft?.photo && !initialDraft.items.length ? new File([initialDraft.photo], "餐點.jpg", { type: "image/jpeg" }) : null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewFailed, setPreviewFailed] = useState(false);
-  const [analysis, setAnalysis] = useState<FoodAnalysis | null>(null);
-  const [items, setItems] = useState<EditableFoodItem[]>([]);
+  const [analysis, setAnalysis] = useState<FoodAnalysis | null>(initialDraft?.analysis ?? null);
+  const [items, setItems] = useState<EditableFoodItem[]>(initialDraft?.items.length ? initialDraft.items : manual ? [createManualItem()] : []);
   const [activeMode, setActiveMode] = useState<AppMode>(
-    initialProviderMode,
+    initialDraft?.items.length ? initialDraft.mode : manual ? "manual" : initialProviderMode,
   );
   const [appError, setAppError] = useState<AppError | null>(null);
   const nutritionProvider = useMemo(() => new LocalNutritionProvider(), []);
   const nameEditTimers = useRef(new Map<string, number>());
   const analyzeAbortRef = useRef<AbortController | null>(null);
+  const editAbortRef = useRef(new AbortController());
+  useLayoutEffect(() => {
+    if (stage === "result") onDraftChange?.({ items, analysis, mode: activeMode }, file);
+  }, [stage, items, analysis, activeMode, file, onDraftChange]);
+  useEffect(() => {
+    if (!initialDraft?.photo) return;
+    const url = URL.createObjectURL(initialDraft.photo);
+    // Blob URLs must be created/revoked after hydration, never during server rendering.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [initialDraft?.photo]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
@@ -387,16 +393,22 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
         window.clearTimeout(timer);
       }
       analyzeAbortRef.current?.abort("unmount");
+      editAbortRef.current.abort();
     };
   }, []);
 
   const handleFileSelected = (nextFile: File | null) => {
+    analyzeAbortRef.current?.abort("superseded");
+    analyzeAbortRef.current = null;
+    editAbortRef.current.abort();
+    editAbortRef.current = new AbortController();
     setAppError(null);
     setPreviewFailed(false);
     setAnalysis(null);
     setItems([]);
 
     if (!nextFile) {
+      onPhotoSelected?.(null);
       setFile(null);
       setPreviewUrl(null);
       setStage("input");
@@ -429,6 +441,7 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
     }
 
     setFile(nextFile);
+    onPhotoSelected?.(nextFile);
     setStage("input");
   };
 
@@ -440,13 +453,13 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
   };
 
   const analyze = async (forceDemo = false) => {
+    if (analyzeAbortRef.current) return;
     if (!file) {
       setAppError(getError("missing_image"));
       setStage("input");
       return;
     }
 
-    analyzeAbortRef.current?.abort("superseded");
     const controller = new AbortController();
     analyzeAbortRef.current = controller;
 
@@ -469,7 +482,7 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
       }
 
       const [response] = await Promise.all([
-        fetch("/api/analyze", {
+        authorizedFetch("/api/analyze", {
           method: "POST",
           body: formData,
           signal: controller.signal,
@@ -477,6 +490,8 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
         demoRequest ? delay(DEMO_ANALYZE_DELAY_MS, controller.signal) : Promise.resolve(),
       ]);
       const body = (await response.json()) as AnalyzeResponse;
+      controller.signal.throwIfAborted();
+      if (analyzeAbortRef.current !== controller) return;
 
       if (!response.ok) {
         const code = typeof body.error?.code === "string" ? body.error.code : "unknown";
@@ -499,12 +514,15 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
         );
         const matches =
           responseMode === "live"
-            ? await enrichUnresolvedMatches(parsed.data.foods, localMatches)
+            ? await enrichUnresolvedMatches(parsed.data.foods, localMatches, controller.signal)
             : localMatches;
+        controller.signal.throwIfAborted();
+        if (analyzeAbortRef.current !== controller) return;
         setItems(createEditableFoodItems(parsed.data.foods, matches));
         setStage("result");
       }
     } catch (error) {
+      if (analyzeAbortRef.current !== controller) return;
       if (controller.signal.aborted) {
         if (analyzeAbortOutcome(controller.signal.reason) === "timeout") {
           setAppError(getError("network_timeout"));
@@ -531,6 +549,9 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
   };
 
   const reset = () => {
+    if (onExit) { onExit(); return; }
+    editAbortRef.current.abort();
+    editAbortRef.current = new AbortController();
     analyzeAbortRef.current?.abort("cancelled");
     analyzeAbortRef.current = null;
     for (const timer of nameEditTimers.current.values()) {
@@ -605,8 +626,10 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
     }
 
     const timer = window.setTimeout(() => {
-      void resolveNutritionMatchWithFallback(nextFood, localMatch).then(
+      const signal = editAbortRef.current.signal;
+      void resolveNutritionMatchWithFallback(nextFood, localMatch, signal).then(
         (resolvedMatch) => {
+          if (signal.aborted) return;
           updateItem(id, (item) => {
             if (item.displayName !== name) return item;
             return {
@@ -666,7 +689,7 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
 
   return (
     <div className="app-shell">
-      <SiteHeader mode={activeMode} />
+      {!onExit && <SiteHeader mode={activeMode} />}
       <ModeBanner demoMode={activeMode === "demo" && stage !== "result"} />
 
       {stage === "input" ? (
@@ -692,6 +715,7 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
             />
           </section>
           <HowItWorks />
+          <button className="button button-secondary" type="button" onClick={startManual}>手動加入食物</button>
         </main>
       ) : null}
 
@@ -738,7 +762,7 @@ export function KcalCueApp({ initialProviderMode }: KcalCueAppProps) {
         />
       ) : null}
 
-      <SiteFooter />
+      {!onExit && <SiteFooter />}
     </div>
   );
 }
