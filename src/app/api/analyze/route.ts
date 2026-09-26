@@ -18,6 +18,10 @@ import {
 } from "@/lib/server/rate-limit";
 import { elapsedMs, logSafeTiming } from "@/lib/server/timing";
 import { authenticated, apiError } from "@/lib/server/auth";
+import {
+  readBoundedRequestBody,
+  RequestBodyTooLargeError,
+} from "@/lib/server/request-body";
 
 export const runtime = "nodejs";
 
@@ -56,12 +60,15 @@ export async function POST(request: Request) {
       });
     }
 
-    const contentLength = Number(request.headers.get("content-length"));
-    if (Number.isFinite(contentLength) && contentLength > MAX_MULTIPART_BYTES) {
-      return errorResponse("file_too_large", 413);
+    let formData: FormData;
+    try {
+      const bytes = await readBoundedRequestBody(request, MAX_MULTIPART_BYTES);
+      formData = await new Response(bytes, { headers: request.headers }).formData();
+    } catch (error) {
+      return error instanceof RequestBodyTooLargeError
+        ? errorResponse("file_too_large", 413)
+        : errorResponse("invalid_file", 400);
     }
-
-    const formData = await request.formData();
     const forceDemo = formData.get("mode") === "demo";
     const provider = forceDemo
       ? new DemoFoodVisionProvider()

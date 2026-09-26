@@ -246,4 +246,79 @@ describe("POST /api/analyze", () => {
     expect(body).toEqual({ error: { code: "file_too_large" } });
     expect(analyzeImage).not.toHaveBeenCalled();
   });
+
+  it.each([undefined, "8"])(
+    "cancels oversized streamed multipart before parsing with content-length %s",
+    async (contentLength) => {
+      const parse = vi.spyOn(Response.prototype, "formData");
+      const cancel = vi.fn();
+      let pulls = 0;
+      const stream = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          pulls++;
+          controller.enqueue(new Uint8Array(pulls === 1 ? 1 : 10 * 1024 * 1024 + 512 * 1024));
+        },
+        cancel,
+      }, { highWaterMark: 0 });
+      const headers = new Headers({ "content-type": "multipart/form-data; boundary=test" });
+      if (contentLength !== undefined) headers.set("content-length", contentLength);
+      const response = await POST(new Request("http://localhost/api/analyze", {
+        method: "POST", headers, body: stream, duplex: "half",
+      } as RequestInit));
+
+      expect(response.status).toBe(413);
+      expect(await response.json()).toEqual({ error: { code: "file_too_large" } });
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(pulls).toBe(2);
+      expect(parse).not.toHaveBeenCalled();
+      expect(authorize).not.toHaveBeenCalled();
+      expect(analyzeImage).not.toHaveBeenCalled();
+    },
+  );
+
+  it("accepts demo multipart exactly at the total byte cap", async () => {
+    const prefix = Buffer.from('--test\r\nContent-Disposition: form-data; name="mode"\r\n\r\ndemo\r\n--test\r\nContent-Disposition: form-data; name="padding"; filename="padding.bin"\r\n\r\n');
+    const suffix = Buffer.from("\r\n--test--\r\n");
+    const limit = 10 * 1024 * 1024 + 512 * 1024;
+    const bytes = Buffer.concat([prefix, Buffer.alloc(limit - prefix.length - suffix.length), suffix]);
+    const response = await POST(new Request("http://localhost/api/analyze", {
+      method: "POST",
+      headers: { "content-type": "multipart/form-data; boundary=test" },
+      body: bytes,
+    }));
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).mode).toBe("demo");
+    expect(authorize).not.toHaveBeenCalled();
+    expect(analyzeImage).not.toHaveBeenCalled();
+  });
+
+  it("returns a controlled error for malformed multipart", async () => {
+    const response = await POST(new Request("http://localhost/api/analyze", {
+      method: "POST",
+      headers: { "content-type": "multipart/form-data; boundary=test" },
+      body: "--test\r\nunfinished-private-input",
+    }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "invalid_file" } });
+    expect(analyzeImage).not.toHaveBeenCalled();
+  });
+
+  it("returns a controlled error for an interrupted input stream", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) { controller.error(new Error("private transport details")); },
+    });
+    const response = await POST(new Request("http://localhost/api/analyze", {
+      method: "POST",
+      headers: { "content-type": "multipart/form-data; boundary=test" },
+      body: stream,
+      duplex: "half",
+    } as RequestInit));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "invalid_file" } });
+    expect(authorize).not.toHaveBeenCalled();
+    expect(analyzeImage).not.toHaveBeenCalled();
+  });
 });
