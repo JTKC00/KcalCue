@@ -1,7 +1,22 @@
 import type { Firestore } from "firebase-admin/firestore";
-import type { MealRecord } from "@/lib/meals/types";
+import { z } from "zod";
+import { CURRENT_MEAL_SCHEMA_VERSION, type MealRecord } from "@/lib/meals/types";
 import { accountPath } from "./admin";
 import { HttpError } from "@/lib/server/auth";
+
+const createdAtSchema = z.iso.datetime();
+
+export function assertWritableMealSchema(
+  record: { schemaVersion?: unknown } | undefined,
+) {
+  const version = record?.schemaVersion;
+  if (
+    version !== undefined &&
+    version !== 0 &&
+    version !== CURRENT_MEAL_SCHEMA_VERSION
+  )
+    throw new HttpError(409, "unsupported_schema");
+}
 
 export function mealCollection(db: Firestore, uid: string) {
   return db.collection(`${accountPath(uid)}/meals`);
@@ -31,7 +46,7 @@ export async function previousMeal(db: Firestore, uid: string, id: string) {
 export async function commitMeal(
   db: Firestore,
   uid: string,
-  record: MealRecord,
+  record: Omit<MealRecord, "updatedAt">,
   expected: number,
 ) {
   const ref = mealCollection(db, uid).doc(record.id);
@@ -40,8 +55,25 @@ export async function commitMeal(
     if (previous?.deleted) throw new HttpError(409, "conflict");
     if (previous?.mutationId === record.mutationId)
       return previous.record as MealRecord;
+    assertWritableMealSchema(previous?.record);
     if ((previous?.version ?? 0) !== expected)
       throw new HttpError(409, "conflict");
+    const now = new Date().toISOString();
+    const previousCreatedAt = createdAtSchema.safeParse(
+      previous?.record?.createdAt,
+    );
+    const saved: MealRecord = {
+      ...record,
+      schemaVersion: CURRENT_MEAL_SCHEMA_VERSION,
+      // A legacy record's first cloud write cannot be reconstructed from its
+      // last edit or client meal date. Only new documents receive a timestamp.
+      createdAt: previous
+        ? previousCreatedAt.success
+          ? previousCreatedAt.data
+          : null
+        : now,
+      updatedAt: now,
+    };
     tx.set(
       ref,
       JSON.parse(
@@ -49,12 +81,12 @@ export async function commitMeal(
           deleted: false,
           version: record.version,
           mutationId: record.mutationId,
-          record,
+          record: saved,
         }),
       ),
     );
     tx.set(db.doc(accountPath(uid)), { revision: crypto.randomUUID() });
-    return record;
+    return saved;
   });
 }
 export async function deleteMeal(

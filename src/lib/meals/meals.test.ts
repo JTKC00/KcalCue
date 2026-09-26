@@ -78,4 +78,23 @@ describe("meal records and local drafts", () => {
     expect((await localMeals.read("a")).draft).toBeNull();
     expect((await localMeals.read("b")).draft).not.toBeNull();
   });
+  it("preserves read-only metadata with draft photos without treating it as writable input", async () => {
+    const draft = {
+      ...newDraft(), version: 3, schemaVersion: 1,
+      createdAt: "2026-09-01T00:00:00.000Z",
+      items: createEditableFoodItems(demoFoodAnalysis.foods),
+      photo: new Blob(["draft photo"], { type: "image/jpeg" }),
+    };
+    await localMeals.write("metadata-account", { records: [], draft, syncedAt: null });
+    const restored = (await localMeals.read("metadata-account")).draft!;
+    expect(restored.createdAt).toBe(draft.createdAt);
+    expect(restored.schemaVersion).toBe(1);
+    expect(await restored.photo!.text()).toBe("draft photo");
+    const command = mealInputSchema.parse({ ...restored, mutationId: crypto.randomUUID() });
+    expect(command).not.toHaveProperty("createdAt");
+    expect(command).not.toHaveProperty("schemaVersion");
+    expect(command).not.toHaveProperty("photo");
+    expect(newDraft()).not.toHaveProperty("createdAt");
+    await localMeals.clear("metadata-account");
+  });
 });

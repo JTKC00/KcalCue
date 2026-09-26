@@ -55,10 +55,20 @@ export async function changeSyncState(
   }
 }
 export function visibleMeals(state: SyncState) {
-  const meals = new Map(state.remote.map((record) => [record.id, record]));
+  const remote = new Map(state.remote.map((record) => [record.id, record]));
+  const meals = new Map(remote);
   for (const job of state.jobs) {
     if (job.kind === "delete") meals.delete(job.record.id);
-    else meals.set(job.record.id, job.record);
+    else {
+      const confirmed = remote.get(job.record.id);
+      // An old queued edit may predate the first cloud acknowledgement. Its
+      // editable values win, but cannot erase or replace confirmed metadata.
+      meals.set(job.record.id, confirmed ? {
+        ...job.record,
+        schemaVersion: confirmed.schemaVersion,
+        createdAt: confirmed.createdAt,
+      } : job.record);
+    }
   }
   return [...meals.values()];
 }

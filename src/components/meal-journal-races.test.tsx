@@ -14,6 +14,7 @@ const fixture = vi.hoisted(() => ({
   list: vi.fn(),
   state: vi.fn(),
   sync: vi.fn(),
+  save: vi.fn(),
   remove: vi.fn(),
   discard: vi.fn(),
   read: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock("@/lib/meals/repository", () => ({
     list = fixture.list;
     state = fixture.state;
     sync = fixture.sync;
+    save = fixture.save;
     delete = fixture.remove;
     discardPending = fixture.discard;
   },
@@ -53,7 +55,9 @@ vi.mock("@/lib/meals/cache", () => ({
 }));
 vi.mock("./kcalcue-app", () => ({
   KcalCueApp: ({ initialDraft }: { initialDraft: MealDraft }) => (
-    <div data-testid="editor-meal">{initialDraft.items[0]?.displayName}</div>
+    <div data-testid="editor-meal" data-created-at={initialDraft.createdAt ?? "unknown"}>
+      {initialDraft.items[0]?.displayName}
+    </div>
   ),
 }));
 vi.mock("./pwa-controls", () => ({ PwaControls: () => null }));
@@ -106,7 +110,7 @@ async function startConflictRecovery(meal: MealRecord) {
 beforeEach(() => {
   states.clear(); caches.clear(); fixture.uid = "a";
   vi.restoreAllMocks(); vi.unstubAllGlobals();
-  for (const mock of [fixture.list, fixture.state, fixture.sync, fixture.remove, fixture.discard, fixture.read, fixture.write, fixture.clear, fixture.clearSync, fixture.signOut]) mock.mockReset();
+  for (const mock of [fixture.list, fixture.state, fixture.sync, fixture.save, fixture.remove, fixture.discard, fixture.read, fixture.write, fixture.clear, fixture.clearSync, fixture.signOut]) mock.mockReset();
   fixture.list.mockImplementation(async (uid: string) => visibleMeals(structuredClone(states.get(uid) ?? emptySync())));
   fixture.state.mockImplementation(async (uid: string) => structuredClone(states.get(uid) ?? emptySync()));
   fixture.sync.mockResolvedValue(undefined);
@@ -238,4 +242,56 @@ it("clears an obsolete trial access error after a later successful sync", async 
   await act(async () => { window.dispatchEvent(new Event("kcalcue-sync")); });
   await waitFor(() => expect(fixture.sync).toHaveBeenCalledTimes(2));
   await waitFor(() => expect(screen.queryByText(/這個 Email 尚未獲得試用權限/)).not.toBeInTheDocument());
+});
+
+it("clears server metadata when preserving a conflicted edit as a new meal", async () => {
+  const meal = { ...record("a"), schemaVersion: 1, createdAt: "2026-08-01T00:00:00.000Z" };
+  const write = await startConflictRecovery(meal);
+  const copy = fixture.write.mock.calls.find(([, value]) => value.draft?.items[0]?.displayName === meal.items[0].displayName)![1].draft;
+  expect(copy.id).not.toBe(meal.id);
+  expect(copy.version).toBe(0);
+  expect(copy.createdAt).toBeUndefined();
+  expect(copy.schemaVersion).toBeUndefined();
+  expect(copy.pendingMutation).toBeUndefined();
+  expect(copy.items).toEqual(meal.items);
+  expect(copy.analysis).toEqual(meal.analysis);
+  expect(meal.createdAt).toBe("2026-08-01T00:00:00.000Z");
+  await act(async () => { write.resolve(); });
+  await screen.findByTestId("editor-meal");
+  expect(screen.getByTestId("editor-meal")).toHaveAttribute("data-created-at", "unknown");
+});
+
+it("retains server creation metadata when opening an ordinary edit", async () => {
+  const meal = { ...record("a"), schemaVersion: 1, createdAt: "2026-08-01T00:00:00.000Z" };
+  states.set("a", { ...emptySync(), remote: [meal] });
+  render(<MealJournal initialProviderMode="live" />);
+  await signIn("a");
+  await screen.findByRole("heading", { name: "meal-a" });
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "查看／修正" })); });
+  await screen.findByTestId("editor-meal");
+  expect(screen.getByTestId("editor-meal")).toHaveAttribute("data-created-at", meal.createdAt);
+});
+
+it("reuses a saved retry identity when only server metadata was added to the restored draft", async () => {
+  const meal = record("a");
+  caches.set("a", { ...emptyCache(), draft: meal });
+  fixture.save.mockRejectedValue(new Error("Local storage unavailable"));
+  render(<MealJournal initialProviderMode="live" />);
+  await signIn("a");
+  await act(async () => { fireEvent.click(await screen.findByRole("button", { name: "繼續草稿" })); });
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "離線儲存餐點" })); });
+  await waitFor(() => expect(fixture.save).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(caches.get("a")?.draft?.pendingMutation).toBeDefined());
+  const retained = structuredClone(caches.get("a")!);
+  retained.draft = { ...retained.draft!, schemaVersion: 1, createdAt: "2026-08-01T00:00:00.000Z" };
+  cleanup();
+  caches.set("a", retained);
+  render(<MealJournal initialProviderMode="live" />);
+  await signIn("a");
+  // The failed save left #new selected, so reload restores the editor directly.
+  await screen.findByTestId("editor-meal");
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "離線儲存餐點" })); });
+  await waitFor(() => expect(fixture.save).toHaveBeenCalledTimes(2));
+  expect(fixture.save.mock.calls[1][1]).toBe(fixture.save.mock.calls[0][1]);
+  expect(fixture.save.mock.calls[1][0].createdAt).toBe("2026-08-01T00:00:00.000Z");
 });

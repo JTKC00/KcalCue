@@ -63,6 +63,10 @@ export class MealRepository {
     if (!parsed.success) throw new RepositoryError("invalid_request", 400);
     const record: MealRecord = {
       ...parsed.data,
+      // Read-only cloud metadata may travel with an existing draft. A new
+      // offline meal has no server creation time until its first acknowledgement.
+      ...(draft.version === 0 || draft.schemaVersion === undefined ? {} : { schemaVersion: draft.schemaVersion }),
+      ...(draft.version === 0 || draft.createdAt === undefined ? {} : { createdAt: draft.createdAt }),
       // The API input schema deliberately strips client nutrition metadata.
       // Preserve the already resolved match in the local outbox for offline
       // totals; the server independently resolves/validates the eventual write.
@@ -220,6 +224,8 @@ export class MealRepository {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               ...job.record,
+              schemaVersion: undefined,
+              createdAt: undefined,
               version: job.expectedVersion,
               mutationId: job.id,
             }),

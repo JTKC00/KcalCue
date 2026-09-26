@@ -14,6 +14,7 @@ export const mealTypes = {
   dinner: "晚餐",
   snack: "小食",
 } as const;
+export const CURRENT_MEAL_SCHEMA_VERSION = 1;
 export interface MealDraft {
   id: string;
   date: string;
@@ -25,6 +26,8 @@ export interface MealDraft {
   items: EditableFoodItem[];
   originalItems: EditableFoodItem[];
   version: number;
+  readonly schemaVersion?: number;
+  readonly createdAt?: string | null;
   photoPath: string | null;
   photo?: Blob;
   removePhoto?: boolean;

@@ -202,4 +202,79 @@ describe("durable offline meal outbox", () => {
     expect(await repository.list()).toEqual([]);
     expect((await repository.state("a")).jobs).toHaveLength(1);
   });
+  it("keeps new offline creation time unknown, even when a copied draft supplies metadata", async () => {
+    const input = { ...draft(), schemaVersion: 1, createdAt: "2000-01-01T00:00:00.000Z" };
+    const saved = await repository.save(input, crypto.randomUUID());
+    expect(saved.createdAt).toBeUndefined();
+    expect(saved.schemaVersion).toBeUndefined();
+    expect((await new MealRepository().list())[0].createdAt).toBeUndefined();
+    const existing = { ...saved, schemaVersion: 1, createdAt: "2026-01-02T03:04:05.000Z" };
+    const edit = await repository.save({ ...existing, time: "18:30" }, crypto.randomUUID());
+    expect(edit.createdAt).toBe(existing.createdAt);
+    expect(edit.schemaVersion).toBe(1);
+    expect((await new MealRepository().list())[0]).toEqual(edit);
+  });
+  it("preserves the first cloud creation time through an older queued edit and lost acknowledgement", async () => {
+    const firstId = crypto.randomUUID(), editId = crypto.randomUUID();
+    const first = await repository.save({ ...draft(), date: "2020-02-03" }, firstId);
+    const edit = await repository.save({ ...first, time: "13:45" }, editId);
+    const before = dayNutrition(await repository.list());
+    const createdAt = "2026-09-26T14:00:00.000Z";
+    const cloudFirst = { ...first, schemaVersion: 1, createdAt, updatedAt: createdAt };
+    fixture.fetch.mockResolvedValueOnce(Response.json({ record: cloudFirst }))
+      .mockRejectedValueOnce(new TypeError("edit acknowledgement lost"));
+    await expect(repository.sync()).rejects.toThrow("edit acknowledgement lost");
+    const restarted = new MealRepository();
+    const interrupted = await restarted.state();
+    expect(interrupted.jobs).toHaveLength(1);
+    expect(interrupted.jobs[0]).toMatchObject({ id: editId, expectedVersion: 1 });
+    expect(interrupted.jobs[0].record.createdAt).toBeUndefined();
+    expect((await restarted.list())[0]).toMatchObject({
+      schemaVersion: 1, createdAt, version: 2, time: "13:45", date: "2020-02-03",
+    });
+    expect(dayNutrition(await restarted.list())).toEqual(before);
+    const cloudEdit = { ...edit, schemaVersion: 1, createdAt, updatedAt: "2026-09-26T14:01:00.000Z" };
+    fixture.fetch.mockResolvedValueOnce(Response.json({ record: cloudEdit }))
+      .mockResolvedValueOnce(Response.json({ records: [cloudEdit], revision: "next" }));
+    await restarted.sync();
+    expect((await restarted.state()).jobs).toEqual([]);
+    expect(await restarted.list()).toEqual([cloudEdit]);
+    const commands = fixture.fetch.mock.calls.filter(([, init]) => init?.method === "POST")
+      .map(([, init]) => JSON.parse(init.body));
+    expect(commands.map((body) => [body.mutationId, body.version])).toEqual([
+      [firstId, 0], [editId, 1], [editId, 1],
+    ]);
+    for (const body of commands) {
+      expect(body).not.toHaveProperty("createdAt");
+      expect(body).not.toHaveProperty("schemaVersion");
+    }
+  });
+  it("uses confirmed metadata over pending values and leaves a legacy creation date unknown", async () => {
+    const saved = await repository.save(draft(), crypto.randomUUID());
+    const pending = { ...saved, version: 2, createdAt: "2000-01-01T00:00:00.000Z", schemaVersion: 1 };
+    await changeSyncState("a", () => ({
+      remote: [saved], syncedAt: null,
+      jobs: [{ id: pending.mutationId, kind: "save", record: pending, expectedVersion: 1 }],
+    }));
+    const legacy = (await repository.list())[0];
+    expect(legacy.createdAt).toBeUndefined();
+    expect(legacy.schemaVersion).toBeUndefined();
+    await changeSyncState("a", (state) => ({
+      ...state, remote: [{ ...saved, schemaVersion: 1, createdAt: null }],
+    }));
+    expect((await repository.list())[0]).toMatchObject({ version: 2, schemaVersion: 1, createdAt: null });
+    expect((await repository.state()).jobs[0].record).toEqual(pending);
+  });
+  it("retains an unsupported-schema edit without automatically replaying it or downgrading remote metadata", async () => {
+    const saved = await repository.save(draft(), crypto.randomUUID());
+    const future = { ...saved, schemaVersion: 2, createdAt: "2026-09-26T14:00:00.000Z" };
+    fixture.fetch.mockResolvedValueOnce(Response.json({ error: { code: "unsupported_schema" } }, { status: 409 }))
+      .mockResolvedValueOnce(Response.json({ records: [future], revision: "future" }))
+      .mockResolvedValueOnce(Response.json({ revision: "future" }));
+    await repository.sync();
+    await new MealRepository().sync();
+    expect((await repository.state()).jobs[0]).toMatchObject({ id: saved.mutationId, error: "unsupported_schema" });
+    expect((await repository.list())[0]).toMatchObject({ schemaVersion: 2, createdAt: future.createdAt });
+    expect(fixture.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
 });
