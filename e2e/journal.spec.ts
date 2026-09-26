@@ -403,6 +403,7 @@ test("real photo preview with mocked analysis supports correction, reload, histo
   await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
   await expect.poll(() => backend.records.size).toBe(1);
   await expect(page.getByText(/項修改待同步/)).not.toBeVisible();
+  await expect(page.locator(".journal-notice")).not.toBeVisible();
   expect(backend.saves).toHaveLength(1);
   const first = [...backend.records.values()][0];
   expect(first).toMatchObject({ mealType: "breakfast", mode: "live", photoPath: null, items: [{ portionMin: 150, portionMax: 180 }] });
@@ -428,6 +429,10 @@ test("real photo preview with mocked analysis supports correction, reload, histo
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "刪除", exact: true }).click();
   await expect.poll(() => backend.records.size).toBe(0);
+  // Confirmed deletion must clear the local-pending acknowledgement before
+  // reload; reloading alone would hide a stale in-memory notice.
+  await expect(page.getByText(/項修改待同步/)).not.toBeVisible();
+  await expect(page.locator(".journal-notice")).not.toBeVisible();
   await page.reload();
   await expect(page.getByRole("heading", { name: "今日未有記錄", exact: true })).toBeVisible();
   await expect(todayCalories).toHaveCount(0);

@@ -30,7 +30,7 @@ The app already provides Today/history/editing, range estimates, per-account Ind
 ## Outcome
 
 - R2a: owner-reported PASS; not independently repeated with an authenticated QA account today.
-- R2b: **BLOCKED / NOT RUN** for all five production journeys. Neither repository documents nor the narrowly inspected KcalCue planning thread identified a designated production QA account. The available in-app browser was signed out; no KcalCue Chrome tab was open. No personal account was assumed to be QA, and no production meal was created, modified, deleted or inspected.
+- R2b: **PARTIAL / final cleanup in progress**. The owner subsequently designated a QA account and restored its login. Grok Bot ran all five real-photo cases; independent review verified six actual cloud records (five cases plus an auxiliary salad), the banana edit, and the first scoped deletion. The remaining five deletions and final empty GET are still awaiting artifact acceptance. No non-QA account data was accessed.
 - Core reliability: **PARTIAL overall; repaired scope passes local independent QA**. No migration or production configuration change.
 - Daily Tracking: existing Today/history/portion editing verified locally; feature expansion remains gated on R2b. No new native, billing or unrelated features.
 - Public real-photo fixtures: five categories ready, with source/license/hash evidence in [r2b-fixtures.md](./r2b-fixtures.md). No measured calorie or portion truth is asserted.
@@ -58,11 +58,29 @@ Runtime: Node **24.15.0**, matching the declared engine range. Dependencies inst
 | Browser E2E | 6/6 PASS | Chromium 375×812; synthetic Auth/cloud; real public photo preview with mocked analysis, correction, save, reload, history, Today total equality, edit and delete |
 | Independent bot | PASS for repaired local scope | Separate agent authored seven behavior tests: baseline 7/7 FAIL, fixed 7/7 PASS; reviewed product diff and separately reran final E2E (6/6 PASS, 14.2 seconds) |
 | Production read-only | PASS for limited probes | `/api/status` 200; anonymous `/api/meals?since=empty` 401; Cloud Run revision below |
-| Production authenticated real-image flow | BLOCKED | Requires designated QA login; 0 real AI calls, 0 production meal writes |
+| Production authenticated real-image flow | PARTIAL | Five real-photo cases and actual six-record GET verified; edit and first deletion verified; final cleanup acceptance pending |
 | Production mobile layout | Limited observation | Anonymous 375 px input view: scrollWidth=viewport=375; no captured console warnings/errors before browser-control failure |
 | Physical phone / installed PWA | NOT RUN | Desktop viewport/emulator cannot establish physical-device acceptance |
 
 Production readback: project `gen-lang-client-0116641325`, Cloud Run `kcalcue` in `asia-east1`, ready revision `kcalcue-00005-blk` at 100% traffic, max instances 1, concurrency 4, request timeout 120 seconds. These values were read without exposing environment variables or credentials. The deployed source artifact was not equated to clean Git main; pre-existing local deployment work remains uncommitted and untouched.
+
+## Resumed production evidence and notice repair
+
+After the owner designated the QA account and completed login, actual response bodies were captured through the normal browser Network UI. Only sanitized body artifacts were exported; no bearer tokens, HAR or authentication headers were retained in this report.
+
+- I full GET: six QA records; sanitized SHA256 `4219719bd1468928a6bb39e98ea141ef8ab30ee32bf000f8392a743388990be6`. Root and an independent reviewer compared all five photo cases, stored nutrition structures, original analysis and current values. Earlier UI-reconstructed JSON was excluded as cloud evidence and superseded by this actual response.
+- K edit POST: banana v3, breakfast, 120g; SHA256 `1bc10cad43ecf28e3c6e5552f57d3ac3f58cbf40958968a08e4bfd566249a491`. Original analysis and originalItems remained 80–140g.
+- L DELETE returned 200/ok for the auxiliary salad only. The subsequent itemful GET has exactly five records; banana equals K and the other four equal I. GET SHA256 `4163f902532b3e309dad5024a1c497e127d16d4e725e16221bd2a892e76389fa`. Today/history show 575–1395 kcal with 4/15 items included; unknown items are not counted as zero nutrition.
+- Five remaining QA meals are being removed individually, with banana last. Final empty cloud GET, reload and mobile cleanup evidence remain pending. Authentication is no longer blocked.
+
+The production screenshots revealed a stale yellow local-pending acknowledgement after confirmed cloud deletion. Save/delete/clear-all acknowledgements were stored as ordinary notices, so successful refreshes cleared sync errors but left these messages. They are now tagged as pending-sync: the existing account/generation-guarded durable snapshot clears only this category when all jobs are gone, or reports the remaining count including error jobs. Ordinary storage/auth/draft messages and dismissed notices are preserved.
+
+Validation of this follow-up:
+
+- Eleven new notice regressions plus eight existing journal/race cases: 19/19 PASS, independently rerun on Node 24.15.0. The final save/delete/clear-all tests all fail against the prior source at the real post-ACK lingering-banner assertion.
+- Full branch: 236/236 tests, lint, types, 47 deterministic nutrition cases, production build and 6/6 mobile E2E PASS. The photo journey now asserts the pending notice disappears before reload after both save and delete.
+- Integration with the unchanged owner deployment snapshot and PR12–17: Node 24.15.0 and Node 26.7.0 each 346/346 tests; lint/types/build and 7/7 mobile E2E PASS.
+- This is source/local evidence. The notice repair has not been deployed; production UI remains subject to the known finding until a separately authorized release.
 
 ## Failure trail and limits
 
@@ -78,7 +96,7 @@ Production readback: project `gen-lang-client-0116641325`, Cloud Run `kcalcue` i
 - Existing durable boundaries: immutable original analysis/originalItems versus editable items; per-record write version and mutation ID; transactional deletes with tombstones; verified UID paths and deny-all direct Firestore rules. Emulator coverage passed. Photo persistence remains intentionally absent.
 - Known follow-up scope after R2b: explicit schema/analysis/model provenance and creation timestamps, per-meal kcal display/direct final-kcal editing, and a deliberate opt-in image-history decision. Current photo-free privacy copy must change together with any future retention design.
 - Cost controls currently include 10 MiB file checks, image magic-byte checks, 1600 px draft compression, server conversion pixel limits, timeouts and process-local IP rate limits. App Check integration was not found in source; durable per-user AI deduplication/rate limits and streamed request-byte limits remain to assess before broader access. This PR is not a comprehensive security audit or public-launch approval.
-- Resume with a designated QA account via its normal login, verify entitlement, then execute each of the five fixtures through the real production journey and independently repeat it. Clean up only that account's newly created QA meals.
+- Complete the remaining designated-QA cleanup and independent final evidence review. The real-photo persistence and edited-state readback have now passed; do not confuse the pending notice repair release with already verified cloud data.
 - Merge/release remains with the owner: no explicit existing automatic-merge policy was found. Review the PR and reconcile pre-existing deployment work before deploying a build. No merge or deployment occurred during this task.
 
 ## Local evidence locations

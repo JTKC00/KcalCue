@@ -44,6 +44,8 @@ function errorText(error: unknown) {
         "未能連接雲端，修改仍保留於本機，稍後會自動重試。")
     : "未能完成操作，請檢查網絡後再試。已保留的修改不會被清除。";
 }
+type JournalNotice = string | { kind: "pending-sync"; message: string };
+
 export function MealJournal({
   initialProviderMode,
 }: {
@@ -63,7 +65,7 @@ export function MealJournal({
   const [manual, setManual] = useState(false);
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState<JournalNotice>("");
   const [syncNotice, setSyncNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [preparing, setPreparing] = useState(false);
@@ -137,6 +139,12 @@ export function MealJournal({
           setRecords(visibleMeals(state));
           setPending(state.jobs);
           setSyncedAt(state.syncedAt);
+          setNotice((value) => {
+            if (typeof value === "string") return value;
+            return state.jobs.length === 0
+              ? ""
+              : { kind: "pending-sync", message: `已保留本機修改，尚有 ${state.jobs.length} 項待同步。` };
+          });
         }
       } catch {
         if (isCurrent()) setSyncNotice("本機儲存不可用，請勿關閉頁面。");
@@ -508,7 +516,7 @@ export function MealJournal({
       ]);
       setDraft(null);
       setInitialDraft(undefined);
-      setNotice("已儲存到本機，連線時會自動同步。圖片不會保存到雲端。");
+      setNotice({ kind: "pending-sync", message: "已儲存到本機，連線時會自動同步。圖片不會保存到雲端。" });
       go("today");
       await writes.current;
       if (!scope.isCurrent()) return;
@@ -558,7 +566,7 @@ export function MealJournal({
     const scope = operationScope();
     await repository.delete(record);
     if (!scope.isCurrent()) return;
-    setNotice("刪除已保留於本機，連線時自動同步。");
+    setNotice({ kind: "pending-sync", message: "刪除已保留於本機，連線時自動同步。" });
     void refresh();
     setRecords((value) => value.filter((r) => r.id !== record.id));
     if (draft?.id === record.id) setDraft(null);
@@ -602,7 +610,7 @@ export function MealJournal({
       if (!scope.isCurrent()) return;
       setDraft(null);
       setRecords([]);
-      setNotice("刪除已保留於本機，連線時自動同步。");
+      setNotice({ kind: "pending-sync", message: "刪除已保留於本機，連線時自動同步。" });
       void refresh();
     } catch (error) {
       if (scope.isCurrent()) setNotice(errorText(error));
@@ -722,7 +730,7 @@ export function MealJournal({
     )
     .sort((a, b) => `${b.date}${b.time}`.localeCompare(`${a.date}${a.time}`));
   const days = [...new Set(visible.map((record) => record.date))];
-  const displayedNotice = syncNotice || notice;
+  const displayedNotice = syncNotice || (typeof notice === "string" ? notice : notice.message);
 
   return (
     <div className="journal-shell">
