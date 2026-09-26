@@ -59,3 +59,24 @@ jobs:
 
       - name: End-to-end journal and PWA tests (synthetic accounts)
         run: npm run test:e2e
+
+  node26-tests:
+    name: Node 26 test compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit and integration tests
+        run: npm test
