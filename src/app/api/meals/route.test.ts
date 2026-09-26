@@ -5,7 +5,8 @@ vi.mock("@/lib/server/auth", async (original) => ({
   ...(await original<typeof import("@/lib/server/auth")>()),
   authenticated: (...args: unknown[]) => authorize(...args),
 }));
-vi.mock("@/lib/firebase/meals", () => ({
+vi.mock("@/lib/firebase/meals", async (original) => ({
+  ...(await original<typeof import("@/lib/firebase/meals")>()),
   previousMeal: vi.fn(),
   commitMeal: vi.fn(),
   listMeals: vi.fn(),
