@@ -46,11 +46,11 @@ beforeEach(() => {
 });
 
 describe("meal schema write boundary", () => {
-  it.each([undefined, {}, { schemaVersion: 0 }, { schemaVersion: 1 }])(
+  it.each([undefined, {}, { schemaVersion: 0 }, { schemaVersion: 1 }, { schemaVersion: 2 }])(
     "accepts the legacy/current schema %j",
     (record) => expect(() => assertWritableMealSchema(record)).not.toThrow(),
   );
-  it.each([null, "1", -1, 0.5, 2, true, {}, [], NaN, Infinity])(
+  it.each([null, "1", -1, 0.5, 3, true, {}, [], NaN, Infinity])(
     "rejects unsupported stored schema %j",
     (schemaVersion) => {
       expect(() => assertWritableMealSchema({ schemaVersion })).toThrowError(
@@ -62,7 +62,7 @@ describe("meal schema write boundary", () => {
     const body = input();
     fixture.previous.mockResolvedValue({
       deleted: false,
-      record: { ...body, version: 1, mutationId: crypto.randomUUID(), schemaVersion: 2 },
+      record: { ...body, version: 1, mutationId: crypto.randomUUID(), schemaVersion: 3 },
     });
     const nutrition = vi.spyOn(LocalNutritionProvider.prototype, "resolve");
     const response = await POST(request({ ...body, version: 1, schemaVersion: 1 }));
@@ -74,7 +74,7 @@ describe("meal schema write boundary", () => {
   });
   it("acknowledges the same future-schema mutation without upgrading or enriching it", async () => {
     const body = input();
-    const previous = { ...body, version: 1, schemaVersion: 2, createdAt: null, futureField: "retain" };
+    const previous = { ...body, version: 1, schemaVersion: 3, createdAt: null, futureField: "retain" };
     fixture.previous.mockResolvedValue({ deleted: false, record: previous });
     const response = await POST(request(body));
     expect(response.status).toBe(200);

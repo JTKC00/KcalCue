@@ -7,6 +7,7 @@ import { dayNutrition, newDraft } from "./types";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { MealRepository } from "./repository";
 import { changeSyncState, clearSyncState } from "./outbox";
+import { dayCalories } from "./calories";
 
 const fixture = vi.hoisted(() => ({ uid: "a", fetch: vi.fn() }));
 vi.mock("@/lib/firebase/client", () => ({
@@ -267,14 +268,73 @@ describe("durable offline meal outbox", () => {
   });
   it("retains an unsupported-schema edit without automatically replaying it or downgrading remote metadata", async () => {
     const saved = await repository.save(draft(), crypto.randomUUID());
-    const future = { ...saved, schemaVersion: 2, createdAt: "2026-09-26T14:00:00.000Z" };
+    const future = { ...saved, schemaVersion: 3, createdAt: "2026-09-26T14:00:00.000Z" };
     fixture.fetch.mockResolvedValueOnce(Response.json({ error: { code: "unsupported_schema" } }, { status: 409 }))
       .mockResolvedValueOnce(Response.json({ records: [future], revision: "future" }))
       .mockResolvedValueOnce(Response.json({ revision: "future" }));
     await repository.sync();
     await new MealRepository().sync();
     expect((await repository.state()).jobs[0]).toMatchObject({ id: saved.mutationId, error: "unsupported_schema" });
-    expect((await repository.list())[0]).toMatchObject({ schemaVersion: 2, createdAt: future.createdAt });
+    expect((await repository.list())[0]).toMatchObject({ schemaVersion: 3, createdAt: future.createdAt });
     expect(fixture.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+
+  it("preserves manual calories offline through reload, lost acknowledgement and retry without leaking raw input", async () => {
+    const mutationId = crypto.randomUUID();
+    const before = { ...draft(), calorieCorrection: { kcal: 723, source: "user" as const }, calorieInput: "723" };
+    const saved = await repository.save(before, mutationId);
+    expect(saved).not.toHaveProperty("calorieInput");
+    expect(dayCalories(await new MealRepository().list()).range).toEqual({ min: 723, max: 723 });
+    expect(dayNutrition([saved])).toEqual(dayNutrition([{ ...saved, calorieCorrection: null }]));
+    fixture.fetch.mockRejectedValueOnce(new TypeError("acknowledgement lost"));
+    await expect(repository.sync()).rejects.toThrow();
+    const cloud = { ...saved, schemaVersion: 2, createdAt: "2026-09-26T12:00:00.000Z" };
+    fixture.fetch.mockResolvedValueOnce(Response.json({ record: cloud }))
+      .mockResolvedValueOnce(Response.json({ records: [cloud] }));
+    await new MealRepository().sync();
+    expect(await repository.list()).toEqual([cloud]);
+    const commands = fixture.fetch.mock.calls.filter(([, init]) => init?.method === "POST").map(([, init]) => JSON.parse(init.body));
+    expect(commands.map((body) => body.mutationId)).toEqual([mutationId, mutationId]);
+    for (const body of commands) {
+      expect(body.calorieCorrection).toEqual({ kcal: 723, source: "user" });
+      expect(body).not.toHaveProperty("calorieInput");
+    }
+    const cleared = await repository.save({ ...cloud, calorieCorrection: null }, crypto.randomUUID());
+    expect(cleared.calorieCorrection).toBeNull();
+    expect((await new MealRepository().list())[0].calorieCorrection).toBeNull();
+    fixture.uid = "b";
+    expect(await repository.list()).toEqual([]);
+  });
+
+  it.each(["same", "changed", "clear"])("overlays legacy pending %s intent without rewriting its payload or mutation", async (mode) => {
+    const saved = await repository.save({ ...draft(), calorieCorrection: { kcal: 650, source: "user" } }, crypto.randomUUID());
+    const mutationId = crypto.randomUUID();
+    const pending = { ...saved, version: 2, mutationId, time: "18:00",
+      calorieCorrection: mode === "clear" ? null : undefined,
+      calorieInput: "private stale draft text",
+      items: saved.items.map((item) => ({ ...item, normalizedName: "async metadata",
+        portionMin: mode === "changed" ? item.portionMin + 0.1 : item.portionMin })),
+    };
+    await changeSyncState("a", () => ({ remote: [saved], syncedAt: null,
+      jobs: [{ id: mutationId, kind: "save", record: pending, expectedVersion: 1 }] }));
+    expect((await new MealRepository().list())[0].calorieCorrection).toEqual(mode === "same" ? saved.calorieCorrection : null);
+    expect((await repository.state()).jobs[0].record).toEqual(pending);
+    fixture.fetch.mockRejectedValueOnce(new TypeError("offline"));
+    await expect(repository.sync()).rejects.toThrow();
+    const command = JSON.parse(fixture.fetch.mock.calls[0][1].body);
+    expect(command.mutationId).toBe(mutationId);
+    expect(command).not.toHaveProperty("calorieInput");
+    if (mode === "clear") expect(command.calorieCorrection).toBeNull();
+    else expect(command).not.toHaveProperty("calorieCorrection");
+  });
+
+  it("carries legacy omission through the preceding pending correction, including explicit clears", async () => {
+    const first = await repository.save({ ...draft(), calorieCorrection: { kcal: 700, source: "user" } }, crypto.randomUUID());
+    const oldEdit = await repository.save({ ...first, calorieCorrection: undefined, time: "18:00" }, crypto.randomUUID());
+    expect(oldEdit.calorieCorrection).toEqual(first.calorieCorrection);
+    expect((await repository.state()).jobs[1].record.calorieCorrection).toBeUndefined();
+    const clear = await repository.save({ ...oldEdit, calorieCorrection: null }, crypto.randomUUID());
+    await repository.save({ ...clear, calorieCorrection: undefined, time: "19:00" }, crypto.randomUUID());
+    expect((await repository.list())[0].calorieCorrection).toBeNull();
   });
 });

@@ -24,6 +24,8 @@ import { preparePhoto } from "@/lib/meals/photo";
 import { roundRange } from "@/lib/nutrition/calculation";
 import { KcalCueApp } from "./kcalcue-app";
 import { PwaControls } from "./pwa-controls";
+import { CalorieCorrectionInput } from "./calorie-correction-input";
+import { dayCalories, mealCalories, sameCalorieBasis } from "@/lib/meals/calories";
 
 const repository = new MealRepository();
 const messages: Record<string, string> = {
@@ -46,6 +48,14 @@ function errorText(error: unknown) {
     : "未能完成操作，請檢查網絡後再試。已保留的修改不會被清除。";
 }
 type JournalNotice = string | { kind: "pending-sync"; message: string };
+
+function mealCalorieLabel(record: MealRecord) {
+  const calories = mealCalories(record);
+  if (!calories.range) return "卡路里未知";
+  if (calories.source === "user") return `手動記錄：${calories.range.min} kcal`;
+  const range = roundRange(calories.range, 5);
+  return `${calories.coverage === "complete" ? "估算" : "已知部分"}：約 ${range.min}–${range.max} kcal`;
+}
 
 export function MealJournal({
   initialProviderMode,
@@ -413,19 +423,27 @@ export function MealJournal({
   }
   const onDraftChange = useCallback(
     (change: Pick<MealDraft, "items" | "analysis" | "mode">) => {
-      setDraft((value) =>
-        value
-          ? {
-              ...value,
-              ...change,
-              originalItems: value.originalItems.length
-                ? value.originalItems
-                : change.analysis
-                  ? change.items
-                  : [],
-            }
-          : value,
-      );
+      const previous = current.current.draft;
+      if (previous && previous.calorieInput !== undefined &&
+        (!sameCalorieBasis(previous.items, change.items) || previous.mode !== change.mode)) {
+        setNotice("餐點內容已改，已恢復參考估算；請重新確認手動卡路里。");
+      } else if (previous?.calorieCorrection &&
+        (!sameCalorieBasis(previous.items, change.items) || previous.mode !== change.mode)) {
+        setNotice("餐點內容已改，已恢復參考估算；請重新確認手動卡路里。");
+      }
+      setDraft((value) => {
+        if (!value) return value;
+        const changed = !sameCalorieBasis(value.items, change.items) || value.mode !== change.mode;
+        return {
+          ...value,
+          ...change,
+          calorieCorrection: changed ? null : value.calorieCorrection,
+          calorieInput: changed ? undefined : value.calorieInput,
+          originalItems: value.originalItems.length
+            ? value.originalItems
+            : change.analysis ? change.items : [],
+        };
+      });
     },
     [],
   );
@@ -497,11 +515,12 @@ export function MealJournal({
     const scope = operationScope();
     let next = draft;
     try {
-      next = { ...next, photoPath: null, photo: undefined };
+      next = { ...next, photoPath: null, photo: undefined, calorieInput: undefined };
       const fingerprint = JSON.stringify({
         ...next,
         schemaVersion: undefined,
         createdAt: undefined,
+        calorieInput: undefined,
         photo: undefined,
         pendingMutation: undefined,
       });
@@ -953,11 +972,20 @@ export function MealJournal({
                     : "確認後才加入每日記錄"}
                 </p>
               </section>
+              {draft.items.length > 0 && draft.mode !== "demo" && (
+                <CalorieCorrectionInput
+                  correction={draft.calorieCorrection}
+                  input={draft.calorieInput}
+                  disabled={busy}
+                  onChange={(change) => setDraft((value) => value ? { ...value, ...change } : value)}
+                />
+              )}
               <fieldset className="editor-fields" disabled={busy}>
                 <KcalCueApp
                   key={editorKey}
                   initialProviderMode={initialProviderMode}
                   initialDraft={initialDraft ?? draft}
+                  calorieCorrection={draft.calorieCorrection}
                   manual={manual}
                   onDraftChange={onDraftChange}
                   onPhotoSelected={onPhotoSelected}
@@ -1005,6 +1033,8 @@ export function MealJournal({
                         openDraft({
                           ...draft,
                           items: structuredClone(draft.originalItems),
+                          calorieCorrection: null,
+                          calorieInput: undefined,
                         });
                     }}
                   >
@@ -1102,21 +1132,27 @@ export function MealJournal({
           {days.map((date) => {
             const meals = visible.filter((r) => r.date === date);
             const nutrition = dayNutrition(meals);
+            const calories = dayCalories(meals);
+            const calorieRange = calories.range && (calories.referenceCount
+              ? roundRange(calories.range, 5) : calories.range);
             return (
               <section className="journal-day" key={date}>
                 <h2>{date}</h2>
                 <div className="day-summary journal-card">
-                  {Object.entries(nutrition.totals).map(([key, range]) => {
-                    const rounded = roundRange(
-                      range,
-                      key === "calories" ? 5 : 1,
-                    );
+                  <div>
+                    <span>卡路里</span>
+                    <strong>{calorieRange
+                      ? calories.referenceCount ? `${calorieRange.min}–${calorieRange.max}` : calorieRange.min
+                      : "未知"}</strong>
+                    <small>kcal</small>
+                  </div>
+                  {Object.entries(nutrition.totals).filter(([key]) => key !== "calories").map(([key, range]) => {
+                    const rounded = roundRange(range, 1);
                     return (
                       <div key={key}>
                         <span>
                           {
                             {
-                              calories: "卡路里",
                               protein: "蛋白質",
                               carbs: "碳水",
                               fat: "脂肪",
@@ -1128,13 +1164,15 @@ export function MealJournal({
                             ? `${rounded.min}–${rounded.max}`
                             : "未知"}
                         </strong>
-                        <small>{key === "calories" ? "kcal" : "g"}</small>
+                        <small>g</small>
                       </div>
                     );
                   })}
+                  {calories.manualCount > 0 && <p>含 {calories.manualCount} 餐手動卡路里記錄；營養素仍按食物參考估算。</p>}
+                  {calories.partialCount + calories.unknownCount > 0 && <p>卡路里尚未完整：{calories.partialCount + calories.unknownCount} 餐有未計入部分，未知不代表零。</p>}
                   {nutrition.includedCount < nutrition.totalCount && (
                     <p>
-                      部分估算：只計入 {nutrition.includedCount}／
+                      營養素部分估算：只計入 {nutrition.includedCount}／
                       {nutrition.totalCount} 項食物，未計入項目不代表零營養。
                     </p>
                   )}
@@ -1151,6 +1189,7 @@ export function MealJournal({
                             .map((item) => item.displayName)
                             .join("、")}
                         </h3>
+                        <p className="meal-calories">{mealCalorieLabel(record)}</p>
                         <div className="journal-actions">
                           <button
                             className="button button-secondary"

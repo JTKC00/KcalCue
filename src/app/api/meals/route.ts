@@ -1,5 +1,6 @@
 import { authenticated, apiError, HttpError } from "@/lib/server/auth";
 import { mealInputSchema, type MealRecord } from "@/lib/meals/types";
+import { resolveCalorieCorrection } from "@/lib/meals/calories";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import {
   listMeals,
@@ -91,6 +92,7 @@ export async function POST(request: Request) {
         : items);
     const record: Omit<MealRecord, "updatedAt"> = {
       ...input,
+      calorieCorrection: resolveCalorieCorrection(input.calorieCorrection, input.items, previous),
       items,
       analysis,
       originalItems,

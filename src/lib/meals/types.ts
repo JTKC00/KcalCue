@@ -7,6 +7,8 @@ import {
 import type { EditableFoodItem } from "@/lib/domain/editable-meal";
 import { NutritionService } from "@/lib/nutrition/service";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
+import { calorieCorrectionInputSchema, type MealCalorieCorrection } from "./calories";
+export type { MealCalorieCorrection } from "./calories";
 
 export const mealTypes = {
   breakfast: "早餐",
@@ -14,7 +16,7 @@ export const mealTypes = {
   dinner: "晚餐",
   snack: "小食",
 } as const;
-export const CURRENT_MEAL_SCHEMA_VERSION = 1;
+export const CURRENT_MEAL_SCHEMA_VERSION = 2;
 export interface MealDraft {
   id: string;
   date: string;
@@ -25,6 +27,8 @@ export interface MealDraft {
   analysis: FoodAnalysis | null;
   items: EditableFoodItem[];
   originalItems: EditableFoodItem[];
+  calorieCorrection?: MealCalorieCorrection | null;
+  calorieInput?: string;
   version: number;
   readonly schemaVersion?: number;
   readonly createdAt?: string | null;
@@ -33,7 +37,7 @@ export interface MealDraft {
   removePhoto?: boolean;
   pendingMutation?: { id: string; fingerprint: string };
 }
-export interface MealRecord extends Omit<MealDraft, "photo" | "removePhoto"> {
+export interface MealRecord extends Omit<MealDraft, "photo" | "removePhoto" | "calorieInput"> {
   userId: string;
   updatedAt: string;
   mutationId: string;
@@ -53,6 +57,7 @@ export function newDraft(): MealDraft {
     analysis: null,
     items: [],
     originalItems: [],
+    calorieCorrection: null,
     version: 0,
     photoPath: null,
   };
@@ -77,6 +82,7 @@ export const mealInputSchema = z.object({
   mealType: z.enum(["breakfast", "lunch", "dinner", "snack"]),
   mode: z.enum(["live", "manual"]),
   analysis: foodAnalysisSchema.nullable(),
+  calorieCorrection: calorieCorrectionInputSchema.nullable().optional(),
   items: z
     .array(
       foodEstimateSchema.safeExtend({

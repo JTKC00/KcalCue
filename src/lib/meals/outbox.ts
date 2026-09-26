@@ -1,4 +1,5 @@
 import type { MealRecord } from "./types";
+import { resolveCalorieCorrection } from "./calories";
 export interface PendingMeal {
   id: string;
   kind: "save" | "delete";
@@ -61,13 +62,17 @@ export function visibleMeals(state: SyncState) {
     if (job.kind === "delete") meals.delete(job.record.id);
     else {
       const confirmed = remote.get(job.record.id);
+      const previous = meals.get(job.record.id);
       // An old queued edit may predate the first cloud acknowledgement. Its
       // editable values win, but cannot erase or replace confirmed metadata.
-      meals.set(job.record.id, confirmed ? {
+      meals.set(job.record.id, {
         ...job.record,
-        schemaVersion: confirmed.schemaVersion,
-        createdAt: confirmed.createdAt,
-      } : job.record);
+        calorieCorrection: resolveCalorieCorrection(job.record.calorieCorrection, job.record.items, previous),
+        ...(confirmed ? {
+          schemaVersion: confirmed.schemaVersion,
+          createdAt: confirmed.createdAt,
+        } : {}),
+      });
     }
   }
   return [...meals.values()];

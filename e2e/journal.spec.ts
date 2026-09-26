@@ -164,6 +164,76 @@ async function rice(page: Page) {
     .fill("白飯");
 }
 
+test("whole-meal user calories survive reload without inventing nutrition, and can be cleared", async ({ page, context }) => {
+  const backend = cloud();
+  await backend.install(context);
+  await page.goto("/");
+  await login(page);
+  await rice(page);
+  await page.getByRole("combobox", { name: "食物名稱", exact: true }).fill("自訂測試餐");
+  await page.getByRole("button", { name: "自行填寫本餐卡路里", exact: true }).click();
+  const input = page.getByRole("spinbutton", { name: "手動卡路里（整餐 kcal）", exact: true });
+  await input.fill("650");
+  await expect(page.getByRole("heading", { name: "手動記錄：650 kcal", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  await expect.poll(() => backend.records.size).toBe(1);
+  expect([...backend.records.values()][0].calorieCorrection).toEqual({ kcal: 650, source: "user" });
+  expect(backend.saves[0]).not.toHaveProperty("calorieInput");
+  const total = page.locator(".day-summary > div").filter({ hasText: "卡路里" }).locator("strong");
+  await expect(total).toHaveText("650");
+  await expect(page.locator(".meal-calories")).toHaveText("手動記錄：650 kcal");
+  await expect(page.locator(".day-summary > div").filter({ hasText: "蛋白質" }).locator("strong")).toHaveText("未知");
+  await page.reload();
+  await expect(total).toHaveText("650");
+  await page.getByRole("button", { name: "歷史", exact: true }).click();
+  await expect(page.locator(".meal-calories")).toHaveText("手動記錄：650 kcal");
+  await page.getByRole("button", { name: "查看／修正", exact: true }).click();
+  await expect(input).toHaveValue("650");
+
+  // An empty editor is invalid, not a user-confirmed zero or the old value.
+  await input.fill("");
+  const savesBefore = backend.saves.length;
+  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  await expect(page.getByRole("region", { name: "本餐卡路里修正" }).getByRole("alert")).toContainText("空白不代表零");
+  expect(backend.saves).toHaveLength(savesBefore);
+  await expect.poll(() => page.evaluate(async (uid) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const open = indexedDB.open("kcalcue-private");
+      open.onsuccess = () => resolve(open.result);
+      open.onerror = () => reject(open.error);
+    });
+    try {
+      return await new Promise<string | undefined>((resolve, reject) => {
+        const tx = db.transaction("accounts", "readonly");
+        const get = tx.objectStore("accounts").get(uid);
+        tx.oncomplete = () => resolve(get.result?.draft?.calorieInput);
+        tx.onerror = () => reject(tx.error);
+      });
+    } finally { db.close(); }
+  }, userId)).toBe("");
+  await page.reload();
+  await expect(input).toHaveValue("");
+  await expect(page.getByRole("region", { name: "本餐卡路里修正" }).getByRole("alert")).toContainText("空白不代表零");
+  await input.fill("0");
+  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  await expect.poll(() => [...backend.records.values()][0].version).toBe(2);
+  await expect(total).toHaveText("0");
+  await expect(page.locator(".meal-calories")).toHaveText("手動記錄：0 kcal");
+  await page.reload();
+  await page.getByRole("button", { name: "查看／修正", exact: true }).click();
+  await page.getByRole("button", { name: "恢復參考估算", exact: true }).click();
+  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  await expect.poll(() => [...backend.records.values()][0].version).toBe(3);
+  expect([...backend.records.values()][0].calorieCorrection).toBeNull();
+  await page.reload();
+  await expect(total).toHaveText("未知");
+  await expect(page.locator(".meal-calories")).toHaveText("卡路里未知");
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "刪除", exact: true }).click();
+  await expect.poll(() => backend.records.size).toBe(0);
+  await expect(page.getByRole("heading", { name: "今日未有記錄", exact: true })).toBeVisible();
+});
+
 test("Email link login restores a guest draft and automatically retries a failed save", async ({
   page,
   context,

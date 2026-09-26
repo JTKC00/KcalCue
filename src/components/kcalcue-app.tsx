@@ -63,6 +63,7 @@ interface AnalyzeResponse {
 interface KcalCueAppProps {
   initialProviderMode: ProviderMode;
   initialDraft?: MealDraft;
+  calorieCorrection?: MealDraft["calorieCorrection"];
   onDraftChange?: (change: Pick<MealDraft, "items" | "analysis" | "mode">, file: File | null) => void;
   onExit?: () => void;
   manual?: boolean;
@@ -349,7 +350,7 @@ function SiteFooter() {
   );
 }
 
-export function KcalCueApp({ initialProviderMode, initialDraft, onDraftChange, onExit, manual, onPhotoSelected }: KcalCueAppProps) {
+export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrection, onDraftChange, onExit, manual, onPhotoSelected }: KcalCueAppProps) {
   const [stage, setStage] = useState<AppStage>(initialDraft?.items.length || manual ? "result" : "input");
   const [file, setFile] = useState<File | null>(() => initialDraft?.photo && !initialDraft.items.length ? new File([initialDraft.photo], "餐點.jpg", { type: "image/jpeg" }) : null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -749,6 +750,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, onDraftChange, o
           analysis={analysis}
           items={items}
           mode={activeMode}
+          calorieCorrection={calorieCorrection}
           previewUrl={previewUrl}
           previewFailed={previewFailed}
           isHeic={isHeicFile(file?.name ?? "", file?.type)}
