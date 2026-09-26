@@ -4,13 +4,15 @@ import { useMemo } from "react";
 import { confidenceCopy, copy } from "@/content/zh-HK";
 import {
   collectUncertaintyReasons,
+  confidenceLevel,
   mealConfidence,
   recognitionConfidenceLevel,
 } from "@/lib/domain/confidence";
 import { mealShowsTotal } from "@/lib/nutrition/calculation";
 import type { NutritionConfidence } from "@/lib/nutrition/types";
-import type { FoodAnalysis, PortionUnit } from "@/lib/domain/food-analysis";
-import type { EditableFoodItem, PortionPreset } from "@/lib/domain/editable-meal";
+import type { FoodAnalysis, FoodEstimate, PortionUnit } from "@/lib/domain/food-analysis";
+import { createEditableFoodItems, type EditableFoodItem, type PortionPreset } from "@/lib/domain/editable-meal";
+import { normalizeFoodName } from "@/lib/nutrition/canonical";
 import {
   roundRange,
   type NutrientRange,
@@ -18,7 +20,7 @@ import {
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { NutritionService } from "@/lib/nutrition/service";
 import { AlertIcon, CheckIcon, PlusIcon, RefreshIcon, ShieldIcon } from "./icons";
-import { FoodEditor } from "./food-editor";
+import { FoodEditor, type RecognitionBadge } from "./food-editor";
 import { ImagePreviewFallback } from "./image-preview-fallback";
 
 interface ResultViewProps {
@@ -39,6 +41,27 @@ interface ResultViewProps {
   onDelete: (id: string) => void;
   onAdd: () => void;
   onReset: () => void;
+}
+
+interface FoodRecognition extends RecognitionBadge {
+  originalFood?: FoodEstimate;
+}
+
+function foodRecognition(
+  item: EditableFoodItem,
+  originalFood: FoodEstimate | undefined,
+  mode: ResultViewProps["mode"],
+): FoodRecognition {
+  if (mode === "manual" || item.id.startsWith("manual-")) return { label: "手動輸入" };
+  if (mode === "demo") return { label: "示範資料" };
+  if (!originalFood) return { label: "未有 AI 辨認資料" };
+  if (
+    normalizeFoodName(item.displayName) !== normalizeFoodName(originalFood.displayName) ||
+    item.identityLevel !== originalFood.identityLevel
+  ) return { label: "已手動修正" };
+
+  const level = confidenceLevel(originalFood.recognitionConfidence);
+  return { label: `${copy.recognitionLabel}：${confidenceCopy[level]}`, level, originalFood };
 }
 
 function displayRange(range: NutrientRange, increment = 1): string {
@@ -85,8 +108,20 @@ export function ResultView({
   const provider = useMemo(() => new LocalNutritionProvider(), []);
   const service = useMemo(() => new NutritionService(provider), [provider]);
   const meal = useMemo(() => service.calculateMeal(items), [items, service]);
-  const recognition = recognitionConfidenceLevel(items);
-  const visionConfidence = mealConfidence(items);
+  const originalFoods = useMemo(
+    () => new Map(createEditableFoodItems(analysis?.foods ?? []).map(food => [food.id, food])),
+    [analysis],
+  );
+  const recognitionSources = items.map(item => foodRecognition(item, originalFoods.get(item.id), mode));
+  const aiFoods = recognitionSources.flatMap(source => source.originalFood ? [source.originalFood] : []);
+  const recognition = recognitionConfidenceLevel(aiFoods);
+  const visionConfidence = aiFoods.length > 0 ? mealConfidence(aiFoods) : null;
+  const recognitionLabel = aiFoods.length === 0
+    ? "食物來源"
+    : aiFoods.length === items.length ? copy.recognitionLabel : `${copy.recognitionLabel}（未修改項目）`;
+  const recognitionSummary = aiFoods.length > 0
+    ? `${confidenceCopy[recognition]}${aiFoods.length < items.length ? `（${aiFoods.length} / ${items.length} 項）` : ""}`
+    : [...new Set(recognitionSources.map(source => source.label))].join("／") || "未有 AI 辨認資料";
   const nutritionConfidence = weakestNutritionConfidence(meal);
   const showTotal = mealShowsTotal(meal.coverage);
   const calories = roundRange(meal.totals.calories, 5);
@@ -159,8 +194,8 @@ export function ResultView({
               )}
             </div>
             <div className="confidence-split">
-              <span>{copy.recognitionLabel}</span>
-              <strong>{confidenceCopy[recognition]}</strong>
+              <span>{recognitionLabel}</span>
+              <strong>{recognitionSummary}</strong>
               <span>{copy.nutritionLabel}</span>
               <strong>
                 {nutritionConfidence === "none"
@@ -214,6 +249,7 @@ export function ResultView({
                   key={item.id}
                   item={item}
                   calculation={meal.foods[index]}
+                  recognition={recognitionSources[index]}
                   onNameChange={(name) => onNameChange(item.id, name)}
                   onPortionChange={(field, value) =>
                     onPortionChange(item.id, field, value)
