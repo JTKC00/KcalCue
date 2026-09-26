@@ -8,6 +8,7 @@ import {
   applyPortionPreset,
   convertPortionUnit,
   createEditableFoodItems,
+  renameFoodItem,
   type EditableFoodItem,
   type PortionPreset,
 } from "@/lib/domain/editable-meal";
@@ -17,7 +18,6 @@ import {
   enrichUnresolvedMatches,
   resolveNutritionMatchWithFallback,
 } from "@/lib/nutrition/client";
-import { normalizeFoodName } from "@/lib/nutrition/canonical";
 import type { NutritionMatch } from "@/lib/nutrition/types";
 import {
   DEMO_ANALYZE_DELAY_MS,
@@ -361,7 +361,12 @@ export function KcalCueApp({ initialProviderMode, initialDraft, onDraftChange, o
   );
   const [appError, setAppError] = useState<AppError | null>(null);
   const nutritionProvider = useMemo(() => new LocalNutritionProvider(), []);
+  const originalFoods = useMemo(
+    () => new Map(createEditableFoodItems(analysis?.foods ?? []).map(food => [food.id, food])),
+    [analysis],
+  );
   const nameEditTimers = useRef(new Map<string, number>());
+  const nameEditRevisions = useRef(new Map<string, number>());
   const analyzeAbortRef = useRef<AbortController | null>(null);
   const editAbortRef = useRef(new AbortController());
   useLayoutEffect(() => {
@@ -592,14 +597,9 @@ export function KcalCueApp({ initialProviderMode, initialDraft, onDraftChange, o
     const currentItem = items.find((item) => item.id === id);
     if (!currentItem) return;
 
-    const nextFood = {
-      ...currentItem,
-      displayName: name,
-      normalizedName:
-        normalizeFoodName(currentItem.displayName) === normalizeFoodName(name)
-          ? currentItem.normalizedName
-          : name,
-    };
+    const revision = (nameEditRevisions.current.get(id) ?? 0) + 1;
+    nameEditRevisions.current.set(id, revision);
+    const nextFood = renameFoodItem(currentItem, name, originalFoods.get(id) ?? initialDraft?.originalItems.find(food => food.id === id));
     const cachedMatch = canReuseNutritionMatchForNameEdit(
       currentItem,
       nextFood,
@@ -629,7 +629,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, onDraftChange, o
       const signal = editAbortRef.current.signal;
       void resolveNutritionMatchWithFallback(nextFood, localMatch, signal).then(
         (resolvedMatch) => {
-          if (signal.aborted) return;
+          if (signal.aborted || nameEditRevisions.current.get(id) !== revision) return;
           updateItem(id, (item) => {
             if (item.displayName !== name) return item;
             return {
