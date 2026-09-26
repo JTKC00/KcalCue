@@ -19,7 +19,8 @@ vi.mock("@/lib/server/auth", async (original) => ({
   ...await original<typeof import("@/lib/server/auth")>(),
   authenticated: async () => ({ db: {}, user: { id: "correction-test-user" } }),
 }));
-vi.mock("@/lib/firebase/meals", () => ({
+vi.mock("@/lib/firebase/meals", async (original) => ({
+  ...(await original<typeof import("@/lib/firebase/meals")>()),
   previousMeal: mocks.previousMeal,
   commitMeal: mocks.commitMeal,
 }));
