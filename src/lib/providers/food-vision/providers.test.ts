@@ -207,7 +207,7 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
         store: false,
       }),
       expect.objectContaining({
-        maxRetries: 2,
+        maxRetries: 0,
         timeout: OPENAI_HTTP_TIMEOUT_MS,
       }),
     );
@@ -218,6 +218,28 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
     expect(options.signal).not.toBe(request.signal);
     expect(OPENAI_ABORT_TIMEOUT_MS).toBeGreaterThan(OPENAI_HTTP_TIMEOUT_MS);
   });
+
+  it.each([500, 429, "connection"] as const)(
+    "makes one SDK transport attempt for %s with the provider's default options",
+    async (failure) => {
+      // Use the installed SDK, with an in-process transport; never contact a provider.
+      const { default: RealOpenAI } = await vi.importActual<typeof import("openai")>("openai");
+      const transport = vi.fn(async () => {
+        if (failure === "connection") throw new TypeError("Synthetic connection failure");
+        return new Response(JSON.stringify({ error: { message: "Synthetic upstream failure" } }), {
+          status: failure,
+          headers: { "content-type": "application/json", "retry-after-ms": "1" },
+        });
+      });
+      const client = new RealOpenAI({ apiKey: "test-only", fetch: transport });
+      responsesCreateMock.mockImplementation((body, options) => client.responses.create(body, options));
+
+      await expect(provider().analyzeImage({ data: "synthetic", mimeType: "image/jpeg" }))
+        .rejects.toMatchObject({ name: "FoodVisionError" });
+      expect(responsesCreateMock).toHaveBeenCalledOnce();
+      expect(transport).toHaveBeenCalledOnce();
+    },
+  );
 
   it("forwards cancellation to an in-flight OpenAI request", async () => {
     const controller = new AbortController();

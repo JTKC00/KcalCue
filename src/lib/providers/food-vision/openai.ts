@@ -262,7 +262,7 @@ export class OpenAIFoodVisionProvider implements FoodVisionProvider {
           store: false,
         },
         {
-          maxRetries: 2,
+          maxRetries: 0,
           timeout: OPENAI_HTTP_TIMEOUT_MS,
           signal: AbortSignal.any([
             AbortSignal.timeout(OPENAI_ABORT_TIMEOUT_MS),

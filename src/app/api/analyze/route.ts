@@ -18,6 +18,7 @@ import {
 } from "@/lib/server/rate-limit";
 import { elapsedMs, logSafeTiming } from "@/lib/server/timing";
 import { authenticated, apiError } from "@/lib/server/auth";
+import { acquireLiveAnalysis } from "@/lib/server/live-analysis-admission";
 import {
   readBoundedRequestBody,
   RequestBodyTooLargeError,
@@ -75,10 +76,6 @@ export async function POST(request: Request) {
       : createFoodVisionProvider();
     visionMode = provider.mode;
 
-    if (provider.mode === "live") {
-      try { await authenticated(request); } catch (error) { return apiError(error); }
-    }
-
     if (provider.mode === "demo") {
       visionStartedAt = performance.now();
       const analysis = await provider.analyzeImage(
@@ -89,6 +86,14 @@ export async function POST(request: Request) {
         { signal: request.signal },
       );
       return NextResponse.json({ analysis, mode: provider.mode });
+    }
+
+    let userId: string;
+    try {
+      const { user } = await authenticated(request);
+      userId = user.id;
+    } catch (error) {
+      return apiError(error);
     }
 
     const image = formData.get("image");
@@ -107,16 +112,28 @@ export async function POST(request: Request) {
 
     imageMimeType = detectedMimeType;
     imageByteSize = bytes.byteLength;
-    visionStartedAt = performance.now();
-    const analysis = await provider.analyzeImage(
-      {
-        data: bytes.toString("base64"),
-        mimeType: detectedMimeType,
-      },
-      { signal: request.signal },
-    );
+    const release = acquireLiveAnalysis(userId);
+    if (!release) {
+      const limited = rateLimitedJsonResponse();
+      return NextResponse.json(limited.body, {
+        status: limited.status,
+        headers: limited.headers,
+      });
+    }
 
-    return NextResponse.json({ analysis, mode: provider.mode });
+    try {
+      visionStartedAt = performance.now();
+      const analysis = await provider.analyzeImage(
+        {
+          data: bytes.toString("base64"),
+          mimeType: detectedMimeType,
+        },
+        { signal: request.signal },
+      );
+      return NextResponse.json({ analysis, mode: provider.mode });
+    } finally {
+      release();
+    }
   } catch (error) {
     if (error instanceof FoodVisionError) {
       if (!error.diagnostic) {

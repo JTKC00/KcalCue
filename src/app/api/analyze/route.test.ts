@@ -8,6 +8,11 @@ vi.mock("@/lib/server/auth", async importOriginal => ({
   ...await importOriginal<typeof import("@/lib/server/auth")>(), authenticated: (...args: unknown[]) => authorize(...args),
 }));
 
+vi.mock("@/lib/server/live-analysis-admission", async importOriginal => ({
+  ...await importOriginal<typeof import("@/lib/server/live-analysis-admission")>(),
+  acquireLiveAnalysis: vi.fn(),
+}));
+
 vi.mock("@/lib/providers/food-vision/factory", () => ({
   createFoodVisionProvider: () => ({
     id: "openai",
@@ -26,6 +31,7 @@ vi.mock("@/lib/server/env", () => ({
 import { FoodVisionError } from "@/lib/providers/food-vision/errors";
 import { demoFoodAnalysis } from "@/lib/providers/food-vision/demo";
 import { ANALYZE_RATE_LIMIT, clearRateLimitStore } from "@/lib/server/rate-limit";
+import { acquireLiveAnalysis, createLiveAnalysisAdmission } from "@/lib/server/live-analysis-admission";
 import { POST } from "./route";
 
 function imageRequest(
@@ -58,11 +64,30 @@ function heifBytes(brand = "mif1"): Uint8Array {
   return bytes;
 }
 
+function deferredAnalysis() {
+  let resolve!: (analysis: typeof demoFoodAnalysis) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<typeof demoFoodAnalysis>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
+
+function distinctIpRequest(index: number) {
+  return jpegRequest("meal.jpg", "image/jpeg", {
+    "x-forwarded-for": `198.51.100.${index}`,
+    "x-user-id": `untrusted-user-${index}`,
+  });
+}
+
 describe("POST /api/analyze", () => {
   beforeEach(() => {
     analyzeImage.mockReset();
     authorize.mockReset().mockResolvedValue({ user: { id: "test-user" } });
+    vi.mocked(acquireLiveAnalysis).mockReset().mockImplementation(createLiveAnalysisAdmission());
     clearRateLimitStore();
+    vi.spyOn(Date, "now").mockReturnValue(1_000_000);
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
@@ -87,6 +112,7 @@ describe("POST /api/analyze", () => {
     expect(body.analysis.analysisStatus).toBe("success");
     expect(analyzeImage).not.toHaveBeenCalled();
     expect(authorize).not.toHaveBeenCalled();
+    expect(acquireLiveAnalysis).not.toHaveBeenCalled();
   });
 
   it("requires a verified account before live image analysis", async () => {
@@ -95,6 +121,7 @@ describe("POST /api/analyze", () => {
     const response = await POST(jpegRequest());
     expect(response.status).toBe(401);
     expect(analyzeImage).not.toHaveBeenCalled();
+    expect(acquireLiveAnalysis).not.toHaveBeenCalled();
   });
 
   it("returns a missing-image error for live requests without a file", async () => {
@@ -111,6 +138,7 @@ describe("POST /api/analyze", () => {
     expect(response.status).toBe(400);
     expect(body).toEqual({ error: { code: "missing_image" } });
     expect(analyzeImage).not.toHaveBeenCalled();
+    expect(acquireLiveAnalysis).not.toHaveBeenCalled();
   });
 
   it("returns a validated live analysis", async () => {
@@ -213,6 +241,74 @@ describe("POST /api/analyze", () => {
     expect(response.status).toBe(415);
     expect(body).toEqual({ error: { code: "invalid_file" } });
     expect(analyzeImage).not.toHaveBeenCalled();
+    expect(acquireLiveAnalysis).not.toHaveBeenCalled();
+  });
+
+  it("shares verified UID quota across different IPs and ignores untrusted user headers", async () => {
+    analyzeImage.mockResolvedValue(demoFoodAnalysis);
+    for (let attempt = 0; attempt < 5; attempt++) {
+      expect((await POST(distinctIpRequest(attempt))).status).toBe(200);
+    }
+    const blocked = await POST(distinctIpRequest(5));
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get("Retry-After")).toBe("60");
+    expect(await blocked.json()).toEqual({ error: { code: "rate_limited" } });
+    expect(analyzeImage).toHaveBeenCalledTimes(5);
+    expect(acquireLiveAnalysis).toHaveBeenCalledTimes(6);
+    expect(vi.mocked(acquireLiveAnalysis).mock.calls.every(([uid]) => uid === "test-user")).toBe(true);
+  });
+
+  it("keeps another verified user's quota independent", async () => {
+    analyzeImage.mockResolvedValue(demoFoodAnalysis);
+    for (let attempt = 0; attempt < 5; attempt++) await POST(distinctIpRequest(attempt));
+    authorize.mockResolvedValueOnce({ user: { id: "another-verified-user" } });
+    expect((await POST(distinctIpRequest(5))).status).toBe(200);
+    expect((await POST(distinctIpRequest(6))).status).toBe(429);
+    expect(analyzeImage).toHaveBeenCalledTimes(6);
+  });
+
+  it("blocks simultaneous work for one UID while another UID can proceed, then releases after success", async () => {
+    const pending = deferredAnalysis();
+    analyzeImage.mockReturnValueOnce(pending.promise).mockResolvedValue(demoFoodAnalysis);
+    const first = POST(distinctIpRequest(0));
+    await vi.waitFor(() => expect(analyzeImage).toHaveBeenCalledOnce());
+    expect((await POST(distinctIpRequest(1))).status).toBe(429);
+    expect(analyzeImage).toHaveBeenCalledOnce();
+    authorize.mockResolvedValueOnce({ user: { id: "another-verified-user" } });
+    expect((await POST(distinctIpRequest(2))).status).toBe(200);
+    pending.resolve(demoFoodAnalysis);
+    expect((await first).status).toBe(200);
+    expect((await POST(distinctIpRequest(3))).status).toBe(200);
+    expect(analyzeImage).toHaveBeenCalledTimes(3);
+  });
+
+  it.each(["throw", "reject"])("releases after provider %s without refunding the attempt", async (failure) => {
+    const error = new FoodVisionError("service_unavailable", "Synthetic provider failure");
+    analyzeImage.mockImplementation(() => {
+      if (failure === "throw") throw error;
+      return Promise.reject(error);
+    });
+    for (let attempt = 0; attempt < 5; attempt++) {
+      expect((await POST(distinctIpRequest(attempt))).status).toBe(503);
+    }
+    expect((await POST(distinctIpRequest(5))).status).toBe(429);
+    expect(analyzeImage).toHaveBeenCalledTimes(5);
+  });
+
+  it("keeps cancelled work reserved until the provider settles, then allows another attempt", async () => {
+    const pending = deferredAnalysis();
+    const controller = new AbortController();
+    analyzeImage.mockReturnValueOnce(pending.promise).mockResolvedValue(demoFoodAnalysis);
+    const first = POST(new Request(distinctIpRequest(0), { signal: controller.signal }));
+    await vi.waitFor(() => expect(analyzeImage).toHaveBeenCalledOnce());
+    controller.abort();
+    expect(analyzeImage.mock.calls[0][1].signal.aborted).toBe(true);
+    expect((await POST(distinctIpRequest(1))).status).toBe(429);
+    expect(analyzeImage).toHaveBeenCalledOnce();
+    pending.reject(new FoodVisionError("network_timeout", "Synthetic cancellation"));
+    expect((await first).status).toBe(504);
+    expect((await POST(distinctIpRequest(2))).status).toBe(200);
+    expect(analyzeImage).toHaveBeenCalledTimes(2);
   });
 
   it("returns 429 after the analyze rate limit is exceeded", async () => {
@@ -245,6 +341,7 @@ describe("POST /api/analyze", () => {
     expect(response.status).toBe(413);
     expect(body).toEqual({ error: { code: "file_too_large" } });
     expect(analyzeImage).not.toHaveBeenCalled();
+    expect(acquireLiveAnalysis).not.toHaveBeenCalled();
   });
 
   it.each([undefined, "8"])(
