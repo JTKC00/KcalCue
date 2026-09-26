@@ -65,7 +65,8 @@ vi.mock("openai", () => ({
   APIUserAbortError: MockAPIUserAbortError,
 }));
 
-import sharp from "sharp";
+import sharp, { type Sharp } from "sharp";
+import { crc32 } from "node:zlib";
 import { foodAnalysisJsonSchema } from "@/lib/domain/food-analysis";
 import { DemoFoodVisionProvider, demoFoodAnalysis } from "./demo";
 import {
@@ -283,7 +284,7 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
     expect(timeout).toHaveBeenCalledWith(OPENAI_ABORT_TIMEOUT_MS);
   });
 
-  it("converts HEIC/HEIF input to JPEG before sending it to OpenAI", async () => {
+  it.each(["image/heic", "image/heif"] as const)("converts the %s branch to JPEG with a small PNG fixture", async (mimeType) => {
     responsesCreateMock.mockResolvedValueOnce({
       output_text: JSON.stringify(demoFoodAnalysis),
     });
@@ -300,7 +301,7 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
 
     await provider().analyzeImage({
       data: png.toString("base64"),
-      mimeType: "image/heic",
+      mimeType,
     });
 
     const request = responsesCreateMock.mock.calls[0]?.[0];
@@ -311,6 +312,50 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
     expect(request.input[0].content[1].image_url).toMatch(
       /^data:image\/jpeg;base64,/,
     );
+    const output = Buffer.from(request.input[0].content[1].image_url.split(",")[1], "base64");
+    expect(await sharp(output).metadata()).toMatchObject({ format: "jpeg", width: 1, height: 1 });
+  });
+
+  it.each([
+    ["image/heic", 8000, true],
+    ["image/heif", 8000, true],
+    ["image/heic", 8001, false],
+    ["image/heif", 8001, false],
+  ] as const)("bounds %s preparation at width %i × 5000 (header-only probe)", async (mimeType, width, accepted) => {
+    responsesCreateMock.mockResolvedValueOnce({ output_text: JSON.stringify(demoFoodAnalysis) });
+    const png = await sharp({
+      create: { width: 1, height: 1, channels: 3, background: "red" },
+    }).png().toBuffer();
+    const smallJpeg = await sharp(png).jpeg().toBuffer();
+    png.writeUInt32BE(width, 16);
+    png.writeUInt32BE(5000, 20);
+    png.writeUInt32BE(crc32(png.subarray(12, 29)), 29);
+
+    // Exercise the real sharp constructor/header validation without decoding a
+    // 40M-pixel bitmap. The small fixture only probes this conversion branch;
+    // it is not a real HEIC codec or device acceptance test.
+    vi.spyOn(sharp.prototype, "toBuffer").mockImplementation(async function (this: Sharp) {
+      await this.metadata();
+      return smallJpeg;
+    });
+    const result = provider().analyzeImage({ data: png.toString("base64"), mimeType });
+    if (accepted) {
+      await expect(result).resolves.toMatchObject({ analysisStatus: "success" });
+      expect(responsesCreateMock).toHaveBeenCalledOnce();
+    } else {
+      await expect(result).rejects.toMatchObject({
+        code: "image_rejected",
+        cause: { message: "Input image exceeds pixel limit" },
+        diagnostic: { stage: "image_prepare" },
+      });
+      expect(responsesCreateMock).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each(["image/heic", "image/heif"] as const)("rejects corrupt %s preparation before calling OpenAI", async (mimeType) => {
+    await expect(provider().analyzeImage({ data: Buffer.from("invalid-image").toString("base64"), mimeType }))
+      .rejects.toMatchObject({ code: "image_rejected", diagnostic: { stage: "image_prepare" } });
+    expect(responsesCreateMock).not.toHaveBeenCalled();
   });
 
   it("strips unknown fields and nullable optional fields before validation", async () => {

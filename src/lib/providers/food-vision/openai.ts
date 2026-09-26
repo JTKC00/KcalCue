@@ -161,7 +161,8 @@ async function prepareOpenAIImage(image: FoodImageInput): Promise<OpenAIImageInp
   }
 
   try {
-    const jpeg = await sharp(Buffer.from(image.data, "base64"))
+    // Match the existing photo-preparation pixel bound before decoding HEIC/HEIF.
+    const jpeg = await sharp(Buffer.from(image.data, "base64"), { limitInputPixels: 40_000_000 })
       .rotate()
       .jpeg()
       .toBuffer();
