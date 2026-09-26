@@ -1,5 +1,6 @@
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import sharp from "sharp";
+import path from "node:path";
 
 const userId = "11111111-1111-4111-8111-111111111111";
 type TestRecord = {
@@ -354,4 +355,82 @@ test("saving a meal never uploads or persists its source image", async ({
   await expect(
     page.getByRole("button", { name: "移除草稿圖片", exact: true }),
   ).not.toBeVisible();
+});
+
+test("real photo preview with mocked analysis supports correction, reload, history, edit and delete", async ({ page, context }, testInfo) => {
+  const backend = cloud();
+  await backend.install(context);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  let analyses = 0;
+  let finishAnalysis!: () => void;
+  const release = new Promise<void>((resolve) => { finishAnalysis = resolve; });
+  await page.route("**/api/analyze", async (route) => {
+    analyses++;
+    await release;
+    await route.fulfill({ json: { mode: "live", analysis: {
+      analysisStatus: "success",
+      foods: [{
+        displayName: "港式奶茶", normalizedName: "hong kong milk tea",
+        identityLevel: "dish", portionMin: 200, portionMax: 300, unit: "ml",
+        recognitionConfidence: 0.8, portionConfidence: 0.3,
+        uncertaintyReasons: ["容量、糖量及奶比例未知，請按實際飲用份量修正。"],
+      }],
+      uncertaintyReasons: ["容量未知"], visibleEvidence: ["杯中的飲品"],
+      estimatedInformation: ["飲用份量"], unknownInformation: ["糖量"],
+    } } });
+  });
+  await page.goto("/");
+  await login(page);
+  await page.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await page.locator('input[type="file"]').nth(1).setInputFiles(path.join(testInfo.project.testDir, "fixtures/hk-milk-tea.jpg"));
+  await expect(page.getByRole("img", { name: "已選擇的餐點相片預覽" })).toBeVisible();
+  // The server is intentionally in demo mode; only this response is mocked live.
+  // The photo remains local. This is not production real-image AI acceptance.
+  await page.getByRole("button", { name: "開始分析", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "分析緊你嘅餐點…" })).toBeVisible();
+  expect(analyses).toBe(1);
+  finishAnalysis();
+  await expect(page.getByText("AI 分析結果", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /約 .*kcal/ })).toBeVisible();
+  await page.getByRole("spinbutton", { name: "最少份量", exact: true }).fill("150");
+  await page.getByRole("spinbutton", { name: "最多份量", exact: true }).fill("180");
+  // PortionInput commits on blur. selectOption changes a select without moving
+  // keyboard focus, so explicitly finish the numeric edit before reading totals.
+  await page.getByRole("spinbutton", { name: "最多份量", exact: true }).press("Tab");
+  await page.getByRole("combobox", { name: "餐次", exact: true }).selectOption("breakfast");
+  const firstRange = await page.locator("#result-title span").innerText();
+  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  await expect.poll(() => backend.records.size).toBe(1);
+  await expect(page.getByText(/項修改待同步/)).not.toBeVisible();
+  expect(backend.saves).toHaveLength(1);
+  const first = [...backend.records.values()][0];
+  expect(first).toMatchObject({ mealType: "breakfast", mode: "live", photoPath: null, items: [{ portionMin: 150, portionMax: 180 }] });
+  expect(first).not.toHaveProperty("photo");
+  const todayCalories = page.locator(".day-summary > div").filter({ hasText: "卡路里" }).locator("strong");
+  await expect(todayCalories).toHaveText(firstRange);
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "港式奶茶", exact: true })).toBeVisible();
+  await expect(todayCalories).toHaveText(firstRange);
+  await page.getByRole("button", { name: "歷史", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "港式奶茶", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "查看／修正", exact: true }).click();
+  await expect(page.getByRole("spinbutton", { name: "最少份量", exact: true })).toHaveValue("150");
+  await page.getByRole("spinbutton", { name: "最多份量", exact: true }).fill("220");
+  await page.getByRole("spinbutton", { name: "最多份量", exact: true }).press("Tab");
+  const editedRange = await page.locator("#result-title span").innerText();
+  expect(editedRange).not.toBe(firstRange);
+  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  await expect.poll(() => [...backend.records.values()][0]?.version).toBe(2);
+  expect([...backend.records.values()][0]).toMatchObject({ items: [{ portionMin: 150, portionMax: 220 }] });
+  await expect(todayCalories).toHaveText(editedRange);
+  expect(analyses).toBe(1);
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "刪除", exact: true }).click();
+  await expect.poll(() => backend.records.size).toBe(0);
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "今日未有記錄", exact: true })).toBeVisible();
+  await expect(todayCalories).toHaveCount(0);
+  expect(errors).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
 });

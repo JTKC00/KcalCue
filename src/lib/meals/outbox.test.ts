@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import "fake-indexeddb/auto";
 import { createEditableFoodItems } from "@/lib/domain/editable-meal";
 import { demoFoodAnalysis } from "@/lib/providers/food-vision/demo";
-import { newDraft } from "./types";
+import { dayNutrition, newDraft } from "./types";
+import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { MealRepository } from "./repository";
 import { changeSyncState, clearSyncState } from "./outbox";
 
@@ -42,6 +43,36 @@ beforeEach(async () => {
   });
 });
 describe("durable offline meal outbox", () => {
+  it("never discards another account's pending meal after a delayed recovery", async () => {
+    const input = draft();
+    await repository.save(input, crypto.randomUUID());
+    fixture.uid = "b";
+    await repository.save(input, crypto.randomUUID());
+    await expect(repository.discardPending(input.id, "a")).rejects.toMatchObject({
+      code: "login_required",
+    });
+    expect((await repository.state("a")).jobs).toHaveLength(1);
+    expect((await repository.state("b")).jobs).toHaveLength(1);
+  });
+  it("rechecks account ownership after waiting for the synchronization lock", async () => {
+    const input = draft();
+    await repository.save(input, crypto.randomUUID());
+    let release!: () => void;
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const held = navigator.locks.request("kcalcue-sync-a", async () => {
+      entered();
+      await new Promise<void>((resolve) => { release = resolve; });
+    });
+    await started;
+    const discard = repository.discardPending(input.id, "a");
+    const rejected = expect(discard).rejects.toMatchObject({ code: "login_required" });
+    fixture.uid = "b";
+    release();
+    await held;
+    await rejected;
+    expect((await repository.state("a")).jobs).toHaveLength(1);
+  });
   it("blocks a stale tab from syncing or enqueueing after explicit logout", async () => {
     await repository.save(draft(), crypto.randomUUID());
     localStorage.setItem("kcalcue-logout", `a:${Date.now()}`);
@@ -67,6 +98,31 @@ describe("durable offline meal outbox", () => {
     expect(state.jobs[0].record.photoPath).toBeNull();
     expect(state.jobs[0].record).not.toHaveProperty("photo");
     await repository.sync();
+    expect(fixture.fetch).not.toHaveBeenCalled();
+  });
+  it("preserves resolved nutrition and today totals through an offline save and portion edit", async () => {
+    const input = draft();
+    const match = new LocalNutritionProvider().resolve(input.items[0]);
+    expect(match.includedInTotal).toBe(true);
+    input.items = [{
+      ...input.items[0],
+      displayName: "QA externally resolved grain",
+      normalizedName: "qa-externally-resolved-grain",
+      nutritionMatch: match,
+    }];
+    const saved = await repository.save(input, crypto.randomUUID());
+    expect(saved.items[0].nutritionMatch).toEqual(match);
+    const initial = dayNutrition([saved]);
+    expect(initial.totals.calories.min).toBeGreaterThan(0);
+    const edited = await repository.save({
+      ...saved,
+      items: saved.items.map((item) => ({
+        ...item, portionMin: item.portionMin * 2, portionMax: item.portionMax * 2,
+      })),
+    }, crypto.randomUUID());
+    const restored = await new MealRepository().list();
+    expect(restored).toEqual([edited]);
+    expect(dayNutrition(restored).totals.calories.min).toBe(initial.totals.calories.min * 2);
     expect(fixture.fetch).not.toHaveBeenCalled();
   });
   it("keeps the same mutation after a lost response and overlays pending changes on remote data", async () => {

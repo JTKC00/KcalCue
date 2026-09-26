@@ -9,7 +9,7 @@ import {
   cloudConfigured,
 } from "@/lib/firebase/client";
 import { Account } from "./firebase-account";
-import { clearSyncState, type PendingMeal } from "@/lib/meals/outbox";
+import { clearSyncState, visibleMeals, type PendingMeal } from "@/lib/meals/outbox";
 import { localMeals, type LocalMeals } from "@/lib/meals/cache";
 import { MealRepository, RepositoryError } from "@/lib/meals/repository";
 import {
@@ -64,6 +64,7 @@ export function MealJournal({
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [notice, setNotice] = useState("");
+  const [syncNotice, setSyncNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [photoFailed, setPhotoFailed] = useState(false);
@@ -71,6 +72,9 @@ export function MealJournal({
   const [pending, setPending] = useState<PendingMeal[]>([]);
   const [syncing, setSyncing] = useState(false);
   const syncingRef = useRef(false);
+  const refreshRequested = useRef(false);
+  const retryRequested = useRef(false);
+  const accountGeneration = useRef(0);
   const pendingRef = useRef(0);
   const lastAttempt = useRef(0);
   useEffect(() => {
@@ -91,47 +95,73 @@ export function MealJournal({
     allowUpdateReload.current = false;
   }, [draft]);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async function refreshMeals(retry = false) {
     const id = current.current.userId;
-    if (id === "guest" || syncingRef.current) return;
+    const generation = ++refreshGeneration.current;
+    const accountVersion = accountGeneration.current;
+    if (id === "guest") return;
+    retryRequested.current ||= retry;
+    if (syncingRef.current || busyRef.current) {
+      refreshRequested.current = true;
+      return;
+    }
+    refreshRequested.current = false;
+    const retryPending = retryRequested.current;
+    retryRequested.current = false;
+    const isCurrent = () =>
+      current.current.userId === id &&
+      accountGeneration.current === accountVersion &&
+      refreshGeneration.current === generation &&
+      !busyRef.current;
     lastAttempt.current = Date.now();
     syncingRef.current = true;
     setSyncing(true);
     try {
       if (navigator.onLine) {
-        await repository.sync(id);
-        if (current.current.userId === id) setOnline(true);
+        await repository.sync(id, retryPending);
+        if (isCurrent()) {
+          setOnline(true);
+          setSyncNotice("");
+        }
       }
     } catch (error) {
-      if (current.current.userId === id) {
-        setNotice(errorText(error));
+      if (isCurrent()) {
+        setSyncNotice(errorText(error));
         if (error instanceof TypeError) setOnline(false);
       }
     } finally {
       try {
-        const [next, state] = await Promise.all([
-          repository.list(id),
-          repository.state(id),
-        ]);
-        if (current.current.userId === id) {
-          setRecords(next);
+        // Records and pending count must describe the same durable snapshot.
+        const state = await repository.state(id);
+        if (isCurrent()) {
+          setRecords(visibleMeals(state));
           setPending(state.jobs);
           setSyncedAt(state.syncedAt);
         }
       } catch {
-        setNotice("本機儲存不可用，請勿關閉頁面。");
+        if (isCurrent()) setSyncNotice("本機儲存不可用，請勿關閉頁面。");
       }
       syncingRef.current = false;
       setSyncing(false);
+      if (refreshRequested.current && !busyRef.current) void refreshMeals();
     }
   }, []);
 
   useEffect(() => {
     let active = true;
+    const accountEpoch = accountGeneration;
+    const refreshEpoch = refreshGeneration;
     let loadGeneration = 0;
+    let loading = false;
     async function load(id: string, address: string | null) {
       const generation = ++loadGeneration;
+      const accountVersion = accountGeneration.current;
+      const isCurrentLoad = () => active && generation === loadGeneration &&
+        accountVersion === accountGeneration.current;
+      loading = true;
       setReady(false);
+      setSyncNotice("");
+      setNotice("");
       refreshGeneration.current++;
       const oldId = current.current.userId;
       const guestDraft =
@@ -155,19 +185,21 @@ export function MealJournal({
           syncedAt: null,
         } satisfies LocalMeals;
       });
-      if (!active || generation !== loadGeneration) return;
+      if (!isCurrentLoad()) return;
       if (guestDraft && !local.draft) {
         local.draft = guestDraft;
         await localMeals.write(id, local);
         await writes.current;
         await localMeals.clear("guest");
       }
+      if (!isCurrentLoad()) return;
       const [visibleRecords, syncState] =
         id === "guest"
           ? [[], { jobs: [] }]
           : await Promise.all([repository.list(id), repository.state(id)]);
       // A later sign-in may finish while IndexedDB is reading the previous account.
-      if (!active || generation !== loadGeneration) return;
+      if (!isCurrentLoad()) return;
+      loading = false;
       current.current = { userId: id, ...local, records: visibleRecords };
       cacheEnabled.current = true;
       setUserId(id);
@@ -185,7 +217,11 @@ export function MealJournal({
     const subscription = auth
       ? onAuthStateChanged(auth, (user) => {
           if (!active) return;
-          if (user?.uid === current.current.userId) {
+          // Invalidate old continuations immediately, before the next account's
+          // IndexedDB load finishes (including an A -> B -> A transition).
+          accountGeneration.current++;
+          refreshGeneration.current++;
+          if (!loading && user?.uid === current.current.userId) {
             setEmail(user.email);
             void refresh();
           } else void load(user?.uid ?? "guest", user?.email ?? null);
@@ -225,6 +261,7 @@ export function MealJournal({
       )
         return;
       const old = current.current.userId;
+      accountGeneration.current++;
       cacheEnabled.current = false;
       refreshGeneration.current++;
       photoGeneration.current++;
@@ -292,6 +329,10 @@ export function MealJournal({
     window.addEventListener("storage", signedOutElsewhere);
     return () => {
       active = false;
+      accountEpoch.current++;
+      refreshEpoch.current++;
+      refreshRequested.current = false;
+      retryRequested.current = false;
       subscription?.();
       clearInterval(syncTimer);
       window.removeEventListener("kcalcue-sync", queued);
@@ -324,6 +365,17 @@ export function MealJournal({
     window.addEventListener("beforeunload", unload);
     return () => window.removeEventListener("beforeunload", unload);
   }, []);
+
+  function operationScope() {
+    const id = current.current.userId;
+    const generation = accountGeneration.current;
+    return {
+      id,
+      isCurrent: () =>
+        current.current.userId === id &&
+        accountGeneration.current === generation,
+    };
+  }
 
   function go(next: string) {
     // State is updated here; hashchange is reserved for browser back/forward.
@@ -433,6 +485,7 @@ export function MealJournal({
     setBusy(true);
     refreshGeneration.current++;
     const id = userId;
+    const scope = operationScope();
     let next = draft;
     try {
       next = { ...next, photoPath: null, photo: undefined };
@@ -448,7 +501,7 @@ export function MealJournal({
       next = { ...next, pendingMutation };
       setDraft({ ...draft, pendingMutation });
       const saved = await repository.save(next, pendingMutation.id, id);
-      if (current.current.userId !== id) return;
+      if (!scope.isCurrent()) return;
       setRecords((value) => [
         ...value.filter((record) => record.id !== saved.id),
         saved,
@@ -458,6 +511,7 @@ export function MealJournal({
       setNotice("已儲存到本機，連線時會自動同步。圖片不會保存到雲端。");
       go("today");
       await writes.current;
+      if (!scope.isCurrent()) return;
       await localMeals.write(id, {
         records: await repository.list(id),
         draft: null,
@@ -467,12 +521,14 @@ export function MealJournal({
       photoGeneration.current++;
       void refresh();
     } catch (error) {
+      if (!scope.isCurrent()) return;
       setNotice(errorText(error));
       if (error instanceof RepositoryError && error.code === "conflict")
         setConflict(true);
     } finally {
       busyRef.current = false;
       setBusy(false);
+      void refresh();
     }
   }
   async function edit(record: MealRecord) {
@@ -486,17 +542,22 @@ export function MealJournal({
   }
   async function discard() {
     if (!confirm("放棄這份草稿？已儲存的記錄不會改變。")) return;
+    const scope = operationScope();
     photoGeneration.current++;
     preparedFile.current = null;
     setDraft(null);
     setInitialDraft(undefined);
     await writes.current;
+    if (!scope.isCurrent()) return;
     await localMeals.write(userId, { records, draft: null, syncedAt });
+    if (!scope.isCurrent()) return;
     go("today");
   }
   async function remove(record: MealRecord, ask = true) {
     if (ask && !confirm("刪除這餐？連線後會同步刪除。")) return;
+    const scope = operationScope();
     await repository.delete(record);
+    if (!scope.isCurrent()) return;
     setNotice("刪除已保留於本機，連線時自動同步。");
     void refresh();
     setRecords((value) => value.filter((r) => r.id !== record.id));
@@ -507,13 +568,15 @@ export function MealJournal({
     busyRef.current = true;
     setBusy(true);
     refreshGeneration.current++;
+    const scope = operationScope();
     try {
       await remove(record);
     } catch (error) {
-      setNotice(errorText(error));
+      if (scope.isCurrent()) setNotice(errorText(error));
     } finally {
       busyRef.current = false;
       setBusy(false);
+      void refresh();
     }
   }
   async function clearAll() {
@@ -527,19 +590,26 @@ export function MealJournal({
     busyRef.current = true;
     setBusy(true);
     refreshGeneration.current++;
+    const scope = operationScope();
     try {
-      for (const record of await repository.list()) await remove(record, false);
+      for (const record of await repository.list(scope.id)) {
+        if (!scope.isCurrent()) return;
+        await remove(record, false);
+      }
       await writes.current;
-      await localMeals.clear(userId);
+      if (!scope.isCurrent()) return;
+      await localMeals.clear(scope.id);
+      if (!scope.isCurrent()) return;
       setDraft(null);
       setRecords([]);
       setNotice("刪除已保留於本機，連線時自動同步。");
       void refresh();
     } catch (error) {
-      setNotice(errorText(error));
+      if (scope.isCurrent()) setNotice(errorText(error));
     } finally {
       busyRef.current = false;
       setBusy(false);
+      void refresh();
     }
   }
   async function logout() {
@@ -549,10 +619,13 @@ export function MealJournal({
         !confirm("登出會清除這個帳戶的本機草稿、照片及快取。仍要登出？"))
     )
       return;
+    const scope = operationScope();
     if ((await repository.state(userId)).jobs.length) {
+      if (!scope.isCurrent()) return;
       setNotice("仍有待同步或衝突的修改。請先連線完成同步或處理衝突，再登出。");
       return;
     }
+    if (!scope.isCurrent()) return;
     busyRef.current = true;
     setBusy(true);
     cacheEnabled.current = false;
@@ -561,11 +634,14 @@ export function MealJournal({
     try {
       await navigator.locks.request(`kcalcue-sync-${userId}`, () =>
         navigator.locks.request(`kcalcue-account-${userId}`, async () => {
+          if (!scope.isCurrent()) throw new Error("account_changed");
           if ((await repository.state(userId)).jobs.length)
             throw new Error("pending_sync");
           await writes.current;
+          if (!scope.isCurrent()) throw new Error("account_changed");
           await localMeals.clear(userId);
           await clearSyncState(userId);
+          if (!scope.isCurrent()) throw new Error("account_changed");
           setDraft(null);
           setRecords([]);
           current.current = { ...current.current, draft: null, records: [] };
@@ -574,18 +650,20 @@ export function MealJournal({
           if (auth) await signOut(auth);
         }),
       );
-      location.reload();
+      if (scope.isCurrent()) location.reload();
     } catch {
       cacheEnabled.current = true;
-      setNotice("登出未完成，請連線後再試。");
+      if (scope.isCurrent()) setNotice("登出未完成，請連線後再試。");
     } finally {
       busyRef.current = false;
       setBusy(false);
     }
   }
   async function latest() {
+    const scope = operationScope();
     try {
-      const next = (await repository.state()).remote;
+      const next = (await repository.state(scope.id)).remote;
+      if (!scope.isCurrent()) return;
       const record = next.find((r) => r.id === draft?.id);
       if (!record) {
         setNotice("這餐已被刪除。你可保留目前草稿，或放棄它。");
@@ -594,7 +672,44 @@ export function MealJournal({
       if (confirm("載入最新記錄會取代目前的未儲存修改，是否繼續？"))
         await edit(record);
     } catch (error) {
-      setNotice(errorText(error));
+      if (scope.isCurrent()) setNotice(errorText(error));
+    }
+  }
+
+  async function resolvePending(job: PendingMeal, preserve: boolean) {
+    if (busyRef.current) return;
+    const scope = operationScope();
+    if (job.record.userId !== scope.id) return;
+    const last = [...pending].reverse().find((other) => other.record.id === job.record.id)!;
+    if (preserve
+      ? draft && !confirm("取代目前草稿並將這份修改保留為新餐點？")
+      : !confirm("放棄這餐尚未同步的修改／刪除，使用雲端版本？")) return;
+    busyRef.current = true;
+    setBusy(true);
+    refreshGeneration.current++;
+    try {
+      const copy: MealDraft = {
+        ...last.record,
+        id: crypto.randomUUID(),
+        version: 0,
+        pendingMutation: undefined,
+      };
+      if (preserve) {
+        // Drain older cache writes before preserving the recovery draft.
+        await writes.current;
+        if (!scope.isCurrent()) return;
+        await localMeals.write(scope.id, { records, draft: copy, syncedAt });
+        if (!scope.isCurrent()) return;
+      }
+      await repository.discardPending(job.record.id, scope.id);
+      if (!scope.isCurrent()) return;
+      if (preserve) openDraft(copy);
+    } catch (error) {
+      if (scope.isCurrent()) setNotice(errorText(error));
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+      void refresh();
     }
   }
   const visible = records
@@ -607,6 +722,7 @@ export function MealJournal({
     )
     .sort((a, b) => `${b.date}${b.time}`.localeCompare(`${a.date}${a.time}`));
   const days = [...new Set(visible.map((record) => record.date))];
+  const displayedNotice = syncNotice || notice;
 
   return (
     <div className="journal-shell">
@@ -634,10 +750,10 @@ export function MealJournal({
           : "離線中 · 可新增、修改及刪除，重連後自動同步"}
         {!cloudConfigured() && <span> · 雲端尚未設定，無法登入或同步</span>}
       </div>
-      {notice && (
+      {displayedNotice && (
         <div className="journal-notice" role="status">
-          <span>{notice}</span>
-          <button aria-label="關閉訊息" onClick={() => setNotice("")}>
+          <span>{displayedNotice}</span>
+          <button aria-label="關閉訊息" onClick={() => { setNotice(""); setSyncNotice(""); }}>
             ×
           </button>
         </div>
@@ -650,12 +766,7 @@ export function MealJournal({
           <button
             className="button button-secondary"
             disabled={!online || syncing}
-            onClick={() => {
-              void repository
-                .sync(userId, true)
-                .catch((error) => setNotice(errorText(error)))
-                .finally(() => void refresh());
-            }}
+            onClick={() => void refresh(true)}
           >
             重試同步
           </button>
@@ -677,30 +788,7 @@ export function MealJournal({
                   <button
                     className="button button-secondary"
                     disabled={busy || syncing}
-                    onClick={() => {
-                      const last = [...pending]
-                        .reverse()
-                        .find((other) => other.record.id === job.record.id)!;
-                      if (
-                        draft &&
-                        !confirm("取代目前草稿並將這份修改保留為新餐點？")
-                      )
-                        return;
-                      const copy = {
-                        ...last.record,
-                        id: crypto.randomUUID(),
-                        version: 0,
-                        pendingMutation: undefined,
-                      };
-                      void localMeals
-                        .write(userId, { records, draft: copy, syncedAt })
-                        .then(() => repository.discardPending(job.record.id))
-                        .then(() => {
-                          openDraft(copy);
-                          void refresh();
-                        })
-                        .catch((error) => setNotice(errorText(error)));
-                    }}
+                    onClick={() => void resolvePending(job, true)}
                   >
                     保留修改為新餐點草稿
                   </button>
@@ -708,13 +796,7 @@ export function MealJournal({
                 <button
                   className="button button-ghost"
                   disabled={busy || syncing}
-                  onClick={() => {
-                    if (confirm("放棄這餐尚未同步的修改／刪除，使用雲端版本？"))
-                      void repository
-                        .discardPending(job.record.id)
-                        .then(() => refresh())
-                        .catch((error) => setNotice(errorText(error)));
-                  }}
+                  onClick={() => void resolvePending(job, false)}
                 >
                   放棄待同步修改
                 </button>

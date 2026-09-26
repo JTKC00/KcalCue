@@ -63,6 +63,13 @@ export class MealRepository {
     if (!parsed.success) throw new RepositoryError("invalid_request", 400);
     const record: MealRecord = {
       ...parsed.data,
+      // The API input schema deliberately strips client nutrition metadata.
+      // Preserve the already resolved match in the local outbox for offline
+      // totals; the server independently resolves/validates the eventual write.
+      items: parsed.data.items.map((item, index) => ({
+        ...item,
+        nutritionMatch: draft.items[index].nutritionMatch,
+      })),
       originalItems: draft.originalItems.length
         ? draft.originalItems
         : draft.items,
@@ -110,13 +117,17 @@ export class MealRepository {
     });
     signalChange(uid);
   }
-  async discardPending(mealId: string) {
-    const uid = currentUser();
+  async discardPending(mealId: string, uid = currentUser()) {
+    if (currentUser() !== uid) throw new RepositoryError("login_required", 401);
     await locked(uid, async () => {
-      await changeSyncState(uid, (state) => ({
-        ...state,
-        jobs: state.jobs.filter((job) => job.record.id !== mealId),
-      }));
+      await navigator.locks.request(`kcalcue-account-${uid}`, async () => {
+        if (currentUser() !== uid)
+          throw new RepositoryError("login_required", 401);
+        await changeSyncState(uid, (state) => ({
+          ...state,
+          jobs: state.jobs.filter((job) => job.record.id !== mealId),
+        }));
+      });
     });
     signalChange(uid);
   }
