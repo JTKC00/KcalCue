@@ -1,5 +1,6 @@
 import { authenticated, apiError, HttpError } from "@/lib/server/auth";
 import { mealInputSchema, type MealRecord } from "@/lib/meals/types";
+import { readAnalysisProvenance } from "@/lib/domain/analysis-provenance";
 import { resolveCalorieCorrection } from "@/lib/meals/calories";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import {
@@ -95,6 +96,9 @@ export async function POST(request: Request) {
       calorieCorrection: resolveCalorieCorrection(input.calorieCorrection, input.items, previous),
       items,
       analysis,
+      analysisProvenance: previous
+        ? previous.analysisProvenance ?? null
+        : analysis ? readAnalysisProvenance(input.analysisProvenance, input.mode) : null,
       originalItems,
       userId: user.id,
       version: input.version + 1,

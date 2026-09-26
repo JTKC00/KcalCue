@@ -1,5 +1,6 @@
 import type { MealRecord } from "./types";
 import { resolveCalorieCorrection } from "./calories";
+import { readAnalysisProvenance } from "@/lib/domain/analysis-provenance";
 export interface PendingMeal {
   id: string;
   kind: "save" | "delete";
@@ -67,6 +68,12 @@ export function visibleMeals(state: SyncState) {
       // editable values win, but cannot erase or replace confirmed metadata.
       meals.set(job.record.id, {
         ...job.record,
+        // Edits cannot replace the accepted/first-queued analysis baseline.
+        analysis: previous ? previous.analysis : job.record.analysis,
+        originalItems: previous?.originalItems ?? job.record.originalItems,
+        analysisProvenance: previous
+          ? previous.analysisProvenance ?? null
+          : job.record.analysis ? readAnalysisProvenance(job.record.analysisProvenance, job.record.mode) : null,
         calorieCorrection: resolveCalorieCorrection(job.record.calorieCorrection, job.record.items, previous),
         ...(confirmed ? {
           schemaVersion: confirmed.schemaVersion,

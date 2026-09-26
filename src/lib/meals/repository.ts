@@ -1,5 +1,6 @@
 import { authorizedFetch, firebaseAuth } from "@/lib/firebase/client";
 import { mealInputSchema, type MealDraft, type MealRecord } from "./types";
+import { readAnalysisProvenance } from "@/lib/domain/analysis-provenance";
 import { changeSyncState, visibleMeals, type PendingMeal } from "./outbox";
 import { resolveCalorieCorrection } from "./calories";
 export class RepositoryError extends Error {
@@ -65,6 +66,7 @@ export class MealRepository {
     const { calorieCorrection, ...input } = parsed.data;
     const record: MealRecord = {
       ...input,
+      analysisProvenance: input.analysis ? readAnalysisProvenance(input.analysisProvenance, input.mode) : null,
       ...(calorieCorrection === undefined ? {} : {
         calorieCorrection: resolveCalorieCorrection(calorieCorrection, input.items),
       }),

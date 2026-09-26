@@ -10,6 +10,7 @@ import {
 } from "./types";
 import { demoFoodAnalysis } from "@/lib/providers/food-vision/demo";
 import { createEditableFoodItems } from "@/lib/domain/editable-meal";
+import { provenance } from "@/test/provenance-fixture";
 
 describe("meal records and local drafts", () => {
   it("preserves the original local date independently of a later time zone", () => {
@@ -82,6 +83,8 @@ describe("meal records and local drafts", () => {
     const draft = {
       ...newDraft(), version: 3, schemaVersion: 1,
       createdAt: "2026-09-01T00:00:00.000Z",
+      analysis: demoFoodAnalysis, analysisProvenance: provenance,
+      calorieInput: "", calorieCorrection: null,
       items: createEditableFoodItems(demoFoodAnalysis.foods),
       photo: new Blob(["draft photo"], { type: "image/jpeg" }),
     };
@@ -89,12 +92,17 @@ describe("meal records and local drafts", () => {
     const restored = (await localMeals.read("metadata-account")).draft!;
     expect(restored.createdAt).toBe(draft.createdAt);
     expect(restored.schemaVersion).toBe(1);
+    expect(restored.analysisProvenance).toEqual(provenance);
+    expect(restored.analysis).toEqual(demoFoodAnalysis);
+    expect(restored.calorieInput).toBe("");
+    expect(restored.calorieCorrection).toBeNull();
     expect(await restored.photo!.text()).toBe("draft photo");
     const command = mealInputSchema.parse({ ...restored, mutationId: crypto.randomUUID() });
     expect(command).not.toHaveProperty("createdAt");
     expect(command).not.toHaveProperty("schemaVersion");
     expect(command).not.toHaveProperty("photo");
     expect(newDraft()).not.toHaveProperty("createdAt");
+    expect(newDraft().analysisProvenance).toBeNull();
     await localMeals.clear("metadata-account");
   });
 });

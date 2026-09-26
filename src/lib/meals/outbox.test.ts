@@ -8,6 +8,7 @@ import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { MealRepository } from "./repository";
 import { changeSyncState, clearSyncState } from "./outbox";
 import { dayCalories } from "./calories";
+import { provenance } from "@/test/provenance-fixture";
 
 const fixture = vi.hoisted(() => ({ uid: "a", fetch: vi.fn() }));
 vi.mock("@/lib/firebase/client", () => ({
@@ -44,6 +45,57 @@ beforeEach(async () => {
   });
 });
 describe("durable offline meal outbox", () => {
+  it("retains provenance and retry identity across offline reload and a lost ACK", async () => {
+    const mutationId = crypto.randomUUID();
+    const input = { ...draft(), mode: "live" as const, analysis: demoFoodAnalysis, analysisProvenance: provenance,
+      calorieCorrection: { kcal: 723, source: "user" as const }, calorieInput: "723" };
+    const saved = await repository.save(input, mutationId);
+    expect((await new MealRepository().list())[0].analysisProvenance).toEqual(provenance);
+    fixture.fetch.mockRejectedValueOnce(new TypeError("ACK lost"));
+    await expect(repository.sync()).rejects.toThrow("ACK lost");
+    const cloud = { ...saved, schemaVersion: 3, createdAt: "2026-09-26T20:00:00.000Z" };
+    fixture.fetch.mockResolvedValueOnce(Response.json({ record: cloud }))
+      .mockResolvedValueOnce(Response.json({ records: [cloud] }));
+    await new MealRepository().sync();
+    expect(await repository.list()).toEqual([cloud]);
+    const commands = fixture.fetch.mock.calls.filter(([, init]) => init?.method === "POST").map(([, init]) => JSON.parse(init.body));
+    expect(commands).toHaveLength(2);
+    for (const command of commands) {
+      expect(command.mutationId).toBe(mutationId);
+      expect(command.version).toBe(0);
+      expect(command.analysisProvenance).toEqual(provenance);
+      expect(command.calorieCorrection).toEqual(input.calorieCorrection);
+      expect(command).not.toHaveProperty("calorieInput");
+      expect(command).not.toHaveProperty("createdAt");
+    }
+  });
+  it.each([false, true])("does not replace the original analysis through an omitted/forged queued edit (confirmed=%s)", async (confirmed) => {
+    const first = await repository.save({ ...draft(), mode: "live", analysis: demoFoodAnalysis, analysisProvenance: provenance }, crypto.randomUUID());
+    const changedAnalysis = { ...demoFoodAnalysis, visibleEvidence: ["replacement"] };
+    const edit = { ...first, version: 2, analysis: changedAnalysis, originalItems: [], analysisProvenance: undefined, time: "19:30" };
+    const editId = crypto.randomUUID();
+    await changeSyncState("a", (state) => ({ ...state, remote: confirmed ? [first] : [], jobs: [
+      ...(confirmed ? [] : state.jobs), { id: editId, kind: "save", record: edit, expectedVersion: 1 },
+    ] }));
+    const visible = (await new MealRepository().list())[0];
+    expect(visible.analysis).toEqual(first.analysis);
+    expect(visible.originalItems).toEqual(first.originalItems);
+    expect(visible.analysisProvenance).toEqual(provenance);
+    expect(visible.time).toBe("19:30");
+    expect((await repository.state()).jobs.at(-1)).toMatchObject({ id: editId, expectedVersion: 1, record: edit });
+    await changeSyncState("a", (state) => ({ ...state, jobs: state.jobs.map((job) => job.id === editId
+      ? { ...job, record: { ...job.record, analysisProvenance: { ...provenance, requestedModel: "replacement" } } } : job) }));
+    expect((await repository.list())[0].analysisProvenance).toEqual(provenance);
+  });
+  it("keeps a legacy cloud baseline unknown despite newly supplied pending metadata", async () => {
+    const first = await repository.save({ ...draft(), mode: "live", analysis: demoFoodAnalysis }, crypto.randomUUID());
+    const { analysisProvenance: _removed, ...legacy } = first;
+    void _removed;
+    await changeSyncState("a", () => ({ remote: [legacy], syncedAt: null,
+      jobs: [{ id: first.mutationId, kind: "save", record: { ...first, analysisProvenance: provenance }, expectedVersion: 1 }] }));
+    expect((await repository.list())[0].analysisProvenance).toBeNull();
+    expect((await repository.list())[0].analysis).toEqual(first.analysis);
+  });
   it("never discards another account's pending meal after a delayed recovery", async () => {
     const input = draft();
     await repository.save(input, crypto.randomUUID());
@@ -268,14 +320,14 @@ describe("durable offline meal outbox", () => {
   });
   it("retains an unsupported-schema edit without automatically replaying it or downgrading remote metadata", async () => {
     const saved = await repository.save(draft(), crypto.randomUUID());
-    const future = { ...saved, schemaVersion: 3, createdAt: "2026-09-26T14:00:00.000Z" };
+    const future = { ...saved, schemaVersion: 4, createdAt: "2026-09-26T14:00:00.000Z" };
     fixture.fetch.mockResolvedValueOnce(Response.json({ error: { code: "unsupported_schema" } }, { status: 409 }))
       .mockResolvedValueOnce(Response.json({ records: [future], revision: "future" }))
       .mockResolvedValueOnce(Response.json({ revision: "future" }));
     await repository.sync();
     await new MealRepository().sync();
     expect((await repository.state()).jobs[0]).toMatchObject({ id: saved.mutationId, error: "unsupported_schema" });
-    expect((await repository.list())[0]).toMatchObject({ schemaVersion: 3, createdAt: future.createdAt });
+    expect((await repository.list())[0]).toMatchObject({ schemaVersion: 4, createdAt: future.createdAt });
     expect(fixture.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
 

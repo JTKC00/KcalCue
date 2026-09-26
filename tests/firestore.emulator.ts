@@ -20,6 +20,7 @@ import { dayCalories } from "@/lib/meals/calories";
 import { assertWritableMealSchema, commitMeal, mealCollection, previousMeal } from "@/lib/firebase/meals";
 import { accountPath } from "@/lib/firebase/admin";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
+import { provenance } from "@/test/provenance-fixture";
 
 const fixture = vi.hoisted(() => ({ auth: vi.fn() }));
 vi.mock("@/lib/server/auth", async (original) => ({
@@ -80,6 +81,37 @@ async function seedLegacy(fields: Record<string, unknown> = {}) {
 }
 
 describe("Firebase meal API against real Firestore emulator", () => {
+  it("persists client-reported provenance once across edits, retries, reads and copy-as-new", async () => {
+    const body = { ...input(), mode: "live", analysis: demoFoodAnalysis,
+      analysisProvenance: { ...provenance, source: "server-verified", verified: true } };
+    const created = (await (await POST(request(body))).json()).record;
+    expect(created.analysisProvenance).toEqual(provenance);
+    expect(created.schemaVersion).toBe(3);
+    const edit = { ...created, mutationId: crypto.randomUUID(), analysis: null, analysisProvenance: null, time: "22:00" };
+    const saved = (await (await POST(request(edit))).json()).record;
+    expect(saved.analysisProvenance).toEqual(provenance);
+    expect(saved.analysis).toEqual(demoFoodAnalysis);
+    const before = await mealCollection(db, uid).doc(body.id).get();
+    expect((await (await POST(request(edit))).json()).record).toEqual(saved);
+    expect((await mealCollection(db, uid).doc(body.id).get()).updateTime!.isEqual(before.updateTime!)).toBe(true);
+    expect((await (await GET(new Request("http://localhost/api/meals"))).json()).records).toEqual([saved]);
+    const copy = (await (await POST(request({ ...saved, id: crypto.randomUUID(), version: 0,
+      mutationId: crypto.randomUUID(), createdAt: "1900-01-01T00:00:00.000Z" }))).json()).record;
+    expect(copy.id).not.toBe(saved.id);
+    expect(copy.createdAt).not.toBe("1900-01-01T00:00:00.000Z");
+    expect(copy.analysisProvenance).toEqual(provenance);
+    expect(copy.analysis).toEqual(saved.analysis);
+  });
+  it("keeps legacy provenance absent on read and unknown on an edit that tries to backfill it", async () => {
+    const legacy = await seedLegacy({ schemaVersion: 2, mode: "live", analysis: demoFoodAnalysis, analysisProvenance: undefined });
+    const before = await mealCollection(db, uid).doc(legacy.id).get();
+    expect((await (await GET(new Request("http://localhost/api/meals"))).json()).records[0]).not.toHaveProperty("analysisProvenance");
+    expect((await mealCollection(db, uid).doc(legacy.id).get()).updateTime!.isEqual(before.updateTime!)).toBe(true);
+    const saved = (await (await POST(request({ ...legacy, mutationId: crypto.randomUUID(), analysisProvenance: provenance }))).json()).record;
+    expect(saved.analysisProvenance).toBeNull();
+    expect(saved.analysis).toEqual(legacy.analysis);
+    expect(saved.schemaVersion).toBe(3);
+  });
   it("recomputes nutrition, strips image fields, and acknowledges a repeated mutation once", async () => {
     const body = {
       ...input(), image: "private image", photo: "private photo",
@@ -180,7 +212,7 @@ describe("Firebase meal API against real Firestore emulator", () => {
     expect(accountAfter.data()).toEqual(accountBefore.data());
     expect(accountAfter.updateTime?.isEqual(accountBefore.updateTime!)).toBe(true);
   });
-  it.each([undefined, 0, 1])("upgrades legacy schema %s on edit without inventing a creation time", async (schemaVersion) => {
+  it.each([undefined, 0, 1, 2])("upgrades legacy schema %s on edit without inventing a creation time", async (schemaVersion) => {
     const legacy = await seedLegacy({ schemaVersion, analysis: demoFoodAnalysis });
     const response = await POST(request({ ...legacy, mutationId: crypto.randomUUID() }));
     expect(response.status).toBe(200);
@@ -220,7 +252,7 @@ describe("Firebase meal API against real Firestore emulator", () => {
     expect(response.status).toBe(200);
     expect((await response.json()).record.createdAt).toBe(legacy.createdAt);
   });
-  it.each([3, "1", null])("refuses stored schema %j before nutrition and leaves cloud data untouched", async (schemaVersion) => {
+  it.each([CURRENT_MEAL_SCHEMA_VERSION + 1, "1", null])("refuses stored schema %j before nutrition and leaves cloud data untouched", async (schemaVersion) => {
     const previous = await seedLegacy({ schemaVersion, futureField: "preserve" });
     const ref = mealCollection(db, uid).doc(previous.id);
     const before = await ref.get();
@@ -240,7 +272,7 @@ describe("Firebase meal API against real Firestore emulator", () => {
     const preflight = await previousMeal(db, uid, previous.id);
     expect(() => assertWritableMealSchema(preflight?.record)).not.toThrow();
     const ref = mealCollection(db, uid).doc(previous.id);
-    await ref.update({ "record.schemaVersion": 3, "record.futureField": "preserve" });
+    await ref.update({ "record.schemaVersion": CURRENT_MEAL_SCHEMA_VERSION + 1, "record.futureField": "preserve" });
     const before = await ref.get();
     const revision = (await db.doc(accountPath(uid)).get()).data()?.revision;
     await expect(commitMeal(db, uid, {
@@ -252,7 +284,7 @@ describe("Firebase meal API against real Firestore emulator", () => {
     expect((await db.doc(accountPath(uid)).get()).data()?.revision).toBe(revision);
   });
   it("acknowledges old or future-schema mutations without a write or implicit metadata upgrade", async () => {
-    for (const schemaVersion of [undefined, 3]) {
+    for (const schemaVersion of [undefined, CURRENT_MEAL_SCHEMA_VERSION + 1]) {
       const previous = await seedLegacy({ schemaVersion });
       const ref = mealCollection(db, uid).doc(previous.id);
       const before = await ref.get();
@@ -268,7 +300,7 @@ describe("Firebase meal API against real Firestore emulator", () => {
     }
   });
   it("keeps versioned delete and tombstone semantics for future-schema records", async () => {
-    const previous = await seedLegacy({ schemaVersion: 3, futureField: "private" });
+    const previous = await seedLegacy({ schemaVersion: CURRENT_MEAL_SCHEMA_VERSION + 1, futureField: "private" });
     const mutationId = crypto.randomUUID();
     const url = `http://localhost/api/meals/${previous.id}?version=1&mutationId=${mutationId}`;
     const response = await DELETE(new Request(url, { method: "DELETE" }), {
@@ -291,7 +323,7 @@ describe("Firebase meal API against real Firestore emulator", () => {
     const created = (await (await POST(request(body))).json()).record as MealRecord;
     expect(created.calorieCorrection).toEqual({ kcal: 650, source: "user" });
     expect(created).not.toHaveProperty("calorieInput");
-    expect(created.schemaVersion).toBe(2);
+    expect(created.schemaVersion).toBe(CURRENT_MEAL_SCHEMA_VERSION);
     expect(dayNutrition([created]).coverage).toBe("none");
     expect(dayCalories([created]).range).toEqual({ min: 650, max: 650 });
     const edit = { ...created, mutationId: crypto.randomUUID(), analysis: null, originalItems: [], calorieCorrection: { kcal: 723 } };
@@ -337,7 +369,7 @@ describe("Firebase meal API against real Firestore emulator", () => {
   it("upgrades a v1 meal to explicit zero while preserving unknown creation time and UID isolation", async () => {
     const legacy = await seedLegacy({ schemaVersion: 1, calorieCorrection: undefined });
     const saved = (await (await POST(request({ ...legacy, mutationId: crypto.randomUUID(), calorieCorrection: { kcal: 0 } }))).json()).record;
-    expect(saved.schemaVersion).toBe(2);
+    expect(saved.schemaVersion).toBe(CURRENT_MEAL_SCHEMA_VERSION);
     expect(saved.createdAt).toBeNull();
     expect(saved.calorieCorrection).toEqual({ kcal: 0, source: "user" });
     expect(dayCalories([saved]).range).toEqual({ min: 0, max: 0 });

@@ -1,4 +1,5 @@
 import { foodAnalysisSchema, type FoodAnalysis } from "@/lib/domain/food-analysis";
+import { FOOD_VISION_ANALYSIS_VERSION } from "@/lib/domain/analysis-provenance";
 import type {
   FoodImageInput,
   FoodVisionAnalyzeOptions,
@@ -79,6 +80,15 @@ export class DemoFoodVisionProvider implements FoodVisionProvider {
   ): Promise<FoodAnalysis> {
     void image;
     options?.signal?.throwIfAborted();
-    return foodAnalysisSchema.parse(structuredClone(demoFoodAnalysis));
+    const analysis = foodAnalysisSchema.parse(structuredClone(demoFoodAnalysis));
+    options?.onMetadata?.({
+      provider: "demo",
+      requestedModel: null,
+      reportedModel: null,
+      modelVersion: null,
+      analysisVersion: FOOD_VISION_ANALYSIS_VERSION,
+      analyzedAt: new Date().toISOString(),
+    });
+    return analysis;
   }
 }

@@ -7,6 +7,7 @@ import { demoFoodAnalysis } from "@/lib/providers/food-vision/demo";
 import { newDraft, type MealDraft, type MealRecord } from "@/lib/meals/types";
 import { visibleMeals, type SyncState } from "@/lib/meals/outbox";
 import type { LocalMeals } from "@/lib/meals/cache";
+import { provenance } from "@/test/provenance-fixture";
 
 const fixture = vi.hoisted(() => ({
   callback: null as null | ((user: { uid: string; email: string }) => void),
@@ -22,6 +23,7 @@ const fixture = vi.hoisted(() => ({
   clear: vi.fn(),
   clearSync: vi.fn(),
   signOut: vi.fn(),
+  draftChange: null as null | ((change: Pick<MealDraft, "items" | "analysis" | "analysisProvenance" | "mode">) => void),
 }));
 vi.mock("@/lib/firebase/client", () => ({
   cloudConfigured: () => true,
@@ -54,11 +56,14 @@ vi.mock("@/lib/meals/cache", () => ({
   localMeals: { read: fixture.read, write: fixture.write, clear: fixture.clear },
 }));
 vi.mock("./kcalcue-app", () => ({
-  KcalCueApp: ({ initialDraft }: { initialDraft: MealDraft }) => (
+  KcalCueApp: ({ initialDraft, onDraftChange }: { initialDraft: MealDraft; onDraftChange: NonNullable<typeof fixture.draftChange> }) => {
+    fixture.draftChange = onDraftChange;
+    return (
     <div data-testid="editor-meal" data-created-at={initialDraft.createdAt ?? "unknown"}>
       {initialDraft.items[0]?.displayName}
     </div>
-  ),
+    );
+  },
 }));
 vi.mock("./pwa-controls", () => ({ PwaControls: () => null }));
 vi.mock("./firebase-account", () => ({ Account: () => null }));
@@ -245,7 +250,8 @@ it("clears an obsolete trial access error after a later successful sync", async 
 });
 
 it("clears server metadata when preserving a conflicted edit as a new meal", async () => {
-  const meal = { ...record("a"), schemaVersion: 1, createdAt: "2026-08-01T00:00:00.000Z" };
+  const meal = { ...record("a"), mode: "live" as const, analysis: demoFoodAnalysis, analysisProvenance: provenance,
+    schemaVersion: 1, createdAt: "2026-08-01T00:00:00.000Z" };
   const write = await startConflictRecovery(meal);
   const copy = fixture.write.mock.calls.find(([, value]) => value.draft?.items[0]?.displayName === meal.items[0].displayName)![1].draft;
   expect(copy.id).not.toBe(meal.id);
@@ -255,6 +261,7 @@ it("clears server metadata when preserving a conflicted edit as a new meal", asy
   expect(copy.pendingMutation).toBeUndefined();
   expect(copy.items).toEqual(meal.items);
   expect(copy.analysis).toEqual(meal.analysis);
+  expect(copy.analysisProvenance).toEqual(provenance);
   expect(meal.createdAt).toBe("2026-08-01T00:00:00.000Z");
   await act(async () => { write.resolve(); });
   await screen.findByTestId("editor-meal");
@@ -273,7 +280,7 @@ it("retains server creation metadata when opening an ordinary edit", async () =>
 });
 
 it("reuses a saved retry identity when only server metadata was added to the restored draft", async () => {
-  const meal = record("a");
+  const meal = { ...record("a"), analysisProvenance: undefined };
   caches.set("a", { ...emptyCache(), draft: meal });
   fixture.save.mockRejectedValue(new Error("Local storage unavailable"));
   render(<MealJournal initialProviderMode="live" />);
@@ -283,7 +290,7 @@ it("reuses a saved retry identity when only server metadata was added to the res
   await waitFor(() => expect(fixture.save).toHaveBeenCalledTimes(1));
   await waitFor(() => expect(caches.get("a")?.draft?.pendingMutation).toBeDefined());
   const retained = structuredClone(caches.get("a")!);
-  retained.draft = { ...retained.draft!, schemaVersion: 1, createdAt: "2026-08-01T00:00:00.000Z" };
+  retained.draft = { ...retained.draft!, schemaVersion: 1, createdAt: "2026-08-01T00:00:00.000Z", analysisProvenance: null };
   cleanup();
   caches.set("a", retained);
   render(<MealJournal initialProviderMode="live" />);
@@ -294,4 +301,34 @@ it("reuses a saved retry identity when only server metadata was added to the res
   await waitFor(() => expect(fixture.save).toHaveBeenCalledTimes(2));
   expect(fixture.save.mock.calls[1][1]).toBe(fixture.save.mock.calls[0][1]);
   expect(fixture.save.mock.calls[1][0].createdAt).toBe("2026-08-01T00:00:00.000Z");
+});
+
+it("replaces an unsaved analysis baseline only when a new analysis arrives", async () => {
+  const items = createEditableFoodItems(demoFoodAnalysis.foods);
+  const draft = { ...newDraft(), mode: "live" as const, analysis: demoFoodAnalysis, analysisProvenance: provenance,
+    items, originalItems: items, calorieCorrection: { kcal: 650, source: "user" as const }, calorieInput: "650" };
+  caches.set("a", { ...emptyCache(), draft });
+  render(<MealJournal initialProviderMode="live" />);
+  await signIn("a");
+  await act(async () => { fireEvent.click(await screen.findByRole("button", { name: "繼續草稿" })); });
+  await screen.findByTestId("editor-meal");
+  // Metadata alone is not a food change and must not erase manual kcal input.
+  const metadataOnly = { ...provenance, reportedModel: null };
+  await act(async () => { fixture.draftChange!({ items, analysis: demoFoodAnalysis, analysisProvenance: metadataOnly, mode: "live" }); });
+  await waitFor(() => expect(caches.get("a")?.draft?.analysisProvenance).toEqual(metadataOnly));
+  expect(caches.get("a")?.draft?.calorieInput).toBe("650");
+  expect(caches.get("a")?.draft?.calorieCorrection).toEqual(draft.calorieCorrection);
+
+  const nextAnalysis = { ...demoFoodAnalysis, foods: [demoFoodAnalysis.foods[1]] };
+  const nextItems = createEditableFoodItems(nextAnalysis.foods);
+  const nextProvenance = { ...provenance, analyzedAt: "2026-09-26T12:00:00.000Z" };
+  await act(async () => { fixture.draftChange!({ items: nextItems, analysis: nextAnalysis, analysisProvenance: nextProvenance, mode: "live" }); });
+  await waitFor(() => expect(caches.get("a")?.draft?.analysisProvenance).toEqual(nextProvenance));
+  expect(caches.get("a")?.draft?.originalItems).toEqual(nextItems);
+  expect(caches.get("a")?.draft?.calorieCorrection).toBeNull();
+  await act(async () => { fixture.draftChange!({ items: nextItems.map((item) => ({ ...item, portionMin: item.portionMin + 1 })),
+    analysis: nextAnalysis, analysisProvenance: nextProvenance, mode: "live" }); });
+  await waitFor(() => expect(caches.get("a")?.draft?.items[0].portionMin).toBe(nextItems[0].portionMin + 1));
+  expect(caches.get("a")?.draft?.originalItems).toEqual(nextItems);
+  expect(caches.get("a")?.draft?.analysisProvenance).toEqual(nextProvenance);
 });

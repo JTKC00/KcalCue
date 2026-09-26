@@ -5,6 +5,7 @@ import OpenAI, {
   APIUserAbortError,
 } from "openai";
 import sharp from "sharp";
+import { boundedModelName, FOOD_VISION_ANALYSIS_VERSION } from "@/lib/domain/analysis-provenance";
 import {
   foodAnalysisJsonSchema,
   foodAnalysisSchema,
@@ -298,6 +299,14 @@ export class OpenAIFoodVisionProvider implements FoodVisionProvider {
         );
       }
 
+      options?.onMetadata?.({
+        provider: "openai",
+        requestedModel: boundedModelName(this.config.model),
+        reportedModel: boundedModelName(response.model),
+        modelVersion: null,
+        analysisVersion: FOOD_VISION_ANALYSIS_VERSION,
+        analyzedAt: new Date().toISOString(),
+      });
       return validated.data;
     } catch (error) {
       const mapped = mapOpenAIError(error);

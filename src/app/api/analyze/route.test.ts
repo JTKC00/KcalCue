@@ -27,6 +27,7 @@ import { FoodVisionError } from "@/lib/providers/food-vision/errors";
 import { demoFoodAnalysis } from "@/lib/providers/food-vision/demo";
 import { ANALYZE_RATE_LIMIT, clearRateLimitStore } from "@/lib/server/rate-limit";
 import { POST } from "./route";
+import { provenanceMetadata } from "@/test/provenance-fixture";
 
 function imageRequest(
   bytes: Uint8Array,
@@ -127,8 +128,19 @@ describe("POST /api/analyze", () => {
         data: expect.any(String),
         mimeType: "image/jpeg",
       },
-      { signal: expect.any(AbortSignal) },
+      { signal: expect.any(AbortSignal), onMetadata: expect.any(Function) },
     );
+  });
+
+  it("returns separate metadata only from the provider hook, with legacy providers remaining unknown", async () => {
+    analyzeImage.mockImplementationOnce(async (_image, options) => {
+      options.onMetadata(provenanceMetadata);
+      return demoFoodAnalysis;
+    });
+    const response = await POST(jpegRequest());
+    expect(await response.json()).toMatchObject({ analysis: demoFoodAnalysis, analysisProvenance: provenanceMetadata });
+    analyzeImage.mockResolvedValueOnce(demoFoodAnalysis);
+    expect((await (await POST(jpegRequest())).json()).analysisProvenance).toBeNull();
   });
 
   it("maps provider errors to public-safe status codes only", async () => {
@@ -185,7 +197,7 @@ describe("POST /api/analyze", () => {
         data: expect.any(String),
         mimeType: "image/heic",
       },
-      { signal: expect.any(AbortSignal) },
+      { signal: expect.any(AbortSignal), onMetadata: expect.any(Function) },
     );
   });
 
@@ -200,7 +212,7 @@ describe("POST /api/analyze", () => {
         data: expect.any(String),
         mimeType: "image/heif",
       },
-      { signal: expect.any(AbortSignal) },
+      { signal: expect.any(AbortSignal), onMetadata: expect.any(Function) },
     );
   });
 

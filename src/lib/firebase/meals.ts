@@ -14,6 +14,7 @@ export function assertWritableMealSchema(
     version !== undefined &&
     version !== 0 &&
     version !== 1 &&
+    version !== 2 &&
     version !== CURRENT_MEAL_SCHEMA_VERSION
   )
     throw new HttpError(409, "unsupported_schema");

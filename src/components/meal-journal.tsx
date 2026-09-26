@@ -422,7 +422,7 @@ export function MealJournal({
     openDraft(newDraft(), isManual);
   }
   const onDraftChange = useCallback(
-    (change: Pick<MealDraft, "items" | "analysis" | "mode">) => {
+    (change: Pick<MealDraft, "items" | "analysis" | "analysisProvenance" | "mode">) => {
       const previous = current.current.draft;
       if (previous && previous.calorieInput !== undefined &&
         (!sameCalorieBasis(previous.items, change.items) || previous.mode !== change.mode)) {
@@ -439,7 +439,9 @@ export function MealJournal({
           ...change,
           calorieCorrection: changed ? null : value.calorieCorrection,
           calorieInput: changed ? undefined : value.calorieInput,
-          originalItems: value.originalItems.length
+          originalItems: value.version === 0 && value.analysis !== change.analysis
+            ? change.analysis ? change.items : []
+            : value.originalItems.length
             ? value.originalItems
             : change.analysis ? change.items : [],
         };
@@ -518,6 +520,8 @@ export function MealJournal({
       next = { ...next, photoPath: null, photo: undefined, calorieInput: undefined };
       const fingerprint = JSON.stringify({
         ...next,
+        // Legacy omission and explicit unknown metadata are the same command.
+        analysisProvenance: next.analysisProvenance ?? undefined,
         schemaVersion: undefined,
         createdAt: undefined,
         calorieInput: undefined,
