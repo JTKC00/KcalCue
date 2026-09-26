@@ -56,7 +56,10 @@ describe("POST /api/meals bounded input", () => {
   beforeEach(() => {
     authorize.mockReset().mockResolvedValue({ db: {}, user: { id: "qa-user" } });
     vi.mocked(previousMeal).mockReset().mockResolvedValue(undefined);
-    vi.mocked(commitMeal).mockReset().mockImplementation(async (_db, _userId, record) => record);
+    vi.mocked(commitMeal).mockReset().mockImplementation(async (_db, _userId, record) => ({
+      ...record,
+      updatedAt: "2026-09-26T00:00:00.000Z",
+    }));
   });
 
   afterEach(() => { vi.restoreAllMocks(); });
