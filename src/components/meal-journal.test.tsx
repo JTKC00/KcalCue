@@ -202,6 +202,33 @@ it("keeps Today meal count and kcal aligned as records change", async () => {
   expect(screen.getByLabelText("今日摘要")).toHaveTextContent("卡路里0kcal");
 });
 
+it("groups Today meals by breakfast, lunch, dinner and snack without changing the daily total", async () => {
+  const item = createEditableFoodItems([demoFoodAnalysis.foods[0]])[0];
+  const record = (mealType: MealRecord["mealType"], name: string, time: string, kcal: number): MealRecord => ({
+    ...newDraft(), id: crypto.randomUUID(), userId: "a", mode: "manual", mealType, time,
+    items: [{ ...item, displayName: name }], calorieCorrection: { kcal, source: "user" },
+    updatedAt: new Date().toISOString(), mutationId: crypto.randomUUID(),
+  });
+  fixture.list.mockResolvedValue([
+    record("dinner", "晚餐測試", "12:00", 600),
+    record("breakfast", "早餐測試", "19:00", 400),
+  ]);
+  render(<MealJournal initialProviderMode="demo" />);
+  await act(async () => fixture.callback!({ uid: "a", email: "a@example.com" }));
+
+  const summary = await screen.findByLabelText("今日摘要");
+  await waitFor(() => expect(summary).toHaveTextContent("今日餐數2餐"));
+  expect(summary).toHaveTextContent("卡路里1000kcal");
+  const groups = ["早餐", "午餐", "晚餐", "小食"].map((name) => screen.getByRole("region", { name }));
+  expect(groups[0].compareDocumentPosition(groups[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(groups[1].compareDocumentPosition(groups[2]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(groups[2].compareDocumentPosition(groups[3]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(within(groups[0]).getByRole("heading", { name: "早餐測試" })).toBeVisible();
+  expect(within(groups[2]).getByRole("heading", { name: "晚餐測試" })).toBeVisible();
+  expect(within(groups[1]).getByText("未有記錄")).toBeVisible();
+  expect(within(groups[3]).getByText("未有記錄")).toBeVisible();
+});
+
 it("labels an insufficient meal unknown and excludes its partial kcal from Today", async () => {
   const known = createEditableFoodItems([demoFoodAnalysis.foods[0]])[0];
   const match = new LocalNutritionProvider().resolve(known);

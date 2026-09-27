@@ -1811,7 +1811,10 @@ svg {
 .day-summary p { grid-column: 1 / -1; margin: 0; font-size: .85rem; }
 .meal-row { display: flex; gap: 20px; align-items: center; }
 .meal-row > div { min-width: 0; }
-.meal-row h3 { overflow-wrap: anywhere; margin: 8px 0 14px; }
+.meal-group + .meal-group { margin-top: 20px; }
+.meal-group-title { margin: 0 0 12px; color: #244d38; }
+.meal-group-empty { margin: 0; padding: 4px 0 16px; color: #5c6e60; }
+.meal-row h3, .meal-row h4 { overflow-wrap: anywhere; margin: 8px 0 14px; }
 .meal-row .meal-calories { margin: 0 0 16px; font-weight: 700; color: #244d38; }
 .meal-row .meal-current-note { margin: 8px 0 0; }
 .meal-photo { width: min(100%, 240px); margin: 0 0 16px; }

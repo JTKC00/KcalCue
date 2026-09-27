@@ -1205,6 +1205,14 @@ export function MealJournal({
             const calories = dayCalories(meals);
             const calorieRange = calories.range && (calories.referenceCount
               ? roundRange(calories.range, 5) : calories.range);
+            const groups = tab === "today"
+              ? Object.entries(mealTypes).map(([mealType, label]) => ({
+                key: mealType,
+                label,
+                records: meals.filter((record) => record.mealType === mealType),
+              }))
+              : [{ key: "history", label: null, records: meals }];
+            const MealNameHeading = tab === "today" ? "h4" : "h3";
             return (
               <section className="journal-day" key={date}>
                 <h2>{date}</h2>
@@ -1248,49 +1256,55 @@ export function MealJournal({
                     </p>
                   )}
                 </div>
-                <div className="meal-list">
-                  {meals.map((record) => (
-                    <article className="journal-card meal-row" key={record.id}>
-                      <div>
-                        <p>
-                          {record.time} · {mealTypes[record.mealType]}
-                        </p>
-                        {tab === "history" && <p className="meal-current-note">目前記錄</p>}
-                        <h3>
-                          {record.items
-                            .map((item) => item.displayName)
-                            .join("、")}
-                        </h3>
-                        <p className="meal-calories">{mealCalorieLabel(record)}</p>
-                        {tab === "history" && userId !== "guest" && record.photoRef && (
-                          <PrivateMealPhoto
-                            key={`${userId}:${authEpoch}:${record.id}:${record.photoRef.attachmentId}:${record.photoRef.generation}`}
-                            mealId={record.id}
-                            photoRef={record.photoRef}
-                            expectedUid={userId}
-                          />
-                        )}
-                        {tab === "history" && <OriginalAnalysisDetails record={record} />}
-                        <div className="journal-actions">
-                          <button
-                            className="button button-secondary"
-                            disabled={busy}
-                            onClick={() => void edit(record)}
-                          >
-                            查看／修正
-                          </button>
-                          <button
-                            className="button button-ghost danger"
-                            disabled={busy}
-                            onClick={() => void deleting(record)}
-                          >
-                            刪除
-                          </button>
-                        </div>
-                      </div>
-                    </article>
-                  ))}
-                </div>
+                {groups.map((group) => (
+                  <section className="meal-group" key={group.key} aria-label={group.label ?? undefined}>
+                    {group.label && <h3 className="meal-group-title">{group.label}</h3>}
+                    {group.records.length === 0 && <p className="meal-group-empty">未有記錄</p>}
+                    <div className="meal-list">
+                      {group.records.map((record) => (
+                        <article className="journal-card meal-row" key={record.id}>
+                          <div>
+                            <p>
+                              {record.time} · {mealTypes[record.mealType]}
+                            </p>
+                            {tab === "history" && <p className="meal-current-note">目前記錄</p>}
+                            <MealNameHeading>
+                              {record.items
+                                .map((item) => item.displayName)
+                                .join("、")}
+                            </MealNameHeading>
+                            <p className="meal-calories">{mealCalorieLabel(record)}</p>
+                            {tab === "history" && userId !== "guest" && record.photoRef && (
+                              <PrivateMealPhoto
+                                key={`${userId}:${authEpoch}:${record.id}:${record.photoRef.attachmentId}:${record.photoRef.generation}`}
+                                mealId={record.id}
+                                photoRef={record.photoRef}
+                                expectedUid={userId}
+                              />
+                            )}
+                            {tab === "history" && <OriginalAnalysisDetails record={record} />}
+                            <div className="journal-actions">
+                              <button
+                                className="button button-secondary"
+                                disabled={busy}
+                                onClick={() => void edit(record)}
+                              >
+                                查看／修正
+                              </button>
+                              <button
+                                className="button button-ghost danger"
+                                disabled={busy}
+                                onClick={() => void deleting(record)}
+                              >
+                                刪除
+                              </button>
+                            </div>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+                ))}
               </section>
             );
           })}

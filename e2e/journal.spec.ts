@@ -635,8 +635,12 @@ test("real photo preview with mocked analysis supports correction, reload, histo
   expect(first).not.toHaveProperty("photo");
   const todayCalories = page.locator(".day-summary > div").filter({ hasText: "卡路里" }).locator("strong");
   await expect(todayCalories).toHaveText(firstRange);
+  await expect(page.getByRole("region", { name: "早餐" }).getByRole("heading", { name: "港式奶茶", exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "午餐" })).toContainText("未有記錄");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
   await page.reload();
   await expect(page.getByRole("heading", { name: "港式奶茶", exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "早餐" }).getByRole("heading", { name: "港式奶茶", exact: true })).toBeVisible();
   await expect(todayCalories).toHaveText(firstRange);
   await page.getByRole("button", { name: "歷史", exact: true }).click();
   await expect(page.getByRole("heading", { name: "港式奶茶", exact: true })).toBeVisible();
