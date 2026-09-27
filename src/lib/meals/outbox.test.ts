@@ -45,6 +45,38 @@ beforeEach(async () => {
   });
 });
 describe("durable offline meal outbox", () => {
+  it("keeps reading and writing queued meals after an additive IDB schema upgrade", async () => {
+    const mutationId = crypto.randomUUID();
+    const queued = await repository.save(draft(), mutationId);
+    const before = await changeSyncState("a", (state) => ({ ...state, revision: "prior" }));
+    expect(before.jobs).toMatchObject([{ id: mutationId, expectedVersion: 0,
+      record: { id: queued.id } }]);
+    const currentVersion = await new Promise<number>((resolve, reject) => {
+      const request = indexedDB.open("kcalcue-sync");
+      request.onsuccess = () => {
+        const version = request.result.version;
+        request.result.close();
+        resolve(version);
+      };
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.open("kcalcue-sync", currentVersion + 1);
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains("photoPayloads"))
+          request.result.createObjectStore("photoPayloads");
+      };
+      request.onsuccess = () => {
+        request.result.close();
+        resolve();
+      };
+      request.onerror = () => reject(request.error);
+    });
+    expect(await changeSyncState("a")).toEqual(before);
+    expect((await changeSyncState("a", (state) => ({ ...state, revision: "after" }))).revision)
+      .toBe("after");
+    expect((await new MealRepository().state()).jobs).toEqual(before.jobs);
+  });
   it("retains provenance and retry identity across offline reload and a lost ACK", async () => {
     const mutationId = crypto.randomUUID();
     const input = { ...draft(), mode: "live" as const, analysis: demoFoodAnalysis, analysisProvenance: provenance,

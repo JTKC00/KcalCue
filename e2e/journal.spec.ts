@@ -488,6 +488,50 @@ test("PWA shell restores a guest draft offline", async ({ page, context }) => {
   ).toHaveValue("白飯");
 });
 
+test("a queued meal survives an additive IndexedDB schema upgrade and syncs", async ({ page, context }) => {
+  const backend = cloud();
+  await backend.install(context);
+  await page.goto("/");
+  await login(page);
+  await page.evaluate(async () => { await navigator.serviceWorker.ready; });
+  const readJob = () => page.evaluate(async (uid) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("kcalcue-sync");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      return await new Promise<{ id: string; mealId: string; expectedVersion: number } | null>((resolve, reject) => {
+        const tx = db.transaction("accounts", "readonly");
+        const request = tx.objectStore("accounts").get(uid);
+        tx.oncomplete = () => {
+          const job = request.result?.jobs?.[0];
+          resolve(job ? { id: job.id, mealId: job.record.id, expectedVersion: job.expectedVersion } : null);
+        };
+        tx.onerror = () => reject(tx.error);
+      });
+    } finally { db.close(); }
+  }, userId);
+  await backend.setOffline(context, true);
+  await rice(page);
+  await page.getByRole("button", { name: "離線儲存餐點", exact: true }).click();
+  await expect.poll(readJob).not.toBeNull();
+  const pending = await readJob();
+  await page.evaluate(() => new Promise<void>((resolve, reject) => {
+    const request = indexedDB.open("kcalcue-sync", 2);
+    request.onupgradeneeded = () => request.result.createObjectStore("photoPayloads");
+    request.onsuccess = () => { request.result.close(); resolve(); };
+    request.onerror = () => reject(request.error);
+    request.onblocked = () => reject(new Error("IDB upgrade blocked"));
+  }));
+  await page.reload();
+  expect(await readJob()).toEqual(pending);
+  await backend.setOffline(context, false);
+  await expect.poll(() => backend.records.size).toBe(1);
+  expect(backend.saves[0].mutationId).toBe(pending?.id);
+  expect(backend.saves[0].id).toBe(pending?.mealId);
+});
+
 test("saving a meal never uploads or persists its source image", async ({
   page,
   context,

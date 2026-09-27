@@ -129,7 +129,7 @@ Cleanup只delete該asset記錄的**確切generation**；precondition mismatch不
 ## 6. 離線、本機原子性與unknown outcome
 
 - 延用per-UID Web Locks、account generation guards、每meal有序outbox、固定mealmutation/uploadID。用 `photoAction`／本機upload dependency表示意圖，不能把Blob、base64、object URL塞入meal JSON。
-- 新增同一`kcalcue-sync` IndexedDB內的`photoPayloads` store，鍵含UID/uploadID；meal job＋upload intent＋compressedBlob以**同一IDB transaction**持久化。這次照片能力確實需要IDB schema upgrade，不能照抄metadata PR的「無需upgrade」結論。
+- 新增同一`kcalcue-sync` IndexedDB內的`photoPayloads` store，鍵含UID/uploadID；meal job＋upload intent＋compressedBlob以**同一IDB transaction**持久化。這次照片能力確實需要IDB schema upgrade，不能照抄metadata PR的「無需upgrade」結論。前置source已把目前client改為開啟既有DB版本，並以加store fixture驗證可回讀舊job；**已在使用中的舊v1 bundle仍固定要求version 1**，將來v2發布前要先部署並驗證此相容client的更新／舊頁籤處理，不能只靠source改動宣稱跨版本PWA安全。
 - 原draft在另一`kcalcue-private` DB：先確認上述job/payload transaction成功才清draft。兩DB不能同transaction；失敗時寧可留duplicate draft/payload待回收，不可先清Blob導致無圖可重試。quota-full／IDB failure清楚提示且保持原draft。
 - Save時尚未上傳，UI應顯「已保留本機；餐點及附圖待同步」，**不稱已保存到雲端**。Upload成功才放行該meal save；其他meal jobs可以繼續，不讓一張壞圖擋全帳戶。
 - Upload失敗允許明確「不附圖儲存餐點」。若meal POST確定尚未dispatch，可以取消原未送意圖、用新的mealmutation儲存無圖餐點並安排staged cleanup；不得改寫任何已dispatch/unknown的mutation payload。若已送且結果unknown，先以同mutation恢復ACK／確認結果，再以新的versioned remove操作處理。

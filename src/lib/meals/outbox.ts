@@ -17,9 +17,13 @@ export interface SyncState {
 const empty = (): SyncState => ({ remote: [], jobs: [], syncedAt: null });
 async function open() {
   return new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open("kcalcue-sync", 1);
-    request.onupgradeneeded = () =>
-      request.result.createObjectStore("accounts");
+    // Open the installed schema. A pinned v1 opener fails with VersionError
+    // after a later client adds an object store for atomic photo payloads.
+    const request = indexedDB.open("kcalcue-sync");
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains("accounts"))
+        request.result.createObjectStore("accounts");
+    };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
