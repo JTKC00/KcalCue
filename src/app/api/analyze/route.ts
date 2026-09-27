@@ -98,6 +98,9 @@ export async function POST(request: Request) {
     } catch (error) {
       return apiError(error);
     }
+    if (process.env.KCALCUE_ANALYSIS_ENABLED === "false") {
+      return errorResponse("analysis_paused", 503);
+    }
 
     const image = formData.get("image");
     if (!(image instanceof File) || image.size === 0) {
