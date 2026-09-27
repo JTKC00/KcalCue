@@ -971,7 +971,17 @@ export function MealJournal({
         visible={account}
         beforeUpdate={async () => {
           if (busyRef.current) throw new Error("Save in progress");
+          const scope = operationScope();
           await writes.current;
+          if (!scope.isCurrent()) throw new Error("Account changed during update");
+          const active = current.current;
+          if (active.draft) {
+            // Background cache writes report errors in the UI and settle the
+            // queue. A PWA reload must confirm this draft is durable itself.
+            await localMeals.write(active.userId, active, draftTabId());
+          }
+          if (!scope.isCurrent() || current.current.draft !== active.draft)
+            throw new Error("Draft changed during update");
           allowUpdateReload.current = true;
         }}
       />

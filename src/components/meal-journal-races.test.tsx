@@ -27,6 +27,7 @@ const fixture = vi.hoisted(() => ({
   clearSync: vi.fn(),
   signOut: vi.fn(),
   photoFetch: vi.fn(),
+  beforeUpdate: null as null | (() => Promise<void>),
   draftChange: null as null | ((change: Pick<MealDraft, "items" | "analysis" | "analysisProvenance" | "mode">) => void),
 }));
 vi.mock("@/lib/firebase/client", () => ({
@@ -76,7 +77,10 @@ vi.mock("./kcalcue-app", () => ({
     );
   },
 }));
-vi.mock("./pwa-controls", () => ({ PwaControls: () => null }));
+vi.mock("./pwa-controls", () => ({ PwaControls: ({ beforeUpdate }: { beforeUpdate: () => Promise<void> }) => {
+  fixture.beforeUpdate = beforeUpdate;
+  return null;
+} }));
 vi.mock("./firebase-account", () => ({ Account: () => null }));
 import { MealJournal } from "./meal-journal";
 import { RepositoryError } from "@/lib/meals/repository";
@@ -124,7 +128,7 @@ async function startConflictRecovery(meal: MealRecord) {
 }
 
 beforeEach(() => {
-  states.clear(); caches.clear(); fixture.uid = "a";
+  states.clear(); caches.clear(); fixture.uid = "a"; fixture.beforeUpdate = null;
   vi.restoreAllMocks(); vi.unstubAllGlobals();
   for (const mock of [fixture.list, fixture.state, fixture.sync, fixture.save, fixture.remove, fixture.discard, fixture.read, fixture.write, fixture.snapshot, fixture.savedDrafts, fixture.restoreDraft, fixture.clear, fixture.clearSync, fixture.signOut, fixture.photoFetch]) mock.mockReset();
   fixture.list.mockImplementation(async (uid: string) => visibleMeals(structuredClone(states.get(uid) ?? emptySync())));
@@ -249,6 +253,57 @@ it("does not show A's recoverable draft after its delayed refresh completes unde
   await act(async () => { delayed.resolve([summary]); });
   expect(screen.queryByText(/private-a/)).not.toBeInTheDocument();
   expect(screen.queryByRole("region", { name: "其他未儲存草稿" })).not.toBeInTheDocument();
+});
+
+it("blocks a PWA update when its explicit scoped draft write fails", async () => {
+  const meal = { ...newDraft(),
+    items: [{ ...createEditableFoodItems(demoFoodAnalysis.foods)[0], displayName: "unsaved-meal" }],
+  };
+  caches.set("a", { ...emptyCache(), draft: meal });
+  render(<MealJournal initialProviderMode="live" />);
+  await signIn("a");
+  await screen.findByRole("button", { name: "繼續草稿" });
+  fixture.write.mockRejectedValueOnce(new Error("IndexedDB quota exceeded"));
+  await expect(fixture.beforeUpdate!()).rejects.toThrow("IndexedDB quota exceeded");
+  expect(fixture.write).toHaveBeenCalledWith("a", expect.objectContaining({ draft: meal }), "test-tab");
+  await expect(fixture.beforeUpdate!()).resolves.toBeUndefined();
+});
+
+it("blocks a PWA update if the account changes during its draft write", async () => {
+  caches.set("a", { ...emptyCache(), draft: newDraft() });
+  render(<MealJournal initialProviderMode="live" />);
+  await signIn("a");
+  await screen.findByRole("button", { name: "繼續草稿" });
+  const write = deferred<void>();
+  fixture.write.mockImplementationOnce(() => write.promise);
+  const update = fixture.beforeUpdate!();
+  const blocked = expect(update).rejects.toThrow("Draft changed during update");
+  await waitFor(() => expect(fixture.write).toHaveBeenCalledWith("a", expect.anything(), "test-tab"));
+  await signIn("b");
+  await screen.findByRole("heading", { name: "尚未確認今日記錄" });
+  await act(async () => { write.resolve(); });
+  await blocked;
+});
+
+it("blocks a PWA update if the draft changes during its confirmation write", async () => {
+  const meal = { ...newDraft(), items: createEditableFoodItems(demoFoodAnalysis.foods) };
+  caches.set("a", { ...emptyCache(), draft: meal });
+  render(<MealJournal initialProviderMode="live" />);
+  await signIn("a");
+  fireEvent.click(await screen.findByRole("button", { name: "繼續草稿" }));
+  const write = deferred<void>();
+  fixture.write.mockImplementationOnce(() => write.promise);
+  const update = fixture.beforeUpdate!();
+  const blocked = expect(update).rejects.toThrow("Draft changed during update");
+  await waitFor(() => expect(fixture.write).toHaveBeenCalledWith("a", expect.anything(), "test-tab"));
+  await act(async () => {
+    fixture.draftChange!({
+      items: [{ ...meal.items[0], displayName: "changed-during-update" }],
+      analysis: null, analysisProvenance: null, mode: "live",
+    });
+  });
+  await act(async () => { write.resolve(); });
+  await blocked;
 });
 
 it("rejects a pre-delete refresh snapshot and follows up with the current snapshot", async () => {
