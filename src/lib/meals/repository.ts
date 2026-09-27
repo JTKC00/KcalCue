@@ -3,7 +3,7 @@ import { mealInputSchema, type MealDraft, type MealRecord } from "./types";
 import { readAnalysisProvenance } from "@/lib/domain/analysis-provenance";
 import {
   changeSyncState, changeSyncStateAndClearPhotos, enqueuePhotoMeal,
-  visibleMeals, type PendingMeal,
+  hasCurrentMealVersion, visibleMeals, type PendingMeal,
 } from "./outbox";
 import { resolveCalorieCorrection } from "./calories";
 export class RepositoryError extends Error {
@@ -129,6 +129,10 @@ export class MealRepository {
             existing.expectedVersion !== draft.version ||
             !sameQueuedSave(existing.record, record)))
             throw new RepositoryError("conflict", 409);
+          if ((!existing && !hasCurrentMealVersion(state, draft.id, draft.version)) ||
+              state.jobs.some((pending) => pending.record.id === draft.id &&
+                pending.kind === "delete"))
+            throw new RepositoryError("conflict", 409);
           if (!existing) state.jobs.push(job);
           visible = visibleMeals(state).find((meal) => meal.id === draft.id) ?? record;
           return state;
@@ -153,6 +157,8 @@ export class MealRepository {
         throw new RepositoryError("login_required", 401);
       await changeSyncState(uid, (state) => {
         if (state.jobs.some((job) => job.record.id === record.id && job.error))
+          throw new RepositoryError("conflict", 409);
+        if (!hasCurrentMealVersion(state, record.id, record.version, false))
           throw new RepositoryError("conflict", 409);
         state.jobs.push({
           id: crypto.randomUUID(),

@@ -109,6 +109,16 @@ describe("durable offline meal outbox", () => {
       .rejects.toThrow();
     expect(await readPhotoPayload("a", laterUploadId)).toBeNull();
   });
+  it("accepts an identical queued photo retry without duplicating its job or Blob", async () => {
+    const photo = new NodeBlob(["private jpeg fixture"], { type: "image/jpeg" }) as Blob;
+    const input = { ...draft(), photo };
+    const mutationId = crypto.randomUUID(), uploadId = crypto.randomUUID();
+    const first = await repository.saveWithPhoto(input, mutationId, uploadId);
+    const retry = await new MealRepository().saveWithPhoto(input, mutationId, uploadId);
+    expect(retry).toEqual(first);
+    expect((await repository.state()).jobs).toHaveLength(1);
+    expect(await (await readPhotoPayload("a", uploadId))?.text()).toBe("private jpeg fixture");
+  });
   it("discards a photo job and Blob without affecting another account", async () => {
     const photo = new NodeBlob(["private jpeg fixture"], { type: "image/jpeg" }) as Blob;
     const meal = await repository.saveWithPhoto({ ...draft(), photo }, crypto.randomUUID(), crypto.randomUUID());
@@ -373,6 +383,63 @@ describe("durable offline meal outbox", () => {
       fixture.fetch.mock.calls.filter((call) => call[1]?.method === "DELETE"),
     ).toHaveLength(1);
     expect((await repository.state()).jobs).toHaveLength(0);
+  });
+  it("rejects a stale second-tab delete after an offline edit", async () => {
+    Object.defineProperty(navigator, "onLine", { value: false });
+    const secondTab = new MealRepository();
+    const first = await repository.save(draft(), crypto.randomUUID());
+    const edited = await repository.save({ ...first, time: "13:00" }, crypto.randomUUID());
+    await expect(secondTab.delete(first)).rejects.toMatchObject({
+      code: "conflict", status: 409,
+    });
+    expect((await repository.state()).jobs).toHaveLength(2);
+    expect(await secondTab.list()).toEqual([edited]);
+    expect(fixture.fetch).not.toHaveBeenCalled();
+  });
+  it("rejects a stale second-tab save after an offline delete", async () => {
+    Object.defineProperty(navigator, "onLine", { value: false });
+    const secondTab = new MealRepository();
+    const first = await repository.save(draft(), crypto.randomUUID());
+    await repository.delete(first);
+    await expect(secondTab.save({ ...first, time: "13:00" }, crypto.randomUUID()))
+      .rejects.toMatchObject({ code: "conflict", status: 409 });
+    expect((await repository.state()).jobs.map((job) => job.kind)).toEqual(["save", "delete"]);
+    expect(await secondTab.list()).toEqual([]);
+    expect(fixture.fetch).not.toHaveBeenCalled();
+  });
+  it("rejects an older save retry after deletion has been queued", async () => {
+    const input = draft(), mutationId = crypto.randomUUID();
+    const first = await repository.save(input, mutationId);
+    await repository.delete(first);
+    await expect(new MealRepository().save(input, mutationId)).rejects.toMatchObject({
+      code: "conflict", status: 409,
+    });
+    expect((await repository.state()).jobs.map((job) => job.kind)).toEqual(["save", "delete"]);
+    expect(await repository.list()).toEqual([]);
+  });
+  it("rejects a stale photo edit without persisting a new Blob", async () => {
+    Object.defineProperty(navigator, "onLine", { value: false });
+    const first = await repository.save(draft(), crypto.randomUUID());
+    await repository.save({ ...first, time: "13:00" }, crypto.randomUUID());
+    const uploadId = crypto.randomUUID();
+    const photo = new NodeBlob(["private jpeg fixture"], { type: "image/jpeg" }) as Blob;
+    await expect(new MealRepository().saveWithPhoto(
+      { ...first, time: "14:00", photo }, crypto.randomUUID(), uploadId,
+    )).rejects.toThrow("Stale photo meal version");
+    expect(await readPhotoPayload("a", uploadId)).toBeNull();
+    expect((await repository.state()).jobs).toHaveLength(2);
+  });
+  it("rejects a photo save after a queued delete without persisting its Blob", async () => {
+    const first = await repository.save(draft(), crypto.randomUUID());
+    await repository.delete(first);
+    const uploadId = crypto.randomUUID();
+    const photo = new NodeBlob(["private jpeg fixture"], { type: "image/jpeg" }) as Blob;
+    await expect(new MealRepository().saveWithPhoto(
+      { ...first, photo }, crypto.randomUUID(), uploadId,
+    )).rejects.toThrow("Meal already queued for deletion");
+    expect(await readPhotoPayload("a", uploadId)).toBeNull();
+    expect((await repository.state()).jobs.map((job) => job.kind)).toEqual(["save", "delete"]);
+    expect(await repository.list()).toEqual([]);
   });
   it("retains conflicts, blocks dependent edits and still syncs unrelated meals", async () => {
     const first = await repository.save(draft(), crypto.randomUUID());

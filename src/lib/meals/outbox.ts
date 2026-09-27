@@ -22,6 +22,17 @@ export interface SyncState {
   syncedAt: string | null;
   revision?: string;
 }
+// Call inside the account's IndexedDB write transaction. Another tab can hold
+// an older meal object, but must not enqueue a command against an older local
+// version or revive a meal already queued for deletion.
+export function hasCurrentMealVersion(
+  state: SyncState, mealId: string, expectedVersion: number, allowCreate = true,
+): boolean {
+  if (state.jobs.some((job) => job.record.id === mealId && job.kind === "delete"))
+    return false;
+  const current = visibleMeals(state).find((meal) => meal.id === mealId);
+  return current ? current.version === expectedVersion : allowCreate && expectedVersion === 0;
+}
 const empty = (): SyncState => ({ remote: [], jobs: [], syncedAt: null });
 const PHOTO_STORE = "photoPayloads";
 const MAX_PHOTO_BYTES = 2 * 1024 * 1024;
@@ -158,6 +169,16 @@ export async function enqueuePhotoMeal(
         }
         if (existing && !sameJobIntent(existing, queued)) {
           abortWith(tx, new Error("Conflicting photo mutation"), reject);
+          return;
+        }
+        if (current.jobs.some((pending) => pending.record.id === job.record.id &&
+            pending.kind === "delete")) {
+          abortWith(tx, new Error("Meal already queued for deletion"), reject);
+          return;
+        }
+        if (!hasCurrentMealVersion(current, job.record.id, job.expectedVersion) &&
+            !existing) {
+          abortWith(tx, new Error("Stale photo meal version"), reject);
           return;
         }
         if (current.jobs.some((pending) => pending.id !== job.id && pending.photoUpload?.uploadId === uploadId)) {
