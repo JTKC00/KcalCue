@@ -34,6 +34,7 @@ export async function POST(request: Request) {
       jpeg = await sharp(bytes, { limitInputPixels: 40_000_000 })
         .rotate()
         .resize(1600, 1600, { fit: "inside", withoutEnlargement: true })
+        .flatten({ background: "#ffffff" })
         .jpeg({ quality: 80 })
         .toBuffer();
     } catch {
