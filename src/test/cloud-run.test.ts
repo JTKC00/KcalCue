@@ -36,7 +36,8 @@ if (matches('projects', 'describe')) emit('private-trial');
 else if (matches('artifacts', 'docker', 'images', 'describe')) emit('sha256:' + 'a'.repeat(64));
 else if (matches('run', 'services', 'list')) emit(process.env.KCAL_TEST_FAILURE === 'new-service' ? [] :
   [{spec:{template:{spec:{containers:[{env:[
-    {name:'KCALCUE_ANALYSIS_ENABLED',value:state.enabled},
+    ...(process.env.KCAL_TEST_FAILURE === 'missing-switch' ? [] :
+      [{name:'KCALCUE_ANALYSIS_ENABLED',value:process.env.KCAL_TEST_FAILURE === 'unknown-switch' ? 'maybe' : state.enabled}]),
     {name:'NEXT_PUBLIC_FIREBASE_PROJECT_ID',value:'demo-kcalcue'},
     {name:'KCALCUE_ALLOWED_EMAILS',value:process.env.KCAL_TEST_FAILURE === 'allowed-mismatch' ? 'other@example.com' : 'tester@example.com'}
   ]}]}}}}]);
@@ -52,7 +53,13 @@ else if (matches('run', 'services', 'update') || matches('run', 'deploy')) {
   writeFileSync(process.env.KCAL_TEST_STATE, JSON.stringify(state));
   emit(process.env.KCAL_TEST_FAILURE === 'invalid-revision' ? '' : 'kcalcue-00003-new');
 } else if (matches('run', 'revisions', 'describe')) {
-  emit({spec:{containers:[{env:[{name:'KCALCUE_ANALYSIS_ENABLED',value:process.env.KCAL_TEST_FAILURE === 'wrong-switch' ? 'wrong' : state.enabled}]}]}});
+  const isRollbackTarget = args[3] === 'kcalcue-00002-old';
+  const isCurrent = args[3] === 'kcalcue-00001-old';
+  emit({spec:{containers:[{env:[
+    {name:'KCALCUE_ANALYSIS_ENABLED',value:process.env.KCAL_TEST_FAILURE === 'wrong-switch' || isRollbackTarget && process.env.KCAL_TEST_FAILURE === 'rollback-switch-unknown' ? 'wrong' : state.enabled},
+    {name:'NEXT_PUBLIC_FIREBASE_PROJECT_ID',value:isRollbackTarget && process.env.KCAL_TEST_FAILURE === 'rollback-project-mismatch' ? 'other-project' : 'demo-kcalcue'},
+    {name:'KCALCUE_ALLOWED_EMAILS',value:isRollbackTarget && process.env.KCAL_TEST_FAILURE === 'rollback-allowed-mismatch' || isCurrent && process.env.KCAL_TEST_FAILURE === 'rollback-current-allowed-mismatch' ? 'other@example.com' : 'tester@example.com'}
+  ]}]},status:{conditions:[{type:'Ready',status:isRollbackTarget && process.env.KCAL_TEST_FAILURE === 'rollback-not-ready' ? 'False' : 'True'}]}});
 } else if (matches('run', 'services', 'update-traffic')) {
   state.routed = process.env.KCAL_TEST_FAILURE !== 'unchanged-traffic';
   if (state.routed) state.routedRevision = args.find(value => value.startsWith('--to-revisions='))?.slice('--to-revisions='.length).split('=')[0];
@@ -106,6 +113,14 @@ describe("Cloud Run routing after rollback", () => {
     expect(calls.some(call => call.includes("update-traffic"))).toBe(false);
   });
 
+  it.each(["missing-switch", "unknown-switch"])("stops before deploy when the existing analysis switch is %s", failure => {
+    const { result, calls } = run("deploy", failure);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Existing analysis switch is unknown");
+    expect(calls.some(call => call.slice(0, 2).join(" ") === "run deploy")).toBe(false);
+    expect(calls.some(call => call.includes("update-traffic"))).toBe(false);
+  });
+
   it("keeps the first deployment paused and provides its explicit account list", () => {
     const { result, calls, finalState } = run("deploy", "new-service");
     expect(result.status, result.stderr).toBe(0);
@@ -126,6 +141,22 @@ describe("Cloud Run routing after rollback", () => {
     expect(mismatch.result.status).toBe(1);
     expect(mismatch.result.stderr).toContain("Traffic verification failed");
     expect(mismatch.result.stdout).not.toContain("PASS");
+  });
+
+  it.each(["rollback-project-mismatch", "rollback-allowed-mismatch", "rollback-switch-unknown", "rollback-not-ready"])(
+    "refuses an incompatible rollback target before moving traffic: %s", failure => {
+      const { result, calls } = run("rollback", failure);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("Rollback target is not a ready revision");
+      expect(calls.some(call => call.includes("update-traffic"))).toBe(false);
+    },
+  );
+
+  it("refuses rollback when config no longer matches the current serving account list", () => {
+    const { result, calls } = run("rollback", "rollback-current-allowed-mismatch");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Current serving account or project settings differ");
+    expect(calls.some(call => call.includes("update-traffic"))).toBe(false);
   });
 
   it.each(["wrong-switch", "invalid-revision"])("refuses traffic changes with %s", failure => {

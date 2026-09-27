@@ -43,11 +43,19 @@ function main() {
     if (result.error || result.status !== 0) throw new Error("gcloud failed; inspect the command result and authenticate/configure the dedicated project before retrying.");
     return capture ? result.stdout.trim() : "";
   }
+  const normalizeEmails = value => value.split(",").map(email => email.trim().toLowerCase()).filter(Boolean).sort().join(",");
   function routeRevision(revision, analysisEnabled) {
     if (!/^kcalcue-[a-z0-9-]+$/.test(revision)) throw new Error("The updated revision could not be identified; traffic was not changed.");
     const candidate = JSON.parse(gcloud(["run", "revisions", "describe", revision, `--region=${config.region}`, "--format=json"], true));
-    const enabled = candidate.spec?.containers?.[0]?.env?.find(entry => entry.name === "KCALCUE_ANALYSIS_ENABLED")?.value;
-    if (enabled !== String(analysisEnabled)) throw new Error("The updated revision has an unexpected analysis switch; traffic was not changed.");
+    const candidateEnv = candidate.spec?.containers?.[0]?.env ?? [];
+    const candidateValue = name => candidateEnv.find(entry => entry.name === name)?.value;
+    if (candidateValue("KCALCUE_ANALYSIS_ENABLED") !== String(analysisEnabled) ||
+        candidateValue("NEXT_PUBLIC_FIREBASE_PROJECT_ID") !== config.projectId ||
+        typeof candidateValue("KCALCUE_ALLOWED_EMAILS") !== "string" ||
+        normalizeEmails(candidateValue("KCALCUE_ALLOWED_EMAILS")) !== normalizeEmails(config.allowedEmails.join(",")) ||
+        !candidate.status?.conditions?.some(entry => entry.type === "Ready" && entry.status === "True")) {
+      throw new Error("The updated revision has unexpected account, project or analysis settings, or is not ready; traffic was not changed.");
+    }
     // A previous rollback pins traffic. Updating the template alone does not
     // move requests to the new revision, even when gcloud reports success.
     gcloud(["run", "services", "update-traffic", "kcalcue", `--region=${config.region}`, `--to-revisions=${revision}=100`]);
@@ -93,11 +101,13 @@ function main() {
     const currentEnv = existing?.spec?.template?.spec?.containers?.[0]?.env ?? [];
     const envValue = name => currentEnv.find(entry => entry.name === name)?.value;
     if (existing) {
-      const normalizeEmails = value => value.split(",").map(email => email.trim().toLowerCase()).filter(Boolean).sort().join(",");
       if (envValue("NEXT_PUBLIC_FIREBASE_PROJECT_ID") !== config.projectId ||
           typeof envValue("KCALCUE_ALLOWED_EMAILS") !== "string" ||
           normalizeEmails(envValue("KCALCUE_ALLOWED_EMAILS")) !== normalizeEmails(config.allowedEmails.join(","))) {
         throw new Error("Existing project or allowed-email list differs from config; deployment stopped before mutation.");
+      }
+      if (!["true", "false"].includes(envValue("KCALCUE_ANALYSIS_ENABLED"))) {
+        throw new Error("Existing analysis switch is unknown; deployment stopped before mutation.");
       }
     }
     const analysisEnabled = envValue("KCALCUE_ANALYSIS_ENABLED") === "true";
@@ -131,6 +141,32 @@ function main() {
     } finally { rmSync(temporary, { recursive: true, force: true }); }
   } else if (action === "rollback") {
     if (!values.revision || !/^kcalcue-[a-z0-9-]+$/.test(values.revision)) throw new Error("Provide the previously verified --revision.");
+    const current = JSON.parse(gcloud(["run", "services", "describe", "kcalcue", `--region=${config.region}`, "--format=json"], true));
+    const serving = current.status?.traffic?.filter(entry => entry.percent > 0) ?? [];
+    if (serving.length !== 1 || serving[0].percent !== 100 ||
+        !/^kcalcue-[a-z0-9-]+$/.test(serving[0].revisionName ?? "")) {
+      throw new Error("Current serving revision is uncertain; rollback traffic was not changed.");
+    }
+    const active = JSON.parse(gcloud(["run", "revisions", "describe", serving[0].revisionName,
+      `--region=${config.region}`, "--format=json"], true));
+    const activeEnv = active.spec?.containers?.[0]?.env ?? [];
+    const activeValue = name => activeEnv.find(entry => entry.name === name)?.value;
+    if (activeValue("NEXT_PUBLIC_FIREBASE_PROJECT_ID") !== config.projectId ||
+        typeof activeValue("KCALCUE_ALLOWED_EMAILS") !== "string" ||
+        normalizeEmails(activeValue("KCALCUE_ALLOWED_EMAILS")) !== normalizeEmails(config.allowedEmails.join(","))) {
+      throw new Error("Current serving account or project settings differ from config; rollback traffic was not changed.");
+    }
+    const candidate = JSON.parse(gcloud(["run", "revisions", "describe", values.revision,
+      `--region=${config.region}`, "--format=json"], true));
+    const targetEnv = candidate.spec?.containers?.[0]?.env ?? [];
+    const targetValue = name => targetEnv.find(entry => entry.name === name)?.value;
+    if (targetValue("NEXT_PUBLIC_FIREBASE_PROJECT_ID") !== config.projectId ||
+        typeof targetValue("KCALCUE_ALLOWED_EMAILS") !== "string" ||
+        normalizeEmails(targetValue("KCALCUE_ALLOWED_EMAILS")) !== normalizeEmails(config.allowedEmails.join(",")) ||
+        !["true", "false"].includes(targetValue("KCALCUE_ANALYSIS_ENABLED")) ||
+        !candidate.status?.conditions?.some(entry => entry.type === "Ready" && entry.status === "True")) {
+      throw new Error("Rollback target is not a ready revision with the expected account, project and analysis settings; traffic was not changed.");
+    }
     gcloud(["run", "services", "update-traffic", "kcalcue", `--region=${config.region}`, `--to-revisions=${values.revision}=100`]);
     verifyTraffic(values.revision);
     console.log(`PASS: ${values.revision} receives 100% of traffic after rollback.`);
