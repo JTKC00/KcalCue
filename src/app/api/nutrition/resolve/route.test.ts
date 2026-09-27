@@ -32,6 +32,39 @@ const banana = {
   uncertaintyReasons: ["顏色只能估計熟度。"],
 };
 
+const remoteNames = [
+  "remotealpha", "remotebeta", "remotegamma", "remotedelta",
+  "remoteepsilon", "remotezeta", "remoteeta", "remotetheta",
+  "remoteiota", "remotekappa", "remotelambda", "remotemu",
+];
+
+function remoteFood(name: string) {
+  return { ...banana, displayName: name, normalizedName: name, uncertaintyReasons: [] };
+}
+
+function usdaResponse(index: number): Response {
+  return Response.json({
+    foods: [{
+      fdcId: 5000 + index,
+      description: remoteNames[index],
+      foodNutrients: [
+        { nutrientNumber: "208", value: 100 + index, unitName: "kcal" },
+        { nutrientNumber: "203", value: 10, unitName: "g" },
+        { nutrientNumber: "205", value: 12, unitName: "g" },
+        { nutrientNumber: "204", value: 3, unitName: "g" },
+      ],
+    }],
+  });
+}
+
+function resolveRequest(foods: ReturnType<typeof remoteFood>[], signal?: AbortSignal): Request {
+  return new Request("http://localhost/api/nutrition/resolve", {
+    method: "POST",
+    body: JSON.stringify({ foods }),
+    signal,
+  });
+}
+
 describe("POST /api/nutrition/resolve", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -148,6 +181,112 @@ describe("POST /api/nutrition/resolve", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(authenticated).toHaveBeenCalledOnce();
     expect(reserveHourlyUsdaCall).toHaveBeenCalledTimes(2);
+  });
+
+  it("bounds USDA work to three concurrent lookups and restores original match and warning order", async () => {
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    const pending = new Map<string, (response: Response) => void>();
+    let active = 0;
+    let peakActive = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL): Promise<Response> => {
+      const query = new URL(String(input)).searchParams.get("query") ?? "";
+      active += 1;
+      peakActive = Math.max(peakActive, active);
+      const response = await new Promise<Response>((resolve) => pending.set(query, resolve));
+      active -= 1;
+      return response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const responsePromise = POST(resolveRequest(remoteNames.map(remoteFood)));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(active).toBe(3);
+    expect(vi.mocked(reserveHourlyUsdaCall)).toHaveBeenCalledTimes(3);
+
+    // Finish some later indexes first. Every freed slot may start one more lookup.
+    for (const index of [2, 1, 0, 3, 5, 4, 6, 8, 7, 9, 11, 10]) {
+      const name = remoteNames[index];
+      await vi.waitFor(() => expect(pending.has(name)).toBe(true));
+      pending.get(name)!(index === 1 || index === 8
+        ? new Response(null, { status: 429 })
+        : usdaResponse(index));
+      pending.delete(name);
+    }
+
+    const response = await responsePromise;
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(peakActive).toBe(3);
+    expect(active).toBe(0);
+    expect(fetchMock).toHaveBeenCalledTimes(12);
+    expect(reserveHourlyUsdaCall).toHaveBeenCalledTimes(12);
+    expect(body.matches).toHaveLength(12);
+    for (const [index, match] of body.matches.entries()) {
+      if (index === 1 || index === 8) {
+        expect(match.includedInTotal).toBe(false);
+      } else {
+        expect(match.profile.id).toBe(`usda-${5000 + index}`);
+        expect(match.includedInTotal).toBe(true);
+      }
+    }
+    expect(body.warnings).toEqual([
+      { index: 1, code: "rate_limited" },
+      { index: 8, code: "rate_limited" },
+    ]);
+  });
+
+  it("does not schedule or reserve later USDA lookups after the request is aborted", async () => {
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    const pending = new Map<string, (response: Response) => void>();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL): Promise<Response> => {
+      const query = new URL(String(input)).searchParams.get("query") ?? "";
+      return new Promise<Response>((resolve) => pending.set(query, resolve));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+    const responsePromise = POST(resolveRequest(remoteNames.map(remoteFood), controller.signal));
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(reserveHourlyUsdaCall).toHaveBeenCalledTimes(3);
+    controller.abort();
+    for (const index of [2, 0, 1]) {
+      pending.get(remoteNames[index])!(usdaResponse(index));
+    }
+
+    const response = await responsePromise;
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.matches).toHaveLength(12);
+    for (const match of body.matches.slice(3)) {
+      expect(match.includedInTotal).toBe(false);
+      expect(match.profile).toBeNull();
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(reserveHourlyUsdaCall).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps a shared pending USDA lookup usable when one caller aborts", async () => {
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    let finishFetch: (response: Response) => void = () => {};
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => { finishFetch = resolve; }));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+    const food = remoteFood(remoteNames[0]);
+    const first = POST(resolveRequest([food], controller.signal));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    const second = POST(resolveRequest([food]));
+    await vi.waitFor(() => expect(authenticated).toHaveBeenCalledTimes(2));
+
+    controller.abort();
+    finishFetch(usdaResponse(0));
+    const [firstResponse, secondResponse] = await Promise.all([first, second]);
+    const secondBody = await secondResponse.json();
+    expect(firstResponse.status).toBe(200);
+    expect(secondResponse.status).toBe(200);
+    expect(secondBody.matches[0].profile.id).toBe("usda-5000");
+    expect(secondBody.matches[0].includedInTotal).toBe(true);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(reserveHourlyUsdaCall).toHaveBeenCalledOnce();
   });
 
   it.each([

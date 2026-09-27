@@ -25,6 +25,7 @@ export const runtime = "nodejs";
 const requestSchema = z.object({
   foods: z.array(foodEstimateSchema).max(12),
 });
+const MAX_PARALLEL_USDA_LOOKUPS = 3;
 
 export async function POST(request: Request) {
   const ip = clientIpFromHeaders(request.headers);
@@ -59,44 +60,44 @@ export async function POST(request: Request) {
     if (!remoteAccount) throw new Error("USDA lookup requires an authenticated account");
     return (await reserveHourlyUsdaCall(remoteAccount.db, remoteAccount.user.id)).allowed;
   }) : null;
-  const matches: NutritionMatch[] = [];
+  const matches: NutritionMatch[] = parsed.data.foods.map((food) => local.resolve(food));
   const warnings: Array<{ index: number; code: string }> = [];
   const startedAt = performance.now();
 
   try {
-    for (const [index, food] of parsed.data.foods.entries()) {
-      const localMatch = local.resolve(food);
-      if (
-        localMatch.includedInTotal ||
-        !usda ||
-        isCompositeIdentity(localMatch.identity)
-      ) {
-        matches.push(localMatch);
-        continue;
-      }
-
+    const remoteIndexes = usda ? matches.flatMap((match, index) =>
+      !match.includedInTotal && !isCompositeIdentity(match.identity) ? [index] : []) : [];
+    if (usda && remoteIndexes.length > 0 && !request.signal.aborted) {
       // Local reference/demo resolution remains public. A provider-backed
       // lookup requires the same verified trial account as Live analysis.
-      if (!remoteAccount) {
-        try {
-          remoteAccount = await authenticated(request);
-        } catch (error) {
-          return apiError(error);
-        }
-      }
-
       try {
-        const remote = await usda.resolve(food);
-        matches.push(remote.includedInTotal ? remote : localMatch);
+        remoteAccount = await authenticated(request);
       } catch (error) {
-        matches.push(localMatch);
-        warnings.push({
-          index,
-          code: error instanceof UsdaNutritionError ? error.code : "unavailable",
-        });
+        return apiError(error);
       }
+      let next = 0;
+      const worker = async () => {
+        while (next < remoteIndexes.length && !request.signal.aborted) {
+          // Taking an index is synchronous; workers cannot claim it twice.
+          const index = remoteIndexes[next++];
+          try {
+            const remote = await usda.resolve(parsed.data.foods[index]);
+            if (remote.includedInTotal) matches[index] = remote;
+          } catch (error) {
+            warnings.push({
+              index,
+              code: error instanceof UsdaNutritionError ? error.code : "unavailable",
+            });
+          }
+        }
+      };
+      await Promise.all(Array.from(
+        { length: Math.min(MAX_PARALLEL_USDA_LOOKUPS, remoteIndexes.length) },
+        () => worker(),
+      ));
     }
 
+    warnings.sort((left, right) => left.index - right.index);
     const response = {
       matches,
       provider: usda ? "usda-fdc" : "kcalcue-reference",
