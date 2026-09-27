@@ -234,6 +234,113 @@ test("whole-meal user calories survive reload without inventing nutrition, and c
   await expect(page.getByRole("heading", { name: "今日未有記錄", exact: true })).toBeVisible();
 });
 
+test("correcting an AI dish to banana survives cloud save, reload and history editing", async ({
+  page,
+  context,
+}) => {
+  const backend = cloud();
+  await backend.install(context);
+  const originalAnalysis = {
+    analysisStatus: "success",
+    foods: [{
+      displayName: "混合沙律",
+      normalizedName: "mixed salad",
+      identityLevel: "dish",
+      portionMin: 100,
+      portionMax: 150,
+      unit: "g",
+      recognitionConfidence: 0.5,
+      portionConfidence: 0.5,
+      uncertaintyReasons: ["請確認份量。"],
+      preparationMethod: "grilled",
+      visibleIngredients: ["rice", "chicken"],
+      notes: "原始 AI 食材推測。",
+    }],
+    uncertaintyReasons: [],
+    visibleEvidence: ["合成測試餐點"],
+    estimatedInformation: ["估計份量"],
+    unknownInformation: [],
+  };
+  // Synthetic Live response only: the E2E server has no provider credentials.
+  await context.route("**/api/analyze", (route) => route.fulfill({
+    json: { mode: "live", analysis: originalAnalysis },
+  }));
+  await context.route("**/api/nutrition/resolve", (route) => route.fulfill({
+    json: {
+      provider: "kcalcue-reference",
+      matches: [{
+        profile: null,
+        confidence: "low",
+        matchType: "unresolved",
+        reasons: ["找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。"],
+        identity: {
+          canonicalName: "mixed-dish",
+          category: "mixed",
+          preparation: "grilled",
+          qualifiers: ["composite"],
+        },
+        includedInTotal: false,
+      }],
+    },
+  }));
+
+  await page.goto("/");
+  await login(page);
+  await page.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  const png = await sharp({
+    create: { width: 80, height: 60, channels: 3, background: "yellow" },
+  }).png().toBuffer();
+  await page.locator('input[type="file"]').nth(1).setInputFiles({
+    name: "synthetic-meal.png", mimeType: "image/png", buffer: png,
+  });
+  await page.getByRole("button", { name: "開始分析", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "暫未能計算", exact: true })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "食物名稱", exact: true })).toHaveValue("混合沙律");
+
+  await page.getByRole("combobox", { name: "食物名稱", exact: true }).fill("香蕉");
+  const estimate = page.getByRole("heading", { name: /約 .*kcal/ });
+  await expect(estimate).toBeVisible();
+  const correctedEstimate = await estimate.textContent();
+  await expect(page.getByRole("spinbutton", { name: "最少份量", exact: true })).toHaveValue("100");
+  await expect(page.getByRole("spinbutton", { name: "最多份量", exact: true })).toHaveValue("150");
+  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  await expect.poll(() => backend.records.size).toBe(1);
+  await expect(page.getByText(/項修改待同步/)).not.toBeVisible();
+
+  expect(backend.saves).toHaveLength(1);
+  const saved = backend.saves[0];
+  expect(saved.analysis).toEqual(originalAnalysis);
+  expect(saved.items).toEqual([expect.objectContaining({
+    displayName: "香蕉",
+    normalizedName: "banana",
+    identityLevel: "ingredient",
+    portionMin: 100,
+    portionMax: 150,
+    unit: "g",
+  })]);
+  const [corrected] = saved.items as Array<Record<string, unknown>>;
+  expect(corrected).not.toHaveProperty("preparationMethod");
+  expect(corrected).not.toHaveProperty("visibleIngredients");
+  expect(corrected).not.toHaveProperty("notes");
+
+  const readback = page.waitForResponse((response) =>
+    new URL(response.url()).pathname === "/api/meals" && response.request().method() === "GET",
+  );
+  await page.reload();
+  expect((await (await readback).json()).records[0]).toMatchObject({
+    id: saved.id, version: 1, analysis: originalAnalysis, items: saved.items,
+  });
+  await page.getByRole("button", { name: "歷史", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "歷史記錄", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "香蕉", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "查看／修正", exact: true }).click();
+  await expect(page.getByRole("combobox", { name: "食物名稱", exact: true })).toHaveValue("香蕉");
+  await expect(estimate).toHaveText(correctedEstimate!);
+  await expect(page.getByRole("spinbutton", { name: "最少份量", exact: true })).toHaveValue("100");
+  await expect(page.getByRole("spinbutton", { name: "最多份量", exact: true })).toHaveValue("150");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+});
+
 test("Email link login restores a guest draft and automatically retries a failed save", async ({
   page,
   context,
