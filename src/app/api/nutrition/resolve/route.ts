@@ -3,7 +3,7 @@ import { authenticated, apiError } from "@/lib/server/auth";
 import { foodEstimateSchema } from "@/lib/domain/food-analysis";
 import { isCompositeIdentity } from "@/lib/nutrition/canonical";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
-import { UsdaNutritionClient, UsdaNutritionError } from "@/lib/nutrition/usda";
+import { supportsUsdaPortionUnit, UsdaNutritionClient, UsdaNutritionError } from "@/lib/nutrition/usda";
 import { getNutritionApiKey } from "@/lib/server/env";
 import { reserveHourlyUsdaCall } from "@/lib/server/durable-nutrition-quota";
 import {
@@ -66,7 +66,9 @@ export async function POST(request: Request) {
 
   try {
     const remoteIndexes = usda ? matches.flatMap((match, index) =>
-      !match.includedInTotal && !isCompositeIdentity(match.identity) ? [index] : []) : [];
+      !match.includedInTotal &&
+      supportsUsdaPortionUnit(parsed.data.foods[index].unit) &&
+      !isCompositeIdentity(match.identity) ? [index] : []) : [];
     if (usda && remoteIndexes.length > 0 && !request.signal.aborted) {
       // Local reference/demo resolution remains public. A provider-backed
       // lookup requires the same verified trial account as Live analysis.

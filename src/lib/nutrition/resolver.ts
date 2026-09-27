@@ -232,6 +232,18 @@ export function resolveNutritionMatch(
     };
   }
 
+  const gramsPerUnit = best.profile.gramsPerUnit[food.unit];
+  if (typeof gramsPerUnit !== "number" || !Number.isFinite(gramsPerUnit) || gramsPerUnit <= 0) {
+    return {
+      profile: null,
+      confidence: "low",
+      matchType: "unresolved",
+      reasons: [`未有 ${food.unit} 的可靠克重換算，因此不納入總數。`],
+      identity,
+      includedInTotal: false,
+    };
+  }
+
   const classified = classifyMatch(identity, best.profile, best.score, best.aliasExact);
   const includedInTotal =
     classified.matchType !== "unresolved" &&

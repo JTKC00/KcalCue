@@ -293,6 +293,12 @@ export function clearUsdaCache(): void {
   cacheGeneration += 1;
 }
 
+export function supportsUsdaPortionUnit(unit: FoodEstimate["unit"]): boolean {
+  // FDC search profiles only contain per-100g values; this pipeline has no
+  // evidence-based conversion for volume or count units.
+  return unit === "g";
+}
+
 export class UsdaNutritionClient {
   constructor(
     private readonly apiKey: string,
@@ -313,6 +319,16 @@ export class UsdaNutritionClient {
     }
     if (!this.apiKey.trim()) {
       throw new UsdaNutritionError("missing_key", "USDA API key is not configured.");
+    }
+    if (!supportsUsdaPortionUnit(food.unit)) {
+      return {
+        profile: null,
+        confidence: "low",
+        matchType: "unresolved",
+        reasons: [`USDA 未有 ${food.unit} 的可靠克重換算，因此不納入總數。`],
+        identity,
+        includedInTotal: false,
+      };
     }
 
     const query = [...new Set(

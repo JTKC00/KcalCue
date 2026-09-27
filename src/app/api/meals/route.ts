@@ -14,7 +14,7 @@ import { accountPath } from "@/lib/firebase/admin";
 import { createEditableFoodItems } from "@/lib/domain/editable-meal";
 import { canReuseNutritionMatchForNameEdit } from "@/lib/nutrition/client";
 import { isCompositeIdentity } from "@/lib/nutrition/canonical";
-import { UsdaNutritionClient } from "@/lib/nutrition/usda";
+import { supportsUsdaPortionUnit, UsdaNutritionClient } from "@/lib/nutrition/usda";
 import { getNutritionApiKey } from "@/lib/server/env";
 import { reserveHourlyUsdaCall } from "@/lib/server/durable-nutrition-quota";
 import { claimMealLookupAttempt, releaseMealLookupAttempt } from "@/lib/server/meal-lookup-attempt";
@@ -97,6 +97,7 @@ export async function POST(request: Request) {
     });
     const needsRemote = (item: typeof initialItems[number]) =>
       !item.nutritionMatch.includedInTotal &&
+      supportsUsdaPortionUnit(item.unit) &&
       !isCompositeIdentity(item.nutritionMatch.identity);
     // All writes participate in this claim. Otherwise a changed local/manual
     // payload with the same mutation ID could race a Live lookup and commit

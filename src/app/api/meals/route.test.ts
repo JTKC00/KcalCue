@@ -22,6 +22,8 @@ import { getNutritionApiKey } from "@/lib/server/env";
 import { reserveHourlyUsdaCall } from "@/lib/server/durable-nutrition-quota";
 import { claimMealLookupAttempt, releaseMealLookupAttempt } from "@/lib/server/meal-lookup-attempt";
 import { copy } from "@/content/zh-HK";
+import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
+import type { NutritionMatch } from "@/lib/nutrition/types";
 import type { MealRecord } from "@/lib/meals/types";
 import { HttpError } from "@/lib/server/auth";
 import { GET, POST } from "./route";
@@ -120,6 +122,39 @@ describe("POST /api/meals bounded input", () => {
     expect(body.record.items[0].nutritionMatch.includedInTotal).toBe(true);
   });
 
+  it("recomputes a saved USDA gram match after a unit edit without another provider call", async () => {
+    const localMatch = new LocalNutritionProvider().resolve({
+      ...meal.items[0], identityLevel: "ingredient", unit: "g",
+    });
+    const oldMatch: NutritionMatch = {
+      ...localMatch,
+      profile: {
+        ...localMatch.profile!, id: "usda-test", gramsPerUnit: { g: 1 },
+        source: { ...localMatch.profile!.source, provider: "usda-fdc" },
+      },
+    };
+    expect(oldMatch.includedInTotal).toBe(true);
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.mocked(previousMeal).mockResolvedValue({
+      deleted: false, version: 1,
+      mutationId: "33333333-3333-4333-8333-333333333333",
+      record: { ...meal, mutationId: "33333333-3333-4333-8333-333333333333",
+        version: 1, items: [{ ...meal.items[0], nutritionMatch: oldMatch }] } as unknown as MealRecord,
+    });
+    const response = await POST(jsonRequest(JSON.stringify({
+      ...meal, version: 1, items: [{ ...meal.items[0], unit: "ml" }],
+    })));
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.record.items[0].nutritionMatch.includedInTotal).toBe(false);
+    expect(body.record.items[0].nutritionMatch.profile).toBeNull();
+    expect(reserveHourlyUsdaCall).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(commitMeal).toHaveBeenCalledOnce();
+  });
+
   it.each([
     { admission: { allowed: false, retryAfterSeconds: 30 }, label: "exhausted" },
     { admission: new Error("quota storage unavailable"), label: "unavailable" },
@@ -144,6 +179,29 @@ describe("POST /api/meals bounded input", () => {
     expect(reserveHourlyUsdaCall).toHaveBeenCalledOnce();
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it.each(["ml", "piece", "bowl", "cup"] as const)(
+    "saves an unknown %s portion without a futile USDA quota reservation or fetch",
+    async (unit) => {
+      vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      const liveMeal = { ...meal, mode: "live", items: [{
+        ...meal.items[0], id: "unknown", displayName: "mystery food",
+        normalizedName: "mystery food", unit,
+      }] };
+
+      const response = await POST(jsonRequest(JSON.stringify(liveMeal)));
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.record.items[0].nutritionMatch.profile).toBeNull();
+      expect(body.record.items[0].nutritionMatch.includedInTotal).toBe(false);
+      expect(commitMeal).toHaveBeenCalledOnce();
+      expect(reserveHourlyUsdaCall).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
 
   it("keeps a concurrent same-mutation save retryable before any USDA request", async () => {
     vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");

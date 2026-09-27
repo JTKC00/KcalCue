@@ -73,6 +73,15 @@ describe("nutrition client", () => {
     ).toBe(true);
   });
 
+  it.each(["ml", "piece", "bowl", "cup"] as const)(
+    "does not reuse a gram-only USDA match after changing the unit to %s",
+    (unit) => {
+      expect(canReuseNutritionMatchForNameEdit(
+        scallops, { ...scallops, unit }, cachedUsdaMatch(),
+      )).toBe(false);
+    },
+  );
+
   it("does not reuse a USDA match after a different identity is entered", () => {
     const nextFood = {
       ...scallops,

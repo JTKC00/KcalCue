@@ -29,6 +29,16 @@ export function canReuseNutritionMatchForNameEdit(
 ): match is NutritionMatch {
   if (!match?.profile) return false;
 
+  // An unchanged name cannot preserve a match whose density cannot express
+  // the edited unit. The persisted includedInTotal flag must agree with the
+  // value that calculateFoodNutrition can actually include.
+  const currentFactor = match.profile.gramsPerUnit[currentFood.unit];
+  const nextFactor = match.profile.gramsPerUnit[nextFood.unit];
+  if (
+    typeof currentFactor !== "number" || !Number.isFinite(currentFactor) || currentFactor <= 0 ||
+    typeof nextFactor !== "number" || !Number.isFinite(nextFactor) || nextFactor <= 0
+  ) return false;
+
   const currentIdentity = canonicalizeFood(currentFood);
   const nextIdentity = canonicalizeFood(nextFood);
   const matchIdentityKey = nutritionIdentityKey(match.identity);

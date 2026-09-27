@@ -349,6 +349,30 @@ describe("POST /api/nutrition/resolve", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it.each(["ml", "piece", "bowl", "cup"] as const)(
+    "keeps an unknown %s portion unresolved without remote authorization or cost",
+    async (unit) => {
+      vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+      vi.mocked(authenticated).mockRejectedValue(new HttpError(401, "login_required"));
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+
+      const response = await POST(resolveRequest([{
+        ...remoteFood("unrecognizedfood"), unit,
+      }]));
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.matches).toHaveLength(1);
+      expect(body.matches[0].profile).toBeNull();
+      expect(body.matches[0].includedInTotal).toBe(false);
+      expect(body.warnings).toBeUndefined();
+      expect(authenticated).not.toHaveBeenCalled();
+      expect(reserveHourlyUsdaCall).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
   it("returns 429 after the nutrition rate limit is exceeded", async () => {
     const headers = {
       "Content-Type": "application/json",
