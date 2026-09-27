@@ -92,18 +92,25 @@ it("does not present manual food or missing legacy analysis as AI output", async
   const legacy = record("live", "舊餐點");
   delete (legacy as Partial<MealRecord>).analysis;
   delete (legacy as Partial<MealRecord>).originalItems;
-  fixture.list.mockResolvedValue([record("manual", "手動早餐"), legacy]);
+  const malformed = record("live", "異常舊餐點");
+  malformed.analysis = {} as MealRecord["analysis"];
+  fixture.list.mockResolvedValue([record("manual", "手動早餐"), legacy, malformed]);
   render(<MealJournal initialProviderMode="live" />);
   await act(async () => fixture.callback!({ uid: "a", email: "a@example.com" }));
   fireEvent.click(screen.getByRole("button", { name: "歷史" }));
 
   const manual = screen.getByRole("heading", { name: "手動早餐" }).closest("article");
   const legacyArticle = screen.getByRole("heading", { name: "舊餐點" }).closest("article");
+  const malformedArticle = screen.getByRole("heading", { name: "異常舊餐點" }).closest("article");
   expect(manual).not.toBeNull();
   expect(legacyArticle).not.toBeNull();
+  expect(malformedArticle).not.toBeNull();
   expect(within(manual!).queryByText(/AI 辨識/)).not.toBeInTheDocument();
   fireEvent.click(within(legacyArticle!).getByText("原始 AI 辨識未保存"));
   expect(legacyArticle).toHaveTextContent("這筆舊紀錄沒有可核實的原始 AI 分析");
+  fireEvent.click(within(malformedArticle!).getByText("原始 AI 辨識未保存"));
+  expect(malformedArticle).toHaveTextContent("這筆舊紀錄沒有可核實的原始 AI 分析");
+  expect(malformedArticle).not.toHaveTextContent("undefined");
 });
 it("shows an explicit zero-meal and zero-kcal Today summary", async () => {
   fixture.list.mockResolvedValue([]);
