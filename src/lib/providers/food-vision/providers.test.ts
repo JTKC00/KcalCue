@@ -472,10 +472,54 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
     );
     const cancelledResult = expect(cancelled).rejects.toMatchObject({ code: "network_timeout" });
     controller.abort();
-    release();
+    const later = provider().analyzeImage({ data: rasterImages["image/webp"], mimeType: "image/webp" });
+    const laterResult = expect(later).resolves.toMatchObject({ analysisStatus: "success" });
+    try {
+      // The old queue waited for the first decode before settling cancellation.
+      await expect(Promise.race([
+        cancelled.then(() => "resolved", () => "rejected"),
+        new Promise((resolve) => setTimeout(() => resolve("still-waiting"), 50)),
+      ])).resolves.toBe("rejected");
+      expect(stats).toHaveBeenCalledOnce();
+      expect(responsesCreateMock).not.toHaveBeenCalled();
+    } finally {
+      release();
+    }
     await expect(first).resolves.toMatchObject({ analysisStatus: "success" });
     await cancelledResult;
-    expect(stats).toHaveBeenCalledOnce();
+    await laterResult;
+    expect(stats).toHaveBeenCalledTimes(2);
+    expect(responsesCreateMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("bounds the image preparation queue wait when a native job does not finish", async () => {
+    const originalStats = sharp.prototype.stats;
+    let begin!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>((resolve) => { begin = resolve; });
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const stats = vi.spyOn(sharp.prototype, "stats").mockImplementationOnce(async function (this: Sharp) {
+      begin();
+      await held;
+      return originalStats.call(this);
+    });
+    responsesCreateMock.mockResolvedValue({ output_text: JSON.stringify(demoFoodAnalysis) });
+
+    const first = provider().analyzeImage({ data: rasterImages["image/png"], mimeType: "image/png" });
+    await started;
+    vi.useFakeTimers();
+    try {
+      const queued = provider().analyzeImage({ data: rasterImages["image/jpeg"], mimeType: "image/jpeg" });
+      const queuedResult = expect(queued).rejects.toMatchObject({ code: "network_timeout" });
+      await vi.advanceTimersByTimeAsync(60_000);
+      await queuedResult;
+      expect(stats).toHaveBeenCalledOnce();
+      expect(responsesCreateMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      release();
+    }
+    await expect(first).resolves.toMatchObject({ analysisStatus: "success" });
     expect(responsesCreateMock).toHaveBeenCalledOnce();
   });
 
