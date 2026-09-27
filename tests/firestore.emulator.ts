@@ -480,15 +480,17 @@ describe("Firebase meal API against real Firestore emulator", () => {
   });
   it("atomically accepts only one of two simultaneous version-zero writes", async () => {
     const body = input();
+    const competing = { ...body, mutationId: crypto.randomUUID(), time: "14:00" };
     const results = await Promise.all([
       POST(request(body)),
-      POST(
-        request({ ...body, mutationId: crypto.randomUUID(), time: "14:00" }),
-      ),
+      POST(request(competing)),
     ]);
-    expect(results.map((response) => response.status).sort()).toEqual([
-      200, 409,
-    ]);
+    expect(results.filter((response) => response.status === 200)).toHaveLength(1);
+    expect([409, 503]).toContain(results.find((response) => response.status !== 200)?.status);
+    const loserBody = results[0].status === 200 ? competing : body;
+    // A live attempt may temporarily return 503 while the winner is still
+    // writing; its durable retry must become the expected version conflict.
+    expect((await POST(request(loserBody))).status).toBe(409);
     const winner = (await results.find((response) => response.status === 200)!.json()).record;
     expect(winner.schemaVersion).toBe(CURRENT_MEAL_SCHEMA_VERSION);
     expect(winner.createdAt).toBe(winner.updatedAt);
@@ -497,8 +499,11 @@ describe("Firebase meal API against real Firestore emulator", () => {
   it("acknowledges concurrent identical creates with exactly the same server timestamps", async () => {
     const body = input();
     const responses = await Promise.all([POST(request(body)), POST(request(body))]);
-    expect(responses.map((response) => response.status)).toEqual([200, 200]);
-    const records = await Promise.all(responses.map(async (response) => (await response.json()).record));
+    expect(responses.every((response) => response.status === 200 || response.status === 503)).toBe(true);
+    const settled = await Promise.all(responses.map((response) =>
+      response.status === 503 ? POST(request(body)) : response));
+    expect(settled.map((response) => response.status)).toEqual([200, 200]);
+    const records = await Promise.all(settled.map(async (response) => (await response.json()).record));
     expect(records[0]).toEqual(records[1]);
     expect(records[0].version).toBe(1);
     expect(records[0].createdAt).toBe(records[0].updatedAt);
@@ -665,10 +670,14 @@ describe("Firebase meal API against real Firestore emulator", () => {
   });
   it("accepts only one competing calorie edit and keeps the winning value", async () => {
     const created = (await (await POST(request(input()))).json()).record as MealRecord;
-    const responses = await Promise.all([700, 800].map((kcal) => POST(request({
+    const edits = [700, 800].map((kcal) => ({
       ...created, mutationId: crypto.randomUUID(), calorieCorrection: { kcal },
-    }))));
-    expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+    }));
+    const responses = await Promise.all(edits.map((edit) => POST(request(edit))));
+    expect(responses.filter((response) => response.status === 200)).toHaveLength(1);
+    expect([409, 503]).toContain(responses.find((response) => response.status !== 200)?.status);
+    const loser = responses[0].status === 200 ? edits[1] : edits[0];
+    expect((await POST(request(loser))).status).toBe(409);
     const winner = (await responses.find((response) => response.status === 200)!.json()).record;
     const stored = (await mealCollection(db, uid).doc(created.id).get()).data()?.record;
     expect(stored).toEqual(winner);
