@@ -426,6 +426,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
       return;
     }
     if (nextFile.size === 0 || !inferSupportedImageMimeType(nextFile.name, nextFile.type)) {
+      onPhotoSelected?.(null);
       setFile(null);
       setPreviewUrl(null);
       setAppError(getError("invalid_file"));
@@ -433,6 +434,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
       return;
     }
     if (nextFile.size > MAX_IMAGE_BYTES) {
+      onPhotoSelected?.(null);
       setFile(null);
       setPreviewUrl(null);
       setAppError(getError("file_too_large"));
@@ -443,6 +445,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
     try {
       setPreviewUrl(URL.createObjectURL(nextFile));
     } catch {
+      onPhotoSelected?.(null);
       setFile(null);
       setPreviewUrl(null);
       setPreviewFailed(true);

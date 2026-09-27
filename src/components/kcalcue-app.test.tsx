@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import "../test/setup";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -56,6 +56,54 @@ describe("KcalCueApp analysis cancel", () => {
     expect(screen.getByRole("button", { name: /開始分析/ })).toBeEnabled();
     expect(screen.queryByText("今次未能完成分析")).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("clears the parent photo when an oversized replacement is rejected", async () => {
+    const user = userEvent.setup();
+    const onPhotoSelected = vi.fn();
+    render(<KcalCueApp initialProviderMode="demo" onPhotoSelected={onPhotoSelected} />);
+
+    const libraryInput = document.querySelectorAll<HTMLInputElement>('input[type="file"]')[1];
+    const first = pngFile();
+    await user.upload(libraryInput, first);
+    expect(onPhotoSelected).toHaveBeenCalledWith(first);
+
+    const oversized = new File([new Uint8Array(10 * 1024 * 1024 + 1)], "large.png", {
+      type: "image/png",
+    });
+    await user.upload(libraryInput, oversized);
+
+    expect(onPhotoSelected).toHaveBeenLastCalledWith(null);
+    expect(screen.queryByAltText("已選擇的餐點相片預覽")).not.toBeInTheDocument();
+  });
+
+  it("clears the parent photo when a replacement has an unsupported format", async () => {
+    const user = userEvent.setup();
+    const onPhotoSelected = vi.fn();
+    render(<KcalCueApp initialProviderMode="demo" onPhotoSelected={onPhotoSelected} />);
+    const libraryInput = document.querySelectorAll<HTMLInputElement>('input[type="file"]')[1];
+    await user.upload(libraryInput, pngFile());
+
+    fireEvent.change(libraryInput, {
+      target: { files: [new File(["image"], "meal.tiff", { type: "image/tiff" })] },
+    });
+
+    expect(onPhotoSelected).toHaveBeenLastCalledWith(null);
+    expect(screen.queryByAltText("已選擇的餐點相片預覽")).not.toBeInTheDocument();
+  });
+
+  it("clears the parent photo when the replacement preview cannot be created", async () => {
+    const user = userEvent.setup();
+    const onPhotoSelected = vi.fn();
+    render(<KcalCueApp initialProviderMode="demo" onPhotoSelected={onPhotoSelected} />);
+    const libraryInput = document.querySelectorAll<HTMLInputElement>('input[type="file"]')[1];
+    await user.upload(libraryInput, pngFile());
+    vi.mocked(URL.createObjectURL).mockImplementationOnce(() => { throw new Error("preview failed"); });
+
+    await user.upload(libraryInput, new File(["second"], "second.png", { type: "image/png" }));
+
+    expect(onPhotoSelected).toHaveBeenLastCalledWith(null);
+    expect(screen.queryByAltText("已選擇的餐點相片預覽")).not.toBeInTheDocument();
   });
 
   it("completes a demo analysis after cancel is not pressed", async () => {

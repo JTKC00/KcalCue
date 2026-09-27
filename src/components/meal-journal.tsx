@@ -521,6 +521,9 @@ export function MealJournal({
       }
       const id = current.current.draft?.id;
       if (!id) return;
+      setDraft((value) =>
+        value?.id === id ? { ...value, photo: undefined, photoPath: null } : value,
+      );
       setPreparing(true);
       setPhotoFailure(null);
       setNotice(clearPhotoNotice);
