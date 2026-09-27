@@ -180,10 +180,13 @@ test("whole-meal user calories survive reload without inventing nutrition, and c
   expect([...backend.records.values()][0].calorieCorrection).toEqual({ kcal: 650, source: "user" });
   expect(backend.saves[0]).not.toHaveProperty("calorieInput");
   const total = page.locator(".day-summary > div").filter({ hasText: "卡路里" }).locator("strong");
+  const todaySummary = page.locator('.day-summary[aria-label="今日摘要"]');
+  await expect(todaySummary).toContainText("今日餐數1餐");
   await expect(total).toHaveText("650");
   await expect(page.locator(".meal-calories")).toHaveText("手動記錄：650 kcal");
   await expect(page.locator(".day-summary > div").filter({ hasText: "蛋白質" }).locator("strong")).toHaveText("未知");
   await page.reload();
+  await expect(todaySummary).toContainText("今日餐數1餐");
   await expect(total).toHaveText("650");
   await page.getByRole("button", { name: "歷史", exact: true }).click();
   await expect(page.locator(".meal-calories")).toHaveText("手動記錄：650 kcal");
@@ -232,6 +235,7 @@ test("whole-meal user calories survive reload without inventing nutrition, and c
   await page.getByRole("button", { name: "刪除", exact: true }).click();
   await expect.poll(() => backend.records.size).toBe(0);
   await expect(page.getByRole("heading", { name: "今日未有記錄", exact: true })).toBeVisible();
+  await expect(todaySummary).toContainText("今日餐數0餐");
 });
 
 test("correcting an AI dish to banana survives cloud save, reload and history editing", async ({

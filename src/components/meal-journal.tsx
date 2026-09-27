@@ -1176,7 +1176,7 @@ export function MealJournal({
             </label>
           )}
           {tab === "today" && !visible.length && (
-            <div className="day-summary journal-card" aria-label="今日摘要">
+            <div className="day-summary journal-card" role="region" aria-label="今日摘要">
               <div><span>今日餐數</span><strong>0</strong><small>餐</small></div>
               <div><span>卡路里</span><strong>0</strong><small>kcal</small></div>
             </div>
@@ -1208,7 +1208,8 @@ export function MealJournal({
             return (
               <section className="journal-day" key={date}>
                 <h2>{date}</h2>
-                <div className="day-summary journal-card">
+                <div className="day-summary journal-card" role="region" aria-label={tab === "today" ? "今日摘要" : `${date} 摘要`}>
+                  <div><span>{tab === "today" ? "今日餐數" : "餐數"}</span><strong>{calories.mealCount}</strong><small>餐</small></div>
                   <div>
                     <span>{calorieRange && calories.partialCount + calories.unknownCount > 0 ? "已知部分卡路里" : "卡路里"}</span>
                     <strong>{calorieRange

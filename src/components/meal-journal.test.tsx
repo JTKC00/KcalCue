@@ -176,6 +176,32 @@ it("shows an explicit zero-meal and zero-kcal Today summary", async () => {
   expect(summary).toHaveTextContent("卡路里0kcal");
 });
 
+it("keeps Today meal count and kcal aligned as records change", async () => {
+  const item = createEditableFoodItems([demoFoodAnalysis.foods[0]])[0];
+  const record = (kcal: number): MealRecord => ({
+    ...newDraft(), id: crypto.randomUUID(), userId: "a", mode: "manual",
+    items: [item], calorieCorrection: { kcal, source: "user" },
+    updatedAt: new Date().toISOString(), mutationId: crypto.randomUUID(),
+  });
+  const first = record(400), second = record(600);
+  fixture.list.mockResolvedValue([first, second]);
+  render(<MealJournal initialProviderMode="demo" />);
+  await act(async () => fixture.callback!({ uid: "a", email: "a@example.com" }));
+  const summary = await screen.findByLabelText("今日摘要");
+  await waitFor(() => expect(summary).toHaveTextContent("今日餐數2餐"));
+  expect(summary).toHaveTextContent("卡路里1000kcal");
+
+  fixture.list.mockResolvedValue([first]);
+  act(() => window.dispatchEvent(new Event("kcalcue-sync")));
+  await waitFor(() => expect(summary).toHaveTextContent("今日餐數1餐"));
+  expect(summary).toHaveTextContent("卡路里400kcal");
+
+  fixture.list.mockResolvedValue([]);
+  act(() => window.dispatchEvent(new Event("kcalcue-sync")));
+  await waitFor(() => expect(screen.getByLabelText("今日摘要")).toHaveTextContent("今日餐數0餐"));
+  expect(screen.getByLabelText("今日摘要")).toHaveTextContent("卡路里0kcal");
+});
+
 it("labels an insufficient meal unknown and excludes its partial kcal from Today", async () => {
   const known = createEditableFoodItems([demoFoodAnalysis.foods[0]])[0];
   const match = new LocalNutritionProvider().resolve(known);
