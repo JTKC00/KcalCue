@@ -7,7 +7,7 @@ import { createEditableFoodItems } from "@/lib/domain/editable-meal";
 import { newDraft, type MealRecord } from "@/lib/meals/types";
 import { mealCollection } from "@/lib/firebase/meals";
 import {
-  MAX_PHOTO_JPEG_BYTES, finalizePhotoAsset, photoAssetRef,
+  MAX_PHOTO_JPEG_BYTES, finalizePhotoAsset, photoAssetRef, recordPhotoAssetDeletion,
   reservePhotoAsset, type PhotoQuotaPolicy,
 } from "@/lib/firebase/photo-assets";
 
@@ -144,7 +144,7 @@ describe("private meal photo transaction lifecycle", () => {
     expect((await photoAssetRef(db, otherOwner, otherAsset).get()).data()?.state).toBe("staged");
   });
 
-  it("keeps an unreadable object generation for cleanup without making it attachable", async () => {
+  it("stages and attaches an exact generation above JavaScript's safe integer range", async () => {
     const uid = `owner-${crypto.randomUUID()}`;
     asUid(uid);
     const first = body();
@@ -156,14 +156,27 @@ describe("private meal photo transaction lifecycle", () => {
       inputSha256: inputHash, generation: "9007199254740993",
       jpegSha256: jpegHash, width: 1200, height: 900, byteSize: 100_000,
     });
-    expect(final).toMatchObject({ state: "deleting", generation: "9007199254740993" });
-    expect((await photoAssetRef(db, uid, uploadId).get()).data()?.state).toBe("deleting");
+    expect(final).toMatchObject({ state: "staged", generation: "9007199254740993" });
+    expect((await photoAssetRef(db, uid, uploadId).get()).data()?.state).toBe("staged");
     expect((await db.doc(`${accountPath(uid)}/photoQuota/current`).get()).data()).toEqual({
-      pendingCount: 0, reservedBytes: MAX_PHOTO_JPEG_BYTES,
+      pendingCount: 1, reservedBytes: MAX_PHOTO_JPEG_BYTES,
     });
-    const attempted = await post({ ...first, photoAction: { kind: "attach", uploadId } });
-    expect(attempted.status).toBe(409);
-    expect((await mealCollection(db, uid).doc(first.id).get()).exists).toBe(false);
+    const response = await post({ ...first, photoAction: { kind: "attach", uploadId } });
+    expect(response.status).toBe(200);
+    const attached = (await response.json()).record as MealRecord;
+    expect(attached.photoRef?.generation).toBe("9007199254740993");
+    expect((await photoAssetRef(db, uid, uploadId).get()).data()?.state).toBe("attached");
+    const removed = await post({ ...attached, mutationId: crypto.randomUUID(),
+      photoAction: { kind: "remove" } });
+    expect(removed.status).toBe(200);
+    expect((await photoAssetRef(db, uid, uploadId).get()).data()?.state).toBe("deleting");
+    await recordPhotoAssetDeletion(db, uid, uploadId, {
+      kind: "deleted_generation", generation: "9007199254740993",
+    });
+    expect((await photoAssetRef(db, uid, uploadId).get()).data()?.state).toBe("deleted");
+    expect((await db.doc(`${accountPath(uid)}/photoQuota/current`).get()).data()).toEqual({
+      pendingCount: 0, reservedBytes: 0,
+    });
   });
 
   it("fails closed on malformed staged metadata and a corrupt attached registry during removal", async () => {
@@ -179,7 +192,7 @@ describe("private meal photo transaction lifecycle", () => {
     expect(badAttach.status).toBe(503);
     expect((await mealCollection(db, uid).doc(first.id).get()).updateTime?.isEqual(before.updateTime!)).toBe(true);
     const unreadable = await attachable(uid, first.id);
-    await photoAssetRef(db, uid, unreadable).update({ generation: "9007199254740993" });
+    await photoAssetRef(db, uid, unreadable).update({ generation: "0" });
     const badGeneration = await post({ ...created, mutationId: crypto.randomUUID(),
       photoAction: { kind: "attach", uploadId: unreadable } });
     expect(badGeneration.status).toBe(503);

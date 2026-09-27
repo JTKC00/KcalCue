@@ -72,7 +72,7 @@ photoRef?: {
 3. 用**指定generation**取object，不能自動fallback最新generation。物件缺失顯示圖片暫不可用；餐點與kcal保持，不能清空其他資料或建立另一餐。
 4. 回 `image/jpeg`、`Cache-Control: private, no-store`、適當nosniff；不提供公開bucket URL、永久download token或長效signed URL，不redirect到公開第三方origin。
 
-目前安裝的Storage SDK會把指定generation轉成JavaScript Number，對0更會略去generation查詢。`photo-object-store`已用Google JSON API的字串query實作有界讀取、metadata及精確generation刪除；私有read route現已接入字串精確讀取，仍逐筆核對byteSize及SHA-256，emulator測試覆蓋超過2^53的值。**finalize仍保守地把SDK不可安全表示的generation記為`deleting`，cleanup runner亦未接線，沒有真實bucket parity**。404可能是bucket設定錯誤，adapter不把它當物件已刪或釋放quota。完成generation-aware cleanup、真實bucket讀刪及設定驗收前，不得啟用照片功能。
+目前安裝的Storage SDK會把指定generation轉成JavaScript Number，對0更會略去generation查詢。`photo-object-store`已用Google JSON API的字串query實作有界讀取、metadata及精確generation刪除；私有read route現已接入字串精確讀取，仍逐筆核對byteSize及SHA-256。registry finalize及meal attach亦保留合法generation為不經數字轉換的字串；emulator測試覆蓋超過2^53的值。**cleanup runner未接線，沒有真實bucket parity**。404可能是bucket設定錯誤，adapter不把它當物件已刪或釋放quota。完成generation-aware cleanup、真實bucket讀刪及設定驗收前，不得啟用照片功能。
 
 History由使用者點「查看餐點附圖」後才以authorized fetch→Blob/object URL顯圖，避免進入舊餐列表時批量下載；相同attachment/generation的同步快照不重抓。account generation change／unmount／換圖立即取消請求、撤銷object URL並清掉舊帳戶state。SW繼續不攔截`/api/`，不把照片放公共shell cache。初版只保證已登入且連線可重新取cloud圖片；不悄悄新增永久離線history圖片cache。
 

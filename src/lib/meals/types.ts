@@ -20,7 +20,7 @@ export const mealTypes = {
 export const CURRENT_MEAL_SCHEMA_VERSION = 3;
 export const photoRefSchema = z.strictObject({
   attachmentId: z.uuid(),
-  generation: z.string().regex(/^[0-9]{1,32}$/),
+  generation: z.string().regex(/^[1-9][0-9]{0,31}$/),
   contentType: z.literal("image/jpeg"),
   width: z.number().int().min(1).max(1600),
   height: z.number().int().min(1).max(1600),

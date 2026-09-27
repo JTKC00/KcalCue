@@ -10,7 +10,7 @@ import { HttpError } from "@/lib/server/auth";
 import {
   PHOTO_SCHEMA_VERSION, PHOTO_PIPELINE_VERSION,
   MAX_PHOTO_INPUT_BYTES, MAX_PHOTO_JPEG_BYTES,
-  isReadablePhotoGeneration, photoAssetRef, photoObjectKey,
+  isPersistablePhotoGeneration, photoAssetRef, photoObjectKey,
   photoQuotaRefs, readPhotoQuota, type PhotoAsset,
 } from "./photo-assets";
 
@@ -73,7 +73,7 @@ function stagedPhoto(data: FirebaseFirestore.DocumentData | undefined,
       data.expiresAt.toMillis() <= Date.now())
     throw new HttpError(409, "photo_not_staged");
   if (!validAssetMetadata(data)) throw new HttpError(503, "photo_registry_corrupt");
-  if (typeof data.generation !== "string" || !isReadablePhotoGeneration(data.generation))
+  if (typeof data.generation !== "string" || !isPersistablePhotoGeneration(data.generation))
     throw new HttpError(503, "photo_registry_corrupt");
   const parsed = photoRefSchema.safeParse({
     attachmentId: uploadId,

@@ -19,13 +19,12 @@ const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 const uidSchema = z.string().min(1).max(128).refine(
   (uid) => !/[\/\x00-\x1f]/u.test(uid) && !/^__.*__$/.test(uid),
 );
-const generationSchema = z.string().regex(/^[0-9]{1,32}$/);
+const generationSchema = z.string().regex(/^[1-9][0-9]{0,31}$/);
 
-// The installed Storage SDK coerces FileOptions.generation to Number. Until
-// a string-exact adapter is available, never attach an unreadable generation.
-export function isReadablePhotoGeneration(value: string): boolean {
-  const numeric = Number(value);
-  return Number.isSafeInteger(numeric) && numeric >= 1 && String(numeric) === value;
+// Preserve the provider's canonical decimal generation as an opaque string.
+// The private read and delete adapter never converts it to a JS number.
+export function isPersistablePhotoGeneration(value: string): boolean {
+  return generationSchema.safeParse(value).success;
 }
 
 export type PhotoAssetState = "uploading" | "staged" | "attached" | "deleting" | "deleted";
@@ -264,9 +263,9 @@ export async function finalizePhotoAsset(
     }
     if (asset.state === "deleting" && asset.generation !== null) return asset;
     // The object may already exist. Keep its exact generation in durable
-    // cleanup state rather than losing it when this SDK cannot read it safely.
+    // cleanup state when this reservation can no longer be attached.
     const expired = asset.state !== "uploading" || mealSnap.data()?.deleted === true ||
-      asset.expiresAt.toMillis() <= Date.now() || !isReadablePhotoGeneration(input.generation);
+      asset.expiresAt.toMillis() <= Date.now();
     const now = Timestamp.now();
     const saved: PhotoAsset = {
       ...asset,
