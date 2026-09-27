@@ -9,6 +9,7 @@ import { newDraft, type MealRecord } from "@/lib/meals/types";
 const fixture = vi.hoisted(() => ({
   callback: null as null | ((user: { uid: string; email: string }) => void),
   list: vi.fn(),
+  preparePhoto: vi.fn(),
   uid: "a",
 }));
 vi.mock("@/lib/firebase/client", () => ({
@@ -36,12 +37,24 @@ vi.mock("@/lib/meals/cache", () => ({
     clear: async () => {},
   },
 }));
-vi.mock("./kcalcue-app", () => ({ KcalCueApp: () => null }));
+vi.mock("@/lib/meals/photo", async (original) => ({
+  ...(await original<typeof import("@/lib/meals/photo")>()),
+  preparePhoto: fixture.preparePhoto,
+}));
+vi.mock("./kcalcue-app", () => ({
+  KcalCueApp: ({ onPhotoSelected }: { onPhotoSelected: (file: File) => void }) => (
+    <button type="button" onClick={() => onPhotoSelected(new File(["photo"], "meal.jpg"))}>
+      選擇測試照片
+    </button>
+  ),
+}));
 vi.mock("./pwa-controls", () => ({ PwaControls: () => null }));
 vi.mock("./firebase-account", () => ({ Account: () => null }));
 import { MealJournal } from "./meal-journal";
+import { PhotoPreparationError } from "@/lib/meals/photo";
 beforeEach(() => {
   fixture.list.mockReset();
+  fixture.preparePhoto.mockReset();
   fixture.uid = "a";
   localStorage.clear();
   window.history.replaceState(null, "", "#today");
@@ -51,6 +64,46 @@ beforeEach(() => {
   });
 });
 afterEach(cleanup);
+it("offers a lower-resolution image instead of futile retry after a pixel-limit rejection", async () => {
+  fixture.list.mockResolvedValue([]);
+  fixture.preparePhoto.mockRejectedValue(new PhotoPreparationError("image_dimensions_too_large"));
+  render(<MealJournal initialProviderMode="live" />);
+  await act(async () => fixture.callback!({ uid: "a", email: "a@example.com" }));
+  fireEvent.click(screen.getByRole("button", { name: "＋ 新增餐點" }));
+  fireEvent.click(screen.getByRole("button", { name: "選擇測試照片" }));
+
+  expect(await screen.findByText(/圖片像素超過 4000 萬/)).toBeVisible();
+  expect(screen.queryByRole("button", { name: "重試照片處理" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "移除草稿圖片" })).toBeVisible();
+});
+
+it("still offers retry for a transient photo preparation failure", async () => {
+  fixture.list.mockResolvedValue([]);
+  fixture.preparePhoto.mockRejectedValue(new PhotoPreparationError("photo_failed"));
+  render(<MealJournal initialProviderMode="live" />);
+  await act(async () => fixture.callback!({ uid: "a", email: "a@example.com" }));
+  fireEvent.click(screen.getByRole("button", { name: "＋ 新增餐點" }));
+  fireEvent.click(screen.getByRole("button", { name: "選擇測試照片" }));
+
+  expect(await screen.findByText(/照片壓縮未完成/)).toBeVisible();
+  expect(screen.getByRole("button", { name: "重試照片處理" })).toBeVisible();
+});
+it("clears the pixel-limit notice after selecting a smaller photo", async () => {
+  fixture.list.mockResolvedValue([]);
+  fixture.preparePhoto
+    .mockRejectedValueOnce(new PhotoPreparationError("image_dimensions_too_large"))
+    .mockResolvedValueOnce(new Blob(["compressed"], { type: "image/jpeg" }));
+  render(<MealJournal initialProviderMode="live" />);
+  await act(async () => fixture.callback!({ uid: "a", email: "a@example.com" }));
+  fireEvent.click(screen.getByRole("button", { name: "＋ 新增餐點" }));
+  fireEvent.click(screen.getByRole("button", { name: "選擇測試照片" }));
+  expect(await screen.findByText(/圖片像素超過 4000 萬/)).toBeVisible();
+
+  fireEvent.click(screen.getByRole("button", { name: "選擇測試照片" }));
+  await waitFor(() => expect(fixture.preparePhoto).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(screen.queryByText(/圖片像素超過 4000 萬/)).not.toBeInTheDocument());
+  expect(screen.queryByRole("button", { name: "重試照片處理" })).not.toBeInTheDocument();
+});
 it("keeps the saved AI recognition separate from corrected History values", async () => {
   const original = createEditableFoodItems([demoFoodAnalysis.foods[0]])[0];
   const corrected: MealRecord = {

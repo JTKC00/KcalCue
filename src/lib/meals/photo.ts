@@ -1,5 +1,11 @@
 import { authorizedFetch } from "@/lib/firebase/client";
 
+export class PhotoPreparationError extends Error {
+  constructor(public readonly code: "image_dimensions_too_large" | "photo_failed") {
+    super(code);
+  }
+}
+
 export async function preparePhoto(
   file: File,
   mealId: string,
@@ -38,7 +44,13 @@ export async function preparePhoto(
       method: "POST",
       body: data,
     });
-    if (!response.ok) throw new Error("photo_failed");
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      const code = body?.error?.code === "image_dimensions_too_large"
+        ? "image_dimensions_too_large"
+        : "photo_failed";
+      throw new PhotoPreparationError(code);
+    }
     return response.blob();
   }
 }

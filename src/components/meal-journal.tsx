@@ -20,7 +20,7 @@ import {
   type MealDraft,
   type MealRecord,
 } from "@/lib/meals/types";
-import { preparePhoto } from "@/lib/meals/photo";
+import { PhotoPreparationError, preparePhoto } from "@/lib/meals/photo";
 import { unitCopy } from "@/content/zh-HK";
 import { foodAnalysisSchema } from "@/lib/domain/food-analysis";
 import { roundRange } from "@/lib/nutrition/calculation";
@@ -50,6 +50,11 @@ function errorText(error: unknown) {
     : "未能完成操作，請檢查網絡後再試。已保留的修改不會被清除。";
 }
 type JournalNotice = string | { kind: "pending-sync"; message: string };
+const oversizedPhotoNotice = "圖片像素超過 4000 萬，此瀏覽器未能壓縮。請選較低解像度的照片，或移除圖片後手動記錄。";
+const retryablePhotoNotice = "照片壓縮未完成，原相只保留於本次頁面。可重試或移除草稿圖片。";
+function clearPhotoNotice(notice: JournalNotice): JournalNotice {
+  return notice === oversizedPhotoNotice || notice === retryablePhotoNotice ? "" : notice;
+}
 
 function mealCalorieLabel(record: MealRecord) {
   const calories = mealCalories(record);
@@ -122,7 +127,7 @@ export function MealJournal({
   const [syncNotice, setSyncNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [preparing, setPreparing] = useState(false);
-  const [photoFailed, setPhotoFailed] = useState(false);
+  const [photoFailure, setPhotoFailure] = useState<null | "retryable" | "too_large">(null);
   const [conflict, setConflict] = useState(false);
   const [pending, setPending] = useState<PendingMeal[]>([]);
   const [syncing, setSyncing] = useState(false);
@@ -448,7 +453,7 @@ export function MealJournal({
     photoGeneration.current++;
     preparedFile.current = null;
     setPreparing(false);
-    setPhotoFailed(false);
+    setPhotoFailure(null);
     setDraft(next);
     setInitialDraft(next);
     setManual(isManual);
@@ -502,13 +507,15 @@ export function MealJournal({
             : value,
         );
         setPreparing(false);
-        setPhotoFailed(false);
+        setPhotoFailure(null);
+        setNotice(clearPhotoNotice);
         return;
       }
       const id = current.current.draft?.id;
       if (!id) return;
       setPreparing(true);
-      setPhotoFailed(false);
+      setPhotoFailure(null);
+      setNotice(clearPhotoNotice);
       void preparePhoto(file, id, initialProviderMode === "live")
         .then((photo) => {
           if (generation === photoGeneration.current)
@@ -518,12 +525,12 @@ export function MealJournal({
                 : value,
             );
         })
-        .catch(() => {
+        .catch((error) => {
           if (generation === photoGeneration.current) {
-            setPhotoFailed(true);
-            setNotice(
-              "照片壓縮未完成，原相只保留於本次頁面。可重試或移除草稿圖片。",
-            );
+            const tooLarge = error instanceof PhotoPreparationError &&
+              error.code === "image_dimensions_too_large";
+            setPhotoFailure(tooLarge ? "too_large" : "retryable");
+            setNotice(tooLarge ? oversizedPhotoNotice : retryablePhotoNotice);
           }
         })
         .finally(() => {
@@ -1042,7 +1049,7 @@ export function MealJournal({
               </fieldset>
               <section className="journal-card journal-actions">
                 {preparing && <p role="status">正在準備壓縮照片…</p>}
-                {photoFailed && (
+                {photoFailure === "retryable" && (
                   <button
                     className="button button-secondary"
                     disabled={busy}
@@ -1054,7 +1061,7 @@ export function MealJournal({
                     重試照片處理
                   </button>
                 )}
-                {(draft.photo || draft.photoPath || photoFailed) && (
+                {(draft.photo || draft.photoPath || photoFailure) && (
                   <button
                     className="button button-secondary"
                     disabled={busy}

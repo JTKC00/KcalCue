@@ -57,6 +57,23 @@ describe("private photo preparation", () => {
     ).toBe(415);
   });
 
+  it("identifies an over-40MP phone JPEG without trying to decode it", async () => {
+    const source = await sharp({
+      create: { width: 8064, height: 6048, channels: 3, background: "green" },
+    }).jpeg({ quality: 70 }).toBuffer();
+    expect(source.length).toBeLessThan(10 * 1024 * 1024);
+    const data = new FormData();
+    data.set("mealId", crypto.randomUUID());
+    data.set("image", new Blob([new Uint8Array(source)], { type: "image/jpeg" }));
+
+    const response = await POST(new Request("http://localhost/api/meals/photo?prepare=1", {
+      method: "POST", body: data,
+    }));
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ error: { code: "image_dimensions_too_large" } });
+  });
+
   it.each([undefined, "8"])(
     "cancels oversized multipart before parsing with content-length %s",
     async (contentLength) => {

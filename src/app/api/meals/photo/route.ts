@@ -37,7 +37,9 @@ export async function POST(request: Request) {
         .flatten({ background: "#ffffff" })
         .jpeg({ quality: 80 })
         .toBuffer();
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("Input image exceeds pixel limit"))
+        throw new HttpError(413, "image_dimensions_too_large");
       throw new HttpError(422, "image_read_failed");
     }
     return new Response(new Uint8Array(jpeg), {
