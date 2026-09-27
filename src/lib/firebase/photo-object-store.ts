@@ -10,6 +10,10 @@ const photoObjectKey = /^meal-photos\/v1\/[A-Za-z0-9_-]{1,172}\/[0-9a-fA-F-]{36}
 const bucketName = /^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$/;
 const metadataLimit = 32 * 1024;
 
+export function isExactPhotoGeneration(value: string) {
+  return exactGeneration.test(value);
+}
+
 function objectUrl(bucket: string, key: string) {
   if (!bucketName.test(bucket) || !photoObjectKey.test(key))
     throw new HttpError(503, "photo_storage_unavailable");

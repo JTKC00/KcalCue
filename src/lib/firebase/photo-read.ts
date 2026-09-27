@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import type { Firestore } from "firebase-admin/firestore";
-import type { getStorage } from "firebase-admin/storage";
 import { HttpError } from "@/lib/server/auth";
 import { photoRefSchema, type PhotoRef } from "@/lib/meals/types";
 import { mealCollection, checkedAttachedPhotoAsset } from "./meals";
-import { isReadablePhotoGeneration, MAX_PHOTO_JPEG_BYTES, photoAssetRef } from "./photo-assets";
+import { MAX_PHOTO_JPEG_BYTES, photoAssetRef } from "./photo-assets";
+import { isExactPhotoGeneration, type ExactPhotoObjectStore } from "./photo-object-store";
 
 export async function attachedPhotoForOwner(db: Firestore, uid: string, mealId: string) {
   const meal = (await mealCollection(db, uid).doc(mealId).get()).data();
@@ -20,10 +20,10 @@ export async function attachedPhotoForOwner(db: Firestore, uid: string, mealId: 
   return { asset, ref };
 }
 
-// The SDK File is pinned to the registry's exact immutable generation. Never
-// ask Storage for the newest generation or serve a public download URL.
+// The JSON API adapter pins the immutable generation as a decimal string.
+// Never ask Storage for the newest generation or serve a public download URL.
 export async function readPrivatePhoto(
-  storage: ReturnType<typeof getStorage>,
+  objects: Pick<ExactPhotoObjectStore, "read">,
   bucketName: string,
   objectKey: string,
   ref: PhotoRef,
@@ -32,38 +32,19 @@ export async function readPrivatePhoto(
 ): Promise<Uint8Array<ArrayBuffer>> {
   if (!/^[a-f0-9]{64}$/.test(expectedSha256))
     throw new HttpError(503, "photo_unavailable");
-  // The installed Storage SDK converts FileOptions.generation to Number.
-  // Refuse values it would round instead of accidentally reading another version.
-  // This SDK also omits the generation query when the value is zero.
-  if (!isReadablePhotoGeneration(ref.generation))
+  if (!photoRefSchema.safeParse(ref).success || !isExactPhotoGeneration(ref.generation))
     throw new HttpError(503, "photo_unavailable");
-  const generation = Number(ref.generation);
-  const stream = storage.bucket(bucketName).file(objectKey, { generation })
-    .createReadStream({ validation: "crc32c" });
-  const abort = () => stream.destroy();
-  if (signal?.aborted) abort();
-  signal?.addEventListener("abort", abort, { once: true });
-  const parts: Buffer[] = [];
-  const hash = createHash("sha256");
-  let total = 0;
+  if (signal?.aborted) throw new HttpError(503, "photo_unavailable");
   try {
-    for await (const chunk of stream) {
-      const bytes = Buffer.from(chunk);
-      total += bytes.length;
-      if (total > MAX_PHOTO_JPEG_BYTES || total > ref.byteSize)
-        throw new HttpError(503, "photo_unavailable");
-      parts.push(bytes);
-      hash.update(bytes);
-    }
-    if (total !== ref.byteSize || hash.digest("hex") !== expectedSha256)
+    const bytes = await objects.read(bucketName, objectKey, ref.generation, signal);
+    if (signal?.aborted || bytes.byteLength < 1 || bytes.byteLength > MAX_PHOTO_JPEG_BYTES ||
+        bytes.byteLength !== ref.byteSize ||
+        createHash("sha256").update(bytes).digest("hex") !== expectedSha256)
       throw new HttpError(503, "photo_unavailable");
-    const output = new Uint8Array(new ArrayBuffer(total));
-    output.set(Buffer.concat(parts, total));
+    const output = new Uint8Array(new ArrayBuffer(bytes.byteLength));
+    output.set(bytes);
     return output;
   } catch {
-    stream.destroy();
     throw new HttpError(503, "photo_unavailable");
-  } finally {
-    signal?.removeEventListener("abort", abort);
   }
 }

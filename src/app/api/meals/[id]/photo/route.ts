@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { authenticated, apiError, HttpError } from "@/lib/server/auth";
 import { attachedPhotoForOwner, readPrivatePhoto } from "@/lib/firebase/photo-read";
+import { ExactPhotoObjectStore } from "@/lib/firebase/photo-object-store";
 
 export const runtime = "nodejs";
 
@@ -15,8 +16,11 @@ export async function GET(
     const { asset, ref } = await attachedPhotoForOwner(db, user.id, id);
     const bucket = process.env.KCALCUE_MEAL_PHOTO_BUCKET?.trim();
     if (!bucket) throw new HttpError(503, "photo_unavailable");
+    const credential = storage.app.options.credential;
+    if (!credential) throw new HttpError(503, "photo_unavailable");
     const bytes = await readPrivatePhoto(
-      storage, bucket, asset.objectKey, ref, asset.jpegSha256!, request.signal,
+      new ExactPhotoObjectStore(credential), bucket, asset.objectKey, ref,
+      asset.jpegSha256!, request.signal,
     );
     return new Response(bytes, {
       headers: {

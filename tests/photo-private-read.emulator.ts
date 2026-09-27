@@ -1,15 +1,19 @@
 import { createHash } from "node:crypto";
-import { Readable } from "node:stream";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { deleteApp, initializeApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { demoFoodAnalysis } from "@/lib/providers/food-vision/demo";
 import { createEditableFoodItems } from "@/lib/domain/editable-meal";
 import { newDraft, type MealRecord, type PhotoRef } from "@/lib/meals/types";
-import { MAX_PHOTO_JPEG_BYTES, reservePhotoAsset, finalizePhotoAsset } from "@/lib/firebase/photo-assets";
+import { MAX_PHOTO_JPEG_BYTES, reservePhotoAsset, finalizePhotoAsset, photoAssetRef } from "@/lib/firebase/photo-assets";
+import { accountPath } from "@/lib/firebase/admin";
 import { readPrivatePhoto } from "@/lib/firebase/photo-read";
 
 const fixture = vi.hoisted(() => ({ auth: vi.fn(), read: vi.fn() }));
+vi.mock("@/lib/firebase/photo-object-store", async (original) => ({
+  ...(await original<typeof import("@/lib/firebase/photo-object-store")>()),
+  ExactPhotoObjectStore: class { read = fixture.read; },
+}));
 vi.mock("@/lib/server/auth", async (original) => ({
   ...(await original<typeof import("@/lib/server/auth")>()), authenticated: fixture.auth,
 }));
@@ -32,15 +36,9 @@ const policy = {
 };
 const inputSha = "a".repeat(64);
 let bytes = Buffer.from("fixture jpeg bytes");
+fixture.read.mockImplementation(async () => new Uint8Array(bytes));
 const storage = {
-  bucket: vi.fn((bucket: string) => ({
-    file: vi.fn((key: string, options: { generation: number }) => ({
-      createReadStream: vi.fn((readOptions: unknown) => {
-        fixture.read(bucket, key, options.generation, readOptions);
-        return Readable.from([bytes]);
-      }),
-    })),
-  })),
+  app: { options: { credential: { getAccessToken: vi.fn() } } },
 };
 function asUid(uid: string) {
   fixture.auth.mockResolvedValue({ db, storage, user: { id: uid } });
@@ -95,7 +93,26 @@ describe("authenticated private History photo read", () => {
     expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes);
     expect(fixture.read).toHaveBeenCalledWith(
       "private-meal-fixture", expect.stringContaining(`/${record.id}/`),
-      112233445566, { validation: "crc32c" },
+      "112233445566", expect.any(AbortSignal),
+    );
+  });
+
+  it("passes an attached generation above Number.MAX_SAFE_INTEGER through the owner route unchanged", async () => {
+    process.env.KCALCUE_MEAL_PHOTO_BUCKET = "private-meal-fixture";
+    bytes = Buffer.from("fixture jpeg bytes");
+    const uid = `owner-${crypto.randomUUID()}`;
+    const record = await attached(uid);
+    const exact = "9007199254740993";
+    await Promise.all([
+      photoAssetRef(db, uid, record.photoRef!.attachmentId).update({ generation: exact }),
+      db.doc(`${accountPath(uid)}/meals/${record.id}`).update({ "record.photoRef.generation": exact }),
+    ]);
+    fixture.read.mockClear();
+    const response = await photo(record.id);
+    expect(response.status).toBe(200);
+    expect(fixture.read).toHaveBeenCalledWith(
+      "private-meal-fixture", expect.stringContaining(`/${record.id}/`),
+      exact, expect.any(AbortSignal),
     );
   });
 
@@ -143,22 +160,25 @@ describe("authenticated private History photo read", () => {
     expect(fixture.read).not.toHaveBeenCalled();
   });
 
-  it("rejects a generation the installed Storage SDK would round", async () => {
-    storage.bucket.mockClear();
+  it("passes a long generation exactly and refuses a zero generation", async () => {
+    fixture.read.mockClear();
     const ref: PhotoRef = {
       attachmentId: crypto.randomUUID(), generation: "9007199254740993",
       contentType: "image/jpeg", width: 10, height: 10, byteSize: bytes.length,
     };
-    await expect(readPrivatePhoto(
-      storage as never, "private-meal-fixture", "private-key", ref,
+    expect(await readPrivatePhoto(
+      { read: fixture.read }, "private-meal-fixture", "private-key", ref,
       createHash("sha256").update(bytes).digest("hex"),
-    )).rejects.toMatchObject({ status: 503, code: "photo_unavailable" });
-    expect(storage.bucket).not.toHaveBeenCalled();
+    )).toEqual(new Uint8Array(bytes));
+    expect(fixture.read).toHaveBeenCalledWith(
+      "private-meal-fixture", "private-key", "9007199254740993", undefined,
+    );
+    fixture.read.mockClear();
     await expect(readPrivatePhoto(
-      storage as never, "private-meal-fixture", "private-key",
+      { read: fixture.read }, "private-meal-fixture", "private-key",
       { ...ref, generation: "0" }, createHash("sha256").update(bytes).digest("hex"),
     )).rejects.toMatchObject({ status: 503, code: "photo_unavailable" });
-    expect(storage.bucket).not.toHaveBeenCalled();
+    expect(fixture.read).not.toHaveBeenCalled();
   });
 
   it("stops an oversized or already-cancelled object read", async () => {
@@ -169,12 +189,12 @@ describe("authenticated private History photo read", () => {
     bytes = Buffer.alloc(13, 0x41);
     const expectedHash = createHash("sha256").update(bytes).digest("hex");
     await expect(readPrivatePhoto(
-      storage as never, "private-meal-fixture", "private-key", ref, expectedHash,
+      { read: fixture.read }, "private-meal-fixture", "private-key", ref, expectedHash,
     )).rejects.toMatchObject({ status: 503, code: "photo_unavailable" });
     const controller = new AbortController();
     controller.abort();
     await expect(readPrivatePhoto(
-      storage as never, "private-meal-fixture", "private-key", ref, expectedHash,
+      { read: fixture.read }, "private-meal-fixture", "private-key", ref, expectedHash,
       controller.signal,
     )).rejects.toMatchObject({ status: 503, code: "photo_unavailable" });
   });
