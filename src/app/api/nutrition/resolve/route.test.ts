@@ -280,13 +280,39 @@ describe("POST /api/nutrition/resolve", () => {
     controller.abort();
     finishFetch(usdaResponse(0));
     const [firstResponse, secondResponse] = await Promise.all([first, second]);
+    const firstBody = await firstResponse.json();
     const secondBody = await secondResponse.json();
     expect(firstResponse.status).toBe(200);
+    expect(firstBody.matches[0].includedInTotal).toBe(false);
+    expect(firstBody.warnings).toEqual([{ index: 0, code: "canceled" }]);
     expect(secondResponse.status).toBe(200);
     expect(secondBody.matches[0].profile.id).toBe("usda-5000");
     expect(secondBody.matches[0].includedInTotal).toBe(true);
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(reserveHourlyUsdaCall).toHaveBeenCalledOnce();
+  });
+
+  it("does not fetch USDA after the request aborts during quota reservation", async () => {
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    let finishReservation!: (value: { allowed: boolean; retryAfterSeconds: number }) => void;
+    vi.mocked(reserveHourlyUsdaCall).mockImplementationOnce(() => new Promise((resolve) => {
+      finishReservation = resolve;
+    }));
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+    const responsePromise = POST(resolveRequest([remoteFood(remoteNames[0])], controller.signal));
+    await vi.waitFor(() => expect(reserveHourlyUsdaCall).toHaveBeenCalledOnce());
+
+    controller.abort();
+    const response = await responsePromise;
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.matches[0].includedInTotal).toBe(false);
+    expect(body.warnings).toEqual([{ index: 0, code: "canceled" }]);
+    finishReservation({ allowed: true, retryAfterSeconds: 0 });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it.each([

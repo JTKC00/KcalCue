@@ -82,7 +82,7 @@ export async function POST(request: Request) {
           // Taking an index is synchronous; workers cannot claim it twice.
           const index = remoteIndexes[next++];
           try {
-            const remote = await usda.resolve(parsed.data.foods[index]);
+            const remote = await usda.resolve(parsed.data.foods[index], request.signal);
             if (remote.includedInTotal) matches[index] = remote;
           } catch (error) {
             warnings.push({

@@ -108,6 +108,7 @@ const USDA_DESCRIPTION_FILLER_WORDS = new Set([
 
 export type UsdaFailureCode =
   | "missing_key"
+  | "canceled"
   | "timeout"
   | "rate_limited"
   | "invalid_response"
@@ -274,8 +275,21 @@ function nutritionCacheKey(
 const USDA_CACHE_TTL_MS = 60 * 60 * 1_000;
 const USDA_CACHE_MAX_ENTRIES = 256;
 const queryCache = new Map<string, { match: NutritionMatch; expiresAt: number }>();
-const pendingQueries = new Map<string, Promise<NutritionMatch>>();
+interface PendingQuery {
+  promise: Promise<NutritionMatch>;
+  controller: AbortController;
+  subscribers: number;
+}
+const pendingQueries = new Map<string, PendingQuery>();
 let cacheGeneration = 0;
+
+function canceledLookup(): UsdaNutritionError {
+  return new UsdaNutritionError("canceled", "USDA lookup was canceled.");
+}
+
+function assertActive(signal: AbortSignal): void {
+  if (signal.aborted) throw canceledLookup();
+}
 
 function rememberMatch(key: string, match: NutritionMatch): void {
   queryCache.delete(key);
@@ -314,7 +328,8 @@ export class UsdaNutritionClient {
       : reserveLookup ? `client:${crypto.randomUUID()}` : "public";
   }
 
-  async resolve(food: FoodEstimate): Promise<NutritionMatch> {
+  async resolve(food: FoodEstimate, signal?: AbortSignal): Promise<NutritionMatch> {
+    if (signal?.aborted) throw canceledLookup();
     const identity = canonicalizeFood(food);
     if (isCompositeIdentity(identity)) {
       return {
@@ -354,23 +369,71 @@ export class UsdaNutritionClient {
     let pending = pendingQueries.get(pendingKey);
     if (!pending) {
       const generation = cacheGeneration;
-      pending = this.lookup(food, identity, query)
+      const entry: PendingQuery = {
+        promise: undefined!,
+        controller: new AbortController(),
+        subscribers: 0,
+      };
+      entry.promise = this.lookup(food, identity, query, entry.controller.signal)
         .then((match) => {
-          if (generation === cacheGeneration) rememberMatch(cacheKey, match);
+          if (generation === cacheGeneration && !entry.controller.signal.aborted && entry.subscribers > 0)
+            rememberMatch(cacheKey, match);
           return match;
         })
         .finally(() => {
-          if (pendingQueries.get(pendingKey) === pending) pendingQueries.delete(pendingKey);
+          if (pendingQueries.get(pendingKey) === entry) pendingQueries.delete(pendingKey);
         });
-      pendingQueries.set(pendingKey, pending);
+      // A reservation callback may synchronously abort before the first
+      // subscriber attaches. Keep that cancellation from becoming unhandled.
+      void entry.promise.catch(() => {});
+      pending = entry;
+      pendingQueries.set(pendingKey, entry);
     }
-    return { ...(await pending), identity };
+    return { ...(await this.subscribe(pendingKey, pending, signal)), identity };
+  }
+
+  private subscribe(
+    key: string,
+    pending: PendingQuery,
+    signal?: AbortSignal,
+  ): Promise<NutritionMatch> {
+    return new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        if (pending.subscribers === 0) {
+          pending.controller.abort();
+          if (pendingQueries.get(key) === pending) pendingQueries.delete(key);
+        }
+        reject(canceledLookup());
+        return;
+      }
+
+      pending.subscribers += 1;
+      let settled = false;
+      const finish = (callback: () => void, canceled = false) => {
+        if (settled) return;
+        settled = true;
+        signal?.removeEventListener("abort", onAbort);
+        pending.subscribers -= 1;
+        if (canceled && pending.subscribers === 0) {
+          pending.controller.abort();
+          if (pendingQueries.get(key) === pending) pendingQueries.delete(key);
+        }
+        callback();
+      };
+      const onAbort = () => finish(() => reject(canceledLookup()), true);
+      signal?.addEventListener("abort", onAbort, { once: true });
+      pending.promise.then(
+        (match) => finish(() => resolve(match)),
+        (error: unknown) => finish(() => reject(error)),
+      );
+    });
   }
 
   private async lookup(
     food: FoodEstimate,
     identity: ReturnType<typeof canonicalizeFood>,
     query: string,
+    signal: AbortSignal,
   ): Promise<NutritionMatch> {
     try {
       // Cache hits and coalesced in-flight lookups never reserve another call.
@@ -385,6 +448,7 @@ export class UsdaNutritionClient {
         if (!allowed)
           throw new UsdaNutritionError("rate_limited", "USDA lookup budget is exhausted.");
       }
+      assertActive(signal);
       const url = new URL(USDA_SEARCH_URL);
       url.searchParams.set("api_key", this.apiKey);
       url.searchParams.set("query", query);
@@ -393,8 +457,9 @@ export class UsdaNutritionClient {
 
       const response = await fetch(url, {
         method: "GET",
-        signal: AbortSignal.timeout(USDA_TIMEOUT_MS),
+        signal: AbortSignal.any([signal, AbortSignal.timeout(USDA_TIMEOUT_MS)]),
       });
+      assertActive(signal);
 
       if (response.status === 429) {
         throw new UsdaNutritionError("rate_limited", "USDA rate limit reached.");
@@ -404,6 +469,7 @@ export class UsdaNutritionClient {
       }
 
       const payload = (await response.json()) as UsdaSearchResponse;
+      assertActive(signal);
       const profile = (payload.foods ?? [])
         .map((candidate) => ({
           candidate,
@@ -442,6 +508,7 @@ export class UsdaNutritionClient {
       };
       return match;
     } catch (error) {
+      if (signal.aborted) throw canceledLookup();
       if (error instanceof UsdaNutritionError) throw error;
       if (
         error instanceof DOMException &&

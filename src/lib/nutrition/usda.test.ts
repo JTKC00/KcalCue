@@ -269,6 +269,118 @@ describe("USDA nutrition client", () => {
       .toEqual(["unresolved", "unresolved"]);
   });
 
+  it("skips USDA after the last caller aborts during quota reservation", async () => {
+    let finishReservation!: (allowed: boolean) => void;
+    const reserve = vi.fn().mockImplementationOnce(() => new Promise<boolean>((resolve) => {
+      finishReservation = resolve;
+    })).mockResolvedValue(true);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true, status: 200, json: async () => ({ foods: [] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new UsdaNutritionClient("test-only-key", reserve, "account-a");
+    const controller = new AbortController();
+    const canceled = client.resolve(food, controller.signal);
+    expect(reserve).toHaveBeenCalledOnce();
+    controller.abort();
+    await expect(canceled).rejects.toMatchObject({ code: "canceled" });
+
+    finishReservation(true);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await expect(client.resolve(food)).resolves.toMatchObject({ matchType: "unresolved" });
+    expect(reserve).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("does not fetch when the quota callback synchronously aborts its caller", async () => {
+    const controller = new AbortController();
+    const reserve = vi.fn(() => {
+      controller.abort();
+      return Promise.resolve(true);
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(new UsdaNutritionClient("test-only-key", reserve)
+      .resolve(food, controller.signal)).rejects.toMatchObject({ code: "canceled" });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("preserves a same-account subscriber when the first caller aborts", async () => {
+    let finishFetch!: (response: Response) => void;
+    let providerSignal!: AbortSignal;
+    const fetchMock = vi.fn((_url: URL, options: RequestInit) => {
+      providerSignal = options.signal as AbortSignal;
+      return new Promise<Response>((resolve) => { finishFetch = resolve; });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const reserve = vi.fn().mockResolvedValue(true);
+    const controller = new AbortController();
+    const first = new UsdaNutritionClient("test-only-key", reserve, "account-a")
+      .resolve(food, controller.signal);
+    const second = new UsdaNutritionClient("test-only-key", reserve, "account-a")
+      .resolve(food);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+
+    controller.abort();
+    await expect(first).rejects.toMatchObject({ code: "canceled" });
+    expect(providerSignal.aborted).toBe(false);
+    finishFetch(Response.json({ foods: [] }));
+    await expect(second).resolves.toMatchObject({ matchType: "unresolved" });
+    expect(reserve).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("aborts an in-flight provider call when its last subscriber leaves without caching it", async () => {
+    let providerSignal!: AbortSignal;
+    const fetchMock = vi.fn()
+      .mockImplementationOnce((_url: URL, options: RequestInit) => {
+        providerSignal = options.signal as AbortSignal;
+        return new Promise<Response>((_resolve, reject) => {
+          providerSignal.addEventListener("abort", () =>
+            reject(new DOMException("Canceled", "AbortError")), { once: true });
+        });
+      })
+      .mockResolvedValueOnce(Response.json({ foods: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const reserve = vi.fn().mockResolvedValue(true);
+    const client = new UsdaNutritionClient("test-only-key", reserve, "account-a");
+    const controller = new AbortController();
+    const canceled = client.resolve(food, controller.signal);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+
+    controller.abort();
+    await expect(canceled).rejects.toMatchObject({ code: "canceled" });
+    expect(providerSignal.aborted).toBe(true);
+    await expect(client.resolve(food)).resolves.toMatchObject({ matchType: "unresolved" });
+    expect(reserve).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not cache a late provider response after every subscriber cancels", async () => {
+    let finishOld!: (response: Response) => void;
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => { finishOld = resolve; }))
+      .mockResolvedValueOnce(Response.json({ foods: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const reserve = vi.fn().mockResolvedValue(true);
+    const client = new UsdaNutritionClient("test-only-key", reserve, "account-a");
+    const controller = new AbortController();
+    const canceled = client.resolve(food, controller.signal);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+
+    controller.abort();
+    await expect(canceled).rejects.toMatchObject({ code: "canceled" });
+    finishOld(Response.json({ foods: [] }));
+    await new Promise((resolve) => setImmediate(resolve));
+    await expect(client.resolve(food)).resolves.toMatchObject({ matchType: "unresolved" });
+    expect(reserve).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it.each([
     [false, "rate_limited"],
     [new Error("quota storage unavailable"), "unavailable"],
