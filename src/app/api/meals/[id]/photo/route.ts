@@ -14,12 +14,10 @@ export async function GET(
     const { id } = await context.params;
     if (!z.uuid().safeParse(id).success) throw new HttpError(404, "photo_not_found");
     const { asset, ref } = await attachedPhotoForOwner(db, user.id, id);
-    const bucket = process.env.KCALCUE_MEAL_PHOTO_BUCKET?.trim();
-    if (!bucket) throw new HttpError(503, "photo_unavailable");
     const credential = storage.app.options.credential;
     if (!credential) throw new HttpError(503, "photo_unavailable");
     const bytes = await readPrivatePhoto(
-      new ExactPhotoObjectStore(credential), bucket, asset.objectKey, ref,
+      new ExactPhotoObjectStore(credential), asset.bucketName, asset.objectKey, ref,
       asset.jpegSha256!, request.signal,
     );
     return new Response(bytes, {

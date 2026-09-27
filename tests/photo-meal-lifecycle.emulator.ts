@@ -27,6 +27,7 @@ const app = initializeApp({ projectId: "demo-kcalcue-photo-meal" }, "photo-meal-
 const db = getFirestore(app);
 const policy: PhotoQuotaPolicy = {
   uploadsEnabled: true,
+  bucketName: "private-meal-fixture",
   maxPendingPerUid: 5,
   maxReservedBytesPerUid: 10 * MAX_PHOTO_JPEG_BYTES,
   maxReservedBytesProject: 100 * MAX_PHOTO_JPEG_BYTES,
@@ -46,7 +47,7 @@ async function attachable(uid: string, mealId: string) {
   const uploadId = crypto.randomUUID();
   await reservePhotoAsset(db, uid, { mealId, uploadId, inputSha256: inputHash, inputBytes: 1000 }, policy);
   await finalizePhotoAsset(db, uid, uploadId, {
-    inputSha256: inputHash, generation: String(Date.now()) + Math.floor(Math.random() * 1000),
+    bucketName: policy.bucketName, inputSha256: inputHash, generation: String(Date.now()) + Math.floor(Math.random() * 1000),
     jpegSha256: jpegHash, width: 1200, height: 900, byteSize: 100_000,
   });
   return uploadId;
@@ -153,7 +154,7 @@ describe("private meal photo transaction lifecycle", () => {
       mealId: first.id, uploadId, inputSha256: inputHash, inputBytes: 1000,
     }, policy);
     const final = await finalizePhotoAsset(db, uid, uploadId, {
-      inputSha256: inputHash, generation: "9007199254740993",
+      bucketName: policy.bucketName, inputSha256: inputHash, generation: "9007199254740993",
       jpegSha256: jpegHash, width: 1200, height: 900, byteSize: 100_000,
     });
     expect(final).toMatchObject({ state: "staged", generation: "9007199254740993" });

@@ -57,7 +57,7 @@ photoRef?: {
 現有 `MealDraft.photo?: Blob` 保持本機用途；新增 `photoRef` 不重用這個欄位名稱或把Blob型別偷換成雲端metadata。兩者在編輯hydrate／保存ACK／清除草稿時分別處理。
 
 - Object key由server使用verified UID、mealID、uploadID推導，例如私有namespace的固定編碼段；驗證UUID／安全編碼，不使用原檔名或client提供的path。每uploadID是一個新的immutable物件，禁止overwrite及跨meal重用。
-- 圖片 registry在 `kcalcueUsers/{uid}/photoAssets/{uploadId}`，只含owner/meal綁定、object key、generation、checksum、尺寸bytes、server時間、state與cleanup資訊。meal引用本身不帶可公開下載的URL。
+- 圖片 registry在 `kcalcueUsers/{uid}/photoAssets/{uploadId}`，只含owner/meal綁定、reservation時固定的private bucket身分、object key、generation、checksum、尺寸bytes、server時間、state與cleanup資訊。meal引用本身不帶可公開下載的URL。已保存圖片的讀取及日後cleanup使用registry的bucket，不因目前環境變數更改而改指另一bucket。
 - `attachmentId`及generation可以回client作顯示/快取識別，但不是bearer credential；即使猜中也必須經UID與目前meal引用檢查。
 - 上傳重試使用固定uploadID，server先保存input bytes checksum、target meal、縮圖pipelineVersion及配額reservation。相同ID不同input拒409；同一ID不得因decode版本改變而靜默改內容。canonical JPEG checksum與generation由server在實際write時確定。
 - 已用uploadID不重用；清除內容後留下最小id/state tombstone，防delayed request重建物件。它不保留照片、食物名稱、prompt或原始payload。

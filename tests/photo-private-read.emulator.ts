@@ -30,6 +30,7 @@ const db = getFirestore(app);
 const previousBucket = process.env.KCALCUE_MEAL_PHOTO_BUCKET;
 const policy = {
   uploadsEnabled: true,
+  bucketName: "private-meal-fixture",
   maxPendingPerUid: 5,
   maxReservedBytesPerUid: 10 * MAX_PHOTO_JPEG_BYTES,
   maxReservedBytesProject: 100 * MAX_PHOTO_JPEG_BYTES,
@@ -64,7 +65,7 @@ async function attached(uid: string) {
     mealId: first.id, uploadId, inputSha256: inputSha, inputBytes: 1000,
   }, policy);
   await finalizePhotoAsset(db, uid, uploadId, {
-    inputSha256: inputSha, generation: "112233445566", width: 10, height: 10,
+    bucketName: policy.bucketName, inputSha256: inputSha, generation: "112233445566", width: 10, height: 10,
     jpegSha256: createHash("sha256").update(bytes).digest("hex"), byteSize: bytes.length,
   });
   const response = await post({ ...first, photoAction: { kind: "attach", uploadId } });
@@ -136,15 +137,21 @@ describe("authenticated private History photo read", () => {
     expect(fixture.read).not.toHaveBeenCalled();
   });
 
-  it("fails closed when bucket is unset or object bytes do not match the registry", async () => {
+  it("reads the reserved bucket after config changes and fails closed on corrupt bucket or bytes", async () => {
     bytes = Buffer.from("fixture jpeg bytes");
     const uid = `owner-${crypto.randomUUID()}`;
     const record = await attached(uid);
-    delete process.env.KCALCUE_MEAL_PHOTO_BUCKET;
+    process.env.KCALCUE_MEAL_PHOTO_BUCKET = "next-private-fixture";
+    fixture.read.mockClear();
+    expect((await photo(record.id)).status).toBe(200);
+    expect(fixture.read).toHaveBeenCalledWith(
+      "private-meal-fixture", expect.any(String), "112233445566", expect.any(AbortSignal),
+    );
+    await photoAssetRef(db, uid, record.photoRef!.attachmentId).update({ bucketName: "" });
     fixture.read.mockClear();
     expect((await photo(record.id)).status).toBe(503);
     expect(fixture.read).not.toHaveBeenCalled();
-    process.env.KCALCUE_MEAL_PHOTO_BUCKET = "private-meal-fixture";
+    await photoAssetRef(db, uid, record.photoRef!.attachmentId).update({ bucketName: policy.bucketName });
     bytes = Buffer.from("tampered bytes");
     const mismatch = await photo(record.id);
     expect(mismatch.status).toBe(503);

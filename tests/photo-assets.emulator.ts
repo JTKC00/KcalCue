@@ -24,6 +24,7 @@ const app = initializeApp({ projectId: "demo-kcalcue-photo-assets" }, "photo-ass
 const db = getFirestore(app);
 const policy: PhotoQuotaPolicy = {
   uploadsEnabled: true,
+  bucketName: "private-meal-fixture",
   maxPendingPerUid: 5,
   maxReservedBytesPerUid: 10 * MAX_PHOTO_JPEG_BYTES,
   maxReservedBytesProject: 100 * MAX_PHOTO_JPEG_BYTES,
@@ -31,7 +32,7 @@ const policy: PhotoQuotaPolicy = {
 const hashA = "a".repeat(64);
 const hashB = "b".repeat(64);
 const upload = () => ({ mealId: crypto.randomUUID(), uploadId: crypto.randomUUID(), inputSha256: hashA, inputBytes: 12_345 });
-const stored = { inputSha256: hashA, generation: "1234567890123456", jpegSha256: hashB,
+const stored = { bucketName: policy.bucketName, inputSha256: hashA, generation: "1234567890123456", jpegSha256: hashB,
   width: 1200, height: 900, byteSize: 123_456 };
 const uid = () => `photo-user-${crypto.randomUUID()}`;
 
@@ -59,6 +60,11 @@ describe("private photo asset registry in Firestore emulator", () => {
     const first = await reservePhotoAsset(db, owner, request, policy);
     const retry = await reservePhotoAsset(db, owner, request, policy);
     expect(retry).toEqual(first);
+    expect(first.bucketName).toBe(policy.bucketName);
+    const afterConfigChange = await reservePhotoAsset(db, owner, request, {
+      ...policy, bucketName: "next-private-fixture",
+    });
+    expect(afterConfigChange.bucketName).toBe(policy.bucketName);
     expect(first.objectKey).toBe(photoObjectKey(owner, request.mealId, request.uploadId));
     expect(first.objectKey).not.toContain(owner);
     expect(first.state).toBe("uploading");
@@ -116,6 +122,8 @@ describe("private photo asset registry in Firestore emulator", () => {
     await expect(finalizePhotoAsset(db, owner, request.uploadId, { ...stored, generation: "999" }))
       .rejects.toMatchObject({ status: 409, code: "photo_object_conflict" });
     await expect(finalizePhotoAsset(db, owner, request.uploadId, { ...stored, inputSha256: hashB }))
+      .rejects.toMatchObject({ status: 409, code: "photo_upload_conflict" });
+    await expect(finalizePhotoAsset(db, owner, request.uploadId, { ...stored, bucketName: "next-private-fixture" }))
       .rejects.toMatchObject({ status: 409, code: "photo_upload_conflict" });
   });
 

@@ -16,9 +16,11 @@ import {
 
 const createdAtSchema = z.iso.datetime();
 const sha256Pattern = /^[a-f0-9]{64}$/;
+const bucketNamePattern = /^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$/;
 
 function validAssetMetadata(data: FirebaseFirestore.DocumentData) {
-  return data.pipelineVersion === PHOTO_PIPELINE_VERSION &&
+  return typeof data.bucketName === "string" && bucketNamePattern.test(data.bucketName) &&
+    data.pipelineVersion === PHOTO_PIPELINE_VERSION &&
     data.reservedBytes === MAX_PHOTO_JPEG_BYTES &&
     Number.isInteger(data.inputBytes) && data.inputBytes >= 1 &&
     data.inputBytes <= MAX_PHOTO_INPUT_BYTES &&

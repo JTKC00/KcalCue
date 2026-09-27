@@ -20,6 +20,7 @@ const uidSchema = z.string().min(1).max(128).refine(
   (uid) => !/[\/\x00-\x1f]/u.test(uid) && !/^__.*__$/.test(uid),
 );
 const generationSchema = z.string().regex(/^[1-9][0-9]{0,31}$/);
+const bucketNameSchema = z.string().regex(/^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$/);
 
 // Preserve the provider's canonical decimal generation as an opaque string.
 // The private read and delete adapter never converts it to a JS number.
@@ -32,6 +33,7 @@ export interface PhotoAsset {
   ownerUid: string;
   mealId: string;
   uploadId: string;
+  bucketName: string;
   objectKey: string;
   inputSha256: string;
   inputBytes: number;
@@ -51,6 +53,7 @@ export interface PhotoAsset {
 export interface PhotoQuotaPolicy {
   // An omitted or false flag keeps all new reservations disabled.
   uploadsEnabled?: boolean;
+  bucketName: string;
   maxPendingPerUid: number;
   maxReservedBytesPerUid: number;
   maxReservedBytesProject: number;
@@ -64,6 +67,7 @@ export interface PhotoReservation {
 }
 
 export interface StoredPhotoMetadata {
+  bucketName: string;
   inputSha256: string;
   generation: string;
   jpegSha256: string;
@@ -95,6 +99,7 @@ function parseReservation(input: PhotoReservation) {
 
 function parseStoredMetadata(input: StoredPhotoMetadata) {
   const parsed = z.object({
+    bucketName: bucketNameSchema,
     inputSha256: sha256Schema,
     generation: generationSchema,
     jpegSha256: sha256Schema,
@@ -109,6 +114,7 @@ function parseStoredMetadata(input: StoredPhotoMetadata) {
 function parsePolicy(policy: PhotoQuotaPolicy) {
   if (!policy.uploadsEnabled) throw new HttpError(503, "photo_uploads_disabled");
   const parsed = z.object({
+    bucketName: bucketNameSchema,
     maxPendingPerUid: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
     maxReservedBytesPerUid: z.number().int().min(MAX_PHOTO_JPEG_BYTES).max(Number.MAX_SAFE_INTEGER),
     maxReservedBytesProject: z.number().int().min(MAX_PHOTO_JPEG_BYTES).max(Number.MAX_SAFE_INTEGER),
@@ -146,6 +152,7 @@ export function readPhotoQuota(data: FirebaseFirestore.DocumentData | undefined)
 
 function storedAsset(data: FirebaseFirestore.DocumentData | undefined): PhotoAsset {
   if (!data || !["uploading", "staged", "attached", "deleting", "deleted"].includes(data.state) ||
+      !bucketNameSchema.safeParse(data.bucketName).success ||
       !(data.expiresAt instanceof Timestamp) || !(data.createdAt instanceof Timestamp))
     throw new HttpError(503, "photo_registry_corrupt");
   return data as PhotoAsset;
@@ -196,6 +203,7 @@ export async function reservePhotoAsset(
       ownerUid: uid,
       mealId: input.mealId,
       uploadId: input.uploadId,
+      bucketName: limits.bucketName,
       objectKey: photoObjectKey(uid, input.mealId, input.uploadId),
       inputSha256: input.inputSha256,
       inputBytes: input.inputBytes,
@@ -248,7 +256,7 @@ export async function finalizePhotoAsset(
     if (!assetSnap.exists) throw new HttpError(409, "photo_upload_not_reserved");
     const asset = storedAsset(assetSnap.data());
     if (asset.ownerUid !== uid || asset.uploadId !== uploadId ||
-        asset.inputSha256 !== input.inputSha256)
+        asset.inputSha256 !== input.inputSha256 || asset.bucketName !== input.bucketName)
       throw new HttpError(409, "photo_upload_conflict");
     const mealSnap = await tx.get(db.doc(`${accountPath(uid)}/meals/${asset.mealId}`));
     if (asset.state === "deleted" && asset.generation === input.generation)
