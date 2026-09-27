@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { Firestore } from "firebase-admin/firestore";
 import { z } from "zod";
 import { authenticated, apiError, HttpError } from "@/lib/server/auth";
 import { mealInputSchema, type MealRecord } from "@/lib/meals/types";
@@ -25,6 +26,30 @@ import {
   readBoundedRequestBody,
   RequestBodyTooLargeError,
 } from "@/lib/server/request-body";
+
+type FullReadMode = "legacy_revisioned" | "legacy_revisionless" | "paged_revisionless";
+
+async function readFullMealList(db: Firestore, uid: string, mode: FullReadMode) {
+  const startedAt = performance.now();
+  let activeRecordCount: number | null = null;
+  try {
+    const records = await listMeals(db, uid);
+    activeRecordCount = records.length;
+    return records;
+  } finally {
+    // This measures the fallback scan without recording an account identifier,
+    // revision, cursor, meal content, or raw error. Logging must never make a
+    // successful read fail or cause a client retry of the full query.
+    try {
+      console.info("[kcalcue:meal-full-read]", {
+        mode,
+        querySucceeded: activeRecordCount !== null,
+        activeRecordCount,
+        elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)),
+      });
+    } catch { /* Observability is best effort. */ }
+  }
+}
 
 export async function GET(request: Request) {
   try {
@@ -56,7 +81,7 @@ export async function GET(request: Request) {
       // concurrent changes cannot be detected across page requests, so read
       // one complete Firestore query snapshot until metadata is established.
       const page = revision === "empty"
-        ? { records: await listMeals(db, user.id) }
+        ? { records: await readFullMealList(db, user.id, "paged_revisionless") }
         : await listMealPage(db, user.id, cursor ?? undefined);
       const afterRevision =
         (await db.doc(accountPath(user.id)).get()).data()?.revision ?? "empty";
@@ -66,7 +91,9 @@ export async function GET(request: Request) {
         { headers: { "Cache-Control": "no-store" } },
       );
     }
-    const records = await listMeals(db, user.id);
+    const records = await readFullMealList(
+      db, user.id, revision === "empty" ? "legacy_revisionless" : "legacy_revisioned",
+    );
     const afterRevision =
       (await db.doc(accountPath(user.id)).get()).data()?.revision ?? "empty";
     if (afterRevision !== revision) throw new HttpError(409, "snapshot_changed");

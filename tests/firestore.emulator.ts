@@ -1020,6 +1020,59 @@ describe("Firebase meal API against real Firestore emulator", () => {
     expect(first.revision).toBe("empty");
     expect(first).not.toHaveProperty("nextCursor");
   });
+  it("observes full-read fallbacks without logging account or meal data", async () => {
+    const mealId = crypto.randomUUID();
+    await mealCollection(db, uid).doc(mealId).set({ deleted: false, record: { id: mealId } });
+    await db.doc(accountPath(uid)).set({ revision: "known-revision" });
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+
+    expect((await GET(new Request("http://localhost/api/meals"))).status).toBe(200);
+    expect((await GET(new Request("http://localhost/api/meals?paged=1"))).status).toBe(200);
+    await db.doc(accountPath(uid)).delete();
+    expect((await GET(new Request("http://localhost/api/meals?paged=1"))).status).toBe(200);
+    expect((await GET(new Request("http://localhost/api/meals"))).status).toBe(200);
+
+    const entries = info.mock.calls
+      .filter(([label]) => label === "[kcalcue:meal-full-read]")
+      .map(([, details]) => details as Record<string, unknown>);
+    expect(entries.map((entry) => entry.mode)).toEqual([
+      "legacy_revisioned", "paged_revisionless", "legacy_revisionless",
+    ]);
+    for (const entry of entries) {
+      expect(Object.keys(entry).sort()).toEqual([
+        "activeRecordCount", "elapsedMs", "mode", "querySucceeded",
+      ]);
+      expect(entry).toMatchObject({ activeRecordCount: 1, querySucceeded: true });
+      expect(entry.elapsedMs).toEqual(expect.any(Number));
+    }
+    expect(JSON.stringify(info.mock.calls)).not.toContain(uid);
+    expect(JSON.stringify(info.mock.calls)).not.toContain(mealId);
+    expect(JSON.stringify(info.mock.calls)).not.toContain("known-revision");
+
+    info.mockClear();
+    const failingDb = new Proxy(db, {
+      get(target, property) {
+        if (property === "collection") return () => ({
+          where: () => ({ get: () => Promise.reject(new Error("simulated query failure")) }),
+        });
+        const value: unknown = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) as Firestore;
+    fixture.auth.mockResolvedValueOnce({ db: failingDb, user: { id: uid } });
+    expect((await GET(new Request("http://localhost/api/meals"))).status).toBe(503);
+    expect(info.mock.calls.filter(([label]) => label === "[kcalcue:meal-full-read]"))
+      .toEqual([["[kcalcue:meal-full-read]", expect.objectContaining({
+        mode: "legacy_revisionless", querySucceeded: false, activeRecordCount: null,
+      })]]);
+
+    info.mockImplementation(() => { throw new Error("logging unavailable"); });
+    const collection = vi.spyOn(db, "collection");
+    const response = await GET(new Request("http://localhost/api/meals?paged=1"));
+    expect(response.status).toBe(200);
+    expect((await response.json()).records).toEqual([{ id: mealId }]);
+    expect(collection).toHaveBeenCalledTimes(1);
+  });
   it("denies direct Firestore reads and writes even to a signed-in client", async () => {
     const client = clientApp(
       { projectId: "demo-kcalcue", apiKey: "test" },
