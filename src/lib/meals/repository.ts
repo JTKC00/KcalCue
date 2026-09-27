@@ -1,7 +1,10 @@
 import { authorizedFetch, firebaseAuth } from "@/lib/firebase/client";
 import { mealInputSchema, type MealDraft, type MealRecord } from "./types";
 import { readAnalysisProvenance } from "@/lib/domain/analysis-provenance";
-import { changeSyncState, visibleMeals, type PendingMeal } from "./outbox";
+import {
+  changeSyncState, changeSyncStateAndClearPhotos, enqueuePhotoMeal,
+  visibleMeals, type PendingMeal,
+} from "./outbox";
 import { resolveCalorieCorrection } from "./calories";
 export class RepositoryError extends Error {
   constructor(
@@ -39,6 +42,12 @@ function signalChange(uid: string) {
     /* IDB is already durable; other tabs also refresh when foregrounded. */
   }
 }
+function sameQueuedSave(left: MealRecord, right: MealRecord) {
+  // A retry may recreate the local timestamp, but must not change the
+  // mutation sent to the server under the same idempotency key.
+  return JSON.stringify({ ...left, updatedAt: undefined }) ===
+    JSON.stringify({ ...right, updatedAt: undefined });
+}
 async function locked<T>(uid: string, operation: () => Promise<T>): Promise<T> {
   if (!navigator.locks) throw new RepositoryError("browser_unsupported", 400);
   return navigator.locks.request(`kcalcue-sync-${uid}`, operation);
@@ -54,6 +63,7 @@ export class MealRepository {
     draft: MealDraft,
     mutationId: string,
     uid = currentUser(),
+    photoUpload?: { uploadId: string; blob: Blob },
   ): Promise<MealRecord> {
     if (currentUser() !== uid) throw new RepositoryError("login_required", 401);
     if (!navigator.locks) throw new RepositoryError("browser_unsupported", 400);
@@ -92,22 +102,47 @@ export class MealRepository {
     await navigator.locks.request(`kcalcue-account-${uid}`, async () => {
       if (currentUser() !== uid)
         throw new RepositoryError("login_required", 401);
-      await changeSyncState(uid, (state) => {
-        if (state.jobs.some((job) => job.record.id === draft.id && job.error))
-          throw new RepositoryError("conflict", 409);
-        if (!state.jobs.some((job) => job.id === mutationId))
-          state.jobs.push({
-            id: mutationId,
-            kind: "save",
-            record,
-            expectedVersion: draft.version,
-          });
+      const job: PendingMeal = {
+        id: mutationId,
+        kind: "save",
+        record,
+        expectedVersion: draft.version,
+      };
+      if (photoUpload) {
+        const state = await enqueuePhotoMeal(uid, {
+          ...job,
+          photoUpload: { uploadId: photoUpload.uploadId, pipelineVersion: 1 },
+        }, photoUpload.blob);
         visible = visibleMeals(state).find((meal) => meal.id === draft.id) ?? record;
-        return state;
-      });
+      } else {
+        await changeSyncState(uid, (state) => {
+          if (state.jobs.some((pending) => pending.record.id === draft.id && pending.error))
+            throw new RepositoryError("conflict", 409);
+          // Once an ACK removes the job, the latest cloud snapshot still
+          // carries its idempotency key. Reusing it for a new edit would get
+          // the old server record back and silently lose the new fields.
+          if (state.remote.some((saved) => saved.mutationId === mutationId))
+            throw new RepositoryError("conflict", 409);
+          const existing = state.jobs.find((pending) => pending.id === mutationId);
+          if (existing && (existing.kind !== "save" || existing.photoUpload ||
+            existing.record.id !== draft.id ||
+            existing.expectedVersion !== draft.version ||
+            !sameQueuedSave(existing.record, record)))
+            throw new RepositoryError("conflict", 409);
+          if (!existing) state.jobs.push(job);
+          visible = visibleMeals(state).find((meal) => meal.id === draft.id) ?? record;
+          return state;
+        });
+      }
     });
     signalChange(uid);
     return visible;
+  }
+  // The opt-in UI is gated until server upload and cleanup are operational.
+  // This method only makes the local meal/upload intent durable together.
+  async saveWithPhoto(draft: MealDraft, mutationId: string, uploadId: string, uid = currentUser()) {
+    if (!draft.photo) throw new RepositoryError("invalid_request", 400);
+    return this.save(draft, mutationId, uid, { uploadId, blob: draft.photo });
   }
   async delete(record: MealRecord) {
     const uid = currentUser();
@@ -136,10 +171,13 @@ export class MealRepository {
       await navigator.locks.request(`kcalcue-account-${uid}`, async () => {
         if (currentUser() !== uid)
           throw new RepositoryError("login_required", 401);
-        await changeSyncState(uid, (state) => ({
+        const uploadIds = (await changeSyncState(uid)).jobs
+          .filter((job) => job.record.id === mealId && job.photoUpload)
+          .map((job) => job.photoUpload!.uploadId);
+        await changeSyncStateAndClearPhotos(uid, (state) => ({
           ...state,
           jobs: state.jobs.filter((job) => job.record.id !== mealId),
-        }));
+        }), uploadIds);
       });
     });
     signalChange(uid);
@@ -164,16 +202,25 @@ export class MealRepository {
           blocked.add(job.record.id);
           continue;
         }
+        if (job.photoUpload && job.photoUpload.status !== "staged") {
+          // Upload/status recovery must stage the fixed uploadId first. Do not
+          // send a meal command that the server cannot safely attach yet.
+          blocked.add(job.record.id);
+          continue;
+        }
         try {
           const saved = await this.send(job, uid);
-          await changeSyncState(uid, (state) => ({
+          const acknowledge = (state: Awaited<ReturnType<typeof changeSyncState>>) => ({
             ...state,
             remote: [
               ...state.remote.filter((record) => record.id !== job.record.id),
               ...(saved ? [saved] : []),
             ],
             jobs: state.jobs.filter((pending) => pending.id !== job.id),
-          }));
+          });
+          if (job.photoUpload)
+            await changeSyncStateAndClearPhotos(uid, acknowledge, [job.photoUpload.uploadId]);
+          else await changeSyncState(uid, acknowledge);
         } catch (error) {
           if (
             !(error instanceof RepositoryError) ||
@@ -224,6 +271,8 @@ export class MealRepository {
       );
       return null;
     }
+    if (job.photoUpload && job.photoUpload.status !== "staged")
+      throw new RepositoryError("photo_upload_pending", 409);
     return (
       await result(
         await authorizedFetch(
@@ -238,6 +287,7 @@ export class MealRepository {
               createdAt: undefined,
               version: job.expectedVersion,
               mutationId: job.id,
+              ...(job.photoUpload ? { photoAction: { kind: "attach", uploadId: job.photoUpload.uploadId } } : {}),
             }),
           },
           uid,
