@@ -24,7 +24,9 @@ export async function GET(request: Request) {
     const { db, user } = await authenticated(request);
     const revision =
       (await db.doc(accountPath(user.id)).get()).data()?.revision ?? "empty";
-    if (new URL(request.url).searchParams.get("since") === revision)
+    // An absent account revision cannot prove that the meal collection is empty
+    // (for example after an import or metadata repair). Always read it in that case.
+    if (revision !== "empty" && new URL(request.url).searchParams.get("since") === revision)
       return Response.json(
         { revision },
         { headers: { "Cache-Control": "no-store" } },
