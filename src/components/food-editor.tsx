@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 import { confidenceCopy, copy, unitCopy } from "@/content/zh-HK";
-import { confidenceLevel } from "@/lib/domain/confidence";
+import type { ConfidenceLevel } from "@/lib/domain/confidence";
 import {
   portionUnits,
   type PortionUnit,
@@ -12,9 +12,15 @@ import type { EditableFoodItem, PortionPreset } from "@/lib/domain/editable-meal
 import { roundRange, type CalculatedFood } from "@/lib/nutrition/calculation";
 import { TrashIcon } from "./icons";
 
+export interface RecognitionBadge {
+  label: string;
+  level?: ConfidenceLevel;
+}
+
 interface FoodEditorProps {
   item: EditableFoodItem;
   calculation: CalculatedFood;
+  recognition: RecognitionBadge;
   onNameChange: (name: string) => void;
   onPortionChange: (field: "portionMin" | "portionMax", value: number) => void;
   onUnitChange: (unit: PortionUnit) => void;
@@ -50,13 +56,13 @@ function calorieRange(calculation: CalculatedFood): string {
 export function FoodEditor({
   item,
   calculation,
+  recognition,
   onNameChange,
   onPortionChange,
   onUnitChange,
   onPreset,
   onDelete,
 }: FoodEditorProps) {
-  const recognition = confidenceLevel(item.recognitionConfidence);
   const nutrition = calculation.match;
   const fieldId = `food-${item.id}`;
 
@@ -93,8 +99,8 @@ export function FoodEditor({
 
       <div className="food-summary-line">
         <strong>{calorieRange(calculation)}</strong>
-        <span className={`confidence-badge confidence-${recognition}`}>
-          {copy.recognitionLabel}：{confidenceCopy[recognition]}
+        <span className={`confidence-badge${recognition.level ? ` confidence-${recognition.level}` : ""}`}>
+          {recognition.label}
         </span>
         <span
           className={`confidence-badge confidence-${
