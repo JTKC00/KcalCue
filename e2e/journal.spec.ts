@@ -191,6 +191,148 @@ test("failed first cloud read stays unknown until an empty meal list is confirme
     .toContainText("今日餐數0餐");
 });
 
+test("a second tab's background refresh cannot erase an unsaved draft", async ({ page, context }) => {
+  const backend = cloud();
+  await backend.install(context);
+  await page.goto("/");
+  await login(page);
+  const other = await context.newPage();
+  await other.goto("/");
+  await other.getByRole("button", { name: "帳戶與安裝", exact: true }).click();
+  await expect(other.getByText("tester@example.com", { exact: true })).toBeVisible();
+  await other.getByRole("button", { name: "今日", exact: true }).click();
+
+  await page.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await page.getByRole("button", { name: "手動加入食物", exact: true }).click();
+  await page.getByRole("combobox", { name: "食物名稱", exact: true }).fill("白飯");
+  const cached = () => page.evaluate(async (uid) => {
+    const tabId = sessionStorage.getItem("kcalcue-draft-tab");
+    if (!tabId) throw new Error("Missing draft tab ID");
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const open = indexedDB.open("kcalcue-private");
+      open.onsuccess = () => resolve(open.result);
+      open.onerror = () => reject(open.error);
+    });
+    try {
+      return await new Promise<{ draft: unknown; syncedAt: string | null }>((resolve, reject) => {
+        const tx = db.transaction("accounts", "readonly");
+        const store = tx.objectStore("accounts");
+        const request = store.get(uid);
+        const draft = store.get(["draft", uid, tabId]);
+        tx.oncomplete = () => resolve({
+          draft: draft.result?.draft ?? null,
+          syncedAt: request.result?.syncedAt ?? null,
+        });
+        tx.onerror = () => reject(tx.error);
+      });
+    } finally { db.close(); }
+  }, userId);
+  await expect.poll(async () => (await cached()).draft).not.toBeNull();
+  const previousSync = (await cached()).syncedAt;
+  await page.waitForTimeout(20);
+  await other.evaluate(() => window.dispatchEvent(new Event("kcalcue-sync")));
+  await expect.poll(async () => (await cached()).syncedAt).not.toBe(previousSync);
+  expect((await cached()).draft).not.toBeNull();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "新餐點草稿", exact: true })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "食物名稱", exact: true })).toHaveValue("白飯");
+  await page.close();
+  const reopened = await context.newPage();
+  await reopened.goto("/");
+  await reopened.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await expect(reopened.getByRole("combobox", { name: "食物名稱", exact: true })).toHaveValue("白飯");
+  expect(backend.saves).toHaveLength(0);
+  await reopened.close();
+  await other.close();
+});
+
+test("a popup with cloned session storage gets its own draft identity", async ({ page, context }) => {
+  const backend = cloud();
+  await backend.install(context);
+  await page.goto("/");
+  await login(page);
+  await page.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await page.getByRole("button", { name: "手動加入食物", exact: true }).click();
+  await page.getByRole("combobox", { name: "食物名稱", exact: true }).fill("白飯");
+  const originalId = await page.evaluate(() => sessionStorage.getItem("kcalcue-draft-tab"));
+  expect(originalId).toBeTruthy();
+
+  const opened = page.waitForEvent("popup");
+  await page.evaluate(() => window.open("/", "_blank"));
+  const popup = await opened;
+  await popup.getByRole("button", { name: "帳戶與安裝", exact: true }).click();
+  await expect(popup.getByText("tester@example.com", { exact: true })).toBeVisible();
+  const popupId = await popup.evaluate(() => sessionStorage.getItem("kcalcue-draft-tab"));
+  expect(popupId).toBeTruthy();
+  expect(popupId).not.toBe(originalId);
+
+  await popup.getByRole("button", { name: "今日", exact: true }).click();
+  await popup.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await expect(popup.getByRole("combobox", { name: "食物名稱", exact: true })).toHaveValue("白飯");
+  await popup.getByRole("combobox", { name: "食物名稱", exact: true }).fill("香蕉");
+  await expect(page.getByRole("combobox", { name: "食物名稱", exact: true })).toHaveValue("白飯");
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "新餐點草稿", exact: true })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "食物名稱", exact: true })).toHaveValue("白飯");
+  expect(backend.saves).toHaveLength(0);
+  await popup.close();
+});
+
+test("a stale tab cannot replace the latest draft and its fork stays recoverable", async ({ page, context }) => {
+  const backend = cloud();
+  await backend.install(context);
+  await page.goto("/");
+  await login(page);
+  await page.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await page.getByRole("button", { name: "手動加入食物", exact: true }).click();
+  const firstName = page.getByRole("combobox", { name: "食物名稱", exact: true });
+  await firstName.fill("白飯");
+  const legacyName = () => page.evaluate(async (uid) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const open = indexedDB.open("kcalcue-private");
+      open.onsuccess = () => resolve(open.result);
+      open.onerror = () => reject(open.error);
+    });
+    try {
+      return await new Promise<string | null>((resolve, reject) => {
+        const tx = db.transaction("accounts", "readonly");
+        const request = tx.objectStore("accounts").get(uid);
+        tx.oncomplete = () => resolve(request.result?.draft?.items?.[0]?.displayName ?? null);
+        tx.onerror = () => reject(tx.error);
+      });
+    } finally { db.close(); }
+  }, userId);
+  await expect.poll(legacyName).toBe("白飯");
+  const stale = await context.newPage();
+  await stale.goto("/");
+  await stale.getByRole("button", { name: "帳戶與安裝", exact: true }).click();
+  await expect(stale.getByText("tester@example.com", { exact: true })).toBeVisible();
+  await stale.getByRole("button", { name: "今日", exact: true }).click();
+  await firstName.fill("香蕉");
+  await expect.poll(legacyName).toBe("香蕉");
+  await stale.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await expect(stale.getByRole("combobox", { name: "食物名稱", exact: true })).toHaveValue("白飯");
+  const recovered = await context.newPage();
+  await recovered.goto("/");
+  await expect(recovered.getByRole("region", { name: "其他未儲存草稿" })).toContainText("白飯");
+  await recovered.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await expect(recovered.getByRole("combobox", { name: "食物名稱", exact: true })).toHaveValue("香蕉");
+  recovered.once("dialog", (dialog) => dialog.accept());
+  await recovered.getByRole("region", { name: "其他未儲存草稿" })
+    .getByRole("button", { name: "恢復草稿" }).first().click();
+  await expect(recovered.getByRole("combobox", { name: "食物名稱", exact: true })).toHaveValue("白飯");
+  const afterRecovery = await context.newPage();
+  await afterRecovery.goto("/");
+  await afterRecovery.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await expect(afterRecovery.getByRole("combobox", { name: "食物名稱", exact: true })).toHaveValue("白飯");
+  expect(backend.saves).toHaveLength(0);
+  await afterRecovery.close();
+  await recovered.close();
+  await stale.close();
+});
+
 test("whole-meal user calories survive reload without inventing nutrition, and can be cleared", async ({ page, context }) => {
   const backend = cloud();
   await backend.install(context);

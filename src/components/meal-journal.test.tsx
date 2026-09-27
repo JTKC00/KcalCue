@@ -36,10 +36,15 @@ vi.mock("@/lib/meals/repository", () => ({
   },
 }));
 vi.mock("@/lib/meals/cache", () => ({
+  draftTabId: () => "test-tab",
+  prepareDraftTabId: async () => "test-tab",
   localMeals: {
     read: async () => ({ records: [], draft: null, syncedAt: fixture.cachedSyncedAt }),
     write: async () => {},
+    writeSnapshot: async () => {},
     clear: async () => {},
+    listDrafts: async () => [],
+    restoreDraft: vi.fn(),
   },
 }));
 vi.mock("@/lib/meals/photo", async (original) => ({

@@ -10,7 +10,7 @@ import {
 } from "@/lib/firebase/client";
 import { Account } from "./firebase-account";
 import { clearSyncState, visibleMeals, type PendingMeal } from "@/lib/meals/outbox";
-import { localMeals, type LocalMeals } from "@/lib/meals/cache";
+import { draftTabId, prepareDraftTabId, localMeals, type LocalMeals, type SavedDraftSummary } from "@/lib/meals/cache";
 import { MealRepository, RepositoryError } from "@/lib/meals/repository";
 import {
   dayNutrition,
@@ -121,6 +121,9 @@ export function MealJournal({
   const [today, setToday] = useState(() => localDate());
   const [records, setRecords] = useState<MealRecord[]>([]);
   const [draft, setDraft] = useState<MealDraft | null>(null);
+  const [savedDrafts, setSavedDrafts] = useState<{ uid: string; items: SavedDraftSummary[] }>({
+    uid: "guest", items: [],
+  });
   const [initialDraft, setInitialDraft] = useState<MealDraft | undefined>();
   const [editorKey, setEditorKey] = useState(0);
   const [manual, setManual] = useState(false);
@@ -148,6 +151,7 @@ export function MealJournal({
     current.current = { userId, draft, records, syncedAt };
   }, [userId, draft, records, syncedAt]);
   const writes = useRef<Promise<unknown>>(Promise.resolve());
+  const queuedDraft = useRef<MealDraft | null>(null);
   const cacheEnabled = useRef(true);
   const preparedFile = useRef<File | null>(null);
   const photoGeneration = useRef(0);
@@ -206,6 +210,8 @@ export function MealJournal({
               ? ""
               : { kind: "pending-sync", message: `已保留本機修改，尚有 ${state.jobs.length} 項待同步。` };
           });
+          const saved = await localMeals.listDrafts(id).catch(() => null);
+          if (isCurrent() && saved) setSavedDrafts({ uid: id, items: saved });
         }
       } catch {
         if (isCurrent()) setSyncNotice("本機儲存不可用，請勿關閉頁面。");
@@ -232,11 +238,13 @@ export function MealJournal({
       setSyncNotice("");
       setNotice("");
       refreshGeneration.current++;
+      const tabKey = await prepareDraftTabId();
+      if (!isCurrentLoad()) return;
       const oldId = current.current.userId;
       const guestDraft =
         oldId === "guest" && id !== "guest"
           ? (current.current.draft ??
-            (await localMeals.read("guest").catch(() => ({ draft: null })))
+            (await localMeals.read("guest", tabKey).catch(() => ({ draft: null })))
               .draft)
           : null;
       if (oldId !== "guest" && oldId !== id) {
@@ -246,7 +254,7 @@ export function MealJournal({
         if (localStorage.getItem("kcalcue-logout")?.split(":")[0] === oldId)
           await localMeals.clear(oldId);
       }
-      const local = await localMeals.read(id).catch(() => {
+      const local = await localMeals.read(id, tabKey).catch(() => {
         setNotice("本機儲存不可用，請勿在儲存到雲端前關閉頁面。");
         return {
           records: [],
@@ -257,12 +265,13 @@ export function MealJournal({
       if (!isCurrentLoad()) return;
       if (guestDraft && !local.draft) {
         local.draft = guestDraft;
-        await localMeals.write(id, local);
+        await localMeals.write(id, local, tabKey);
         await writes.current;
-        await localMeals.clear("guest");
+        await localMeals.clear("guest", tabKey);
       }
       if (!isCurrentLoad()) return;
       const syncState = id === "guest" ? null : await repository.state(id);
+      const saved = await localMeals.listDrafts(id).catch(() => []);
       const visibleRecords = syncState ? visibleMeals(syncState) : [];
       // The durable outbox proves whether this account ever received a cloud
       // meal snapshot. The separate draft cache is not authority for that.
@@ -270,12 +279,14 @@ export function MealJournal({
       // A later sign-in may finish while IndexedDB is reading the previous account.
       if (!isCurrentLoad()) return;
       loading = false;
+      queuedDraft.current = local.draft;
       current.current = { userId: id, ...local, records: visibleRecords, syncedAt: knownSyncedAt };
       cacheEnabled.current = true;
       setUserId(id);
       setEmail(address);
       setRecords(visibleRecords);
       setDraft(local.draft);
+      setSavedDrafts({ uid: id, items: saved });
       setInitialDraft(local.draft ?? undefined);
       setEditorKey((key) => key + 1);
       setSyncedAt(knownSyncedAt);
@@ -348,6 +359,7 @@ export function MealJournal({
       setReady(false);
       setEmail(null);
       setDraft(null);
+      setSavedDrafts({ uid: "guest", items: [] });
       setInitialDraft(undefined);
       setRecords([]);
       setUserId("guest");
@@ -422,14 +434,30 @@ export function MealJournal({
 
   useEffect(() => {
     if (!ready || !cacheEnabled.current) return;
-    const state = { records, draft, syncedAt };
+    const state = { records, syncedAt };
     writes.current = writes.current
       .catch(() => {})
-      .then(() => localMeals.write(userId, state))
+      .then(() => localMeals.writeSnapshot(userId, state))
       .catch(() =>
         setNotice("本機空間不足或儲存不可用，草稿未能保留。請先儲存到雲端。"),
       );
-  }, [ready, records, draft, syncedAt, userId]);
+  }, [ready, records, syncedAt, userId]);
+  useEffect(() => {
+    if (!ready || !cacheEnabled.current || queuedDraft.current === draft) return;
+    queuedDraft.current = draft;
+    const state = { records, draft, syncedAt };
+    writes.current = writes.current
+      .catch(() => {})
+      .then(async () => {
+        await localMeals.write(userId, state, draftTabId());
+        const saved = await localMeals.listDrafts(userId);
+        if (current.current.userId === userId)
+          setSavedDrafts({ uid: userId, items: saved });
+      })
+      .catch(() =>
+        setNotice("本機空間不足或儲存不可用，草稿未能保留。請先儲存到雲端。"),
+      );
+  }, [ready, draft, userId, records, syncedAt]);
   useEffect(() => {
     const unload = (e: BeforeUnloadEvent) => {
       if (current.current.draft && !allowUpdateReload.current) {
@@ -476,6 +504,22 @@ export function MealJournal({
       return;
     }
     openDraft(newDraft(), isManual);
+  }
+  async function recoverDraft(source: SavedDraftSummary) {
+    if (draft && !confirm("開啟另一份草稿？目前草稿會另外保留，可稍後恢復。")) return;
+    const scope = operationScope();
+    try {
+      await writes.current;
+      if (!scope.isCurrent()) return;
+      const recovered = await localMeals.restoreDraft(scope.id, draftTabId(), source.tabId);
+      if (!scope.isCurrent()) return;
+      queuedDraft.current = recovered;
+      openDraft(recovered);
+      const saved = await localMeals.listDrafts(scope.id);
+      if (scope.isCurrent()) setSavedDrafts({ uid: scope.id, items: saved });
+    } catch {
+      if (scope.isCurrent()) setNotice("這份草稿暫時無法讀取，請重試。");
+    }
   }
   const onDraftChange = useCallback(
     (change: Pick<MealDraft, "items" | "analysis" | "analysisProvenance" | "mode">) => {
@@ -608,7 +652,7 @@ export function MealJournal({
         records: await repository.list(id),
         draft: null,
         syncedAt: null,
-      });
+      }, draftTabId());
       preparedFile.current = null;
       photoGeneration.current++;
       void refresh();
@@ -641,7 +685,7 @@ export function MealJournal({
     setInitialDraft(undefined);
     await writes.current;
     if (!scope.isCurrent()) return;
-    await localMeals.write(userId, { records, draft: null, syncedAt });
+    await localMeals.write(userId, { records, draft: null, syncedAt }, draftTabId());
     if (!scope.isCurrent()) return;
     go("today");
   }
@@ -675,7 +719,7 @@ export function MealJournal({
     if (
       busyRef.current ||
       !confirm(
-        "刪除本機可見的全部餐點及草稿？連線後會自動同步刪除。其他裝置尚未同步的新增記錄不包含在內。",
+        "刪除本機可見的全部餐點及此分頁草稿？連線後會自動同步刪除。其他裝置尚未同步的新增記錄不包含在內。",
       )
     )
       return;
@@ -690,7 +734,11 @@ export function MealJournal({
       }
       await writes.current;
       if (!scope.isCurrent()) return;
-      await localMeals.clear(scope.id);
+      // Another tab can have a separate unsaved draft for this account.
+      // Clear this tab's copy without silently deleting that other work.
+      await localMeals.write(scope.id, {
+        records: [], draft: null, syncedAt: null,
+      }, draftTabId());
       if (!scope.isCurrent()) return;
       setDraft(null);
       setRecords([]);
@@ -792,7 +840,7 @@ export function MealJournal({
         // Drain older cache writes before preserving the recovery draft.
         await writes.current;
         if (!scope.isCurrent()) return;
-        await localMeals.write(scope.id, { records, draft: copy, syncedAt });
+        await localMeals.write(scope.id, { records, draft: copy, syncedAt }, draftTabId());
         if (!scope.isCurrent()) return;
       }
       await repository.discardPending(job.record.id, scope.id);
@@ -818,6 +866,13 @@ export function MealJournal({
   const days = [...new Set(visible.map((record) => record.date))];
   const cloudRecordsUnknown = userId !== "guest" && !syncedAt;
   const displayedNotice = syncNotice || (typeof notice === "string" ? notice : notice.message);
+  const visibleSavedDrafts = ready && savedDrafts.uid === userId
+    ? savedDrafts.items : [];
+  const ownDraftRevision = visibleSavedDrafts.find((saved) =>
+    ready && typeof window !== "undefined" && saved.tabId === draftTabId())?.revision;
+  const otherDrafts = [...new Map(visibleSavedDrafts
+    .filter((saved) => saved.revision !== ownDraftRevision)
+    .map((saved) => [saved.revision, saved])).values()];
 
   return (
     <div className="journal-shell">
@@ -852,6 +907,19 @@ export function MealJournal({
             ×
           </button>
         </div>
+      )}
+      {ready && otherDrafts.length > 0 && (
+        <section className="journal-card" aria-label="其他未儲存草稿">
+          <p>此裝置另有 {otherDrafts.length} 份未儲存草稿。</p>
+          {otherDrafts.map((saved) => (
+            <div key={saved.revision}>
+              <span>{saved.label} · {saved.date} · {new Date(saved.updatedAt).toLocaleString("zh-HK")}</span>{" "}
+              <button className="button button-secondary" onClick={() => void recoverDraft(saved)}>
+                恢復草稿
+              </button>
+            </div>
+          ))}
+        </section>
       )}
       {!!pending.length && (
         <section className="journal-card">
@@ -904,12 +972,6 @@ export function MealJournal({
         beforeUpdate={async () => {
           if (busyRef.current) throw new Error("Save in progress");
           await writes.current;
-          if (current.current.draft)
-            await localMeals.write(current.current.userId, {
-              records: current.current.records,
-              draft: current.current.draft,
-              syncedAt: current.current.syncedAt,
-            });
           allowUpdateReload.current = true;
         }}
       />

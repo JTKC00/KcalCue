@@ -20,6 +20,9 @@ const fixture = vi.hoisted(() => ({
   discard: vi.fn(),
   read: vi.fn(),
   write: vi.fn(),
+  snapshot: vi.fn(),
+  savedDrafts: vi.fn(),
+  restoreDraft: vi.fn(),
   clear: vi.fn(),
   clearSync: vi.fn(),
   signOut: vi.fn(),
@@ -55,7 +58,13 @@ vi.mock("@/lib/meals/outbox", async (original) => ({
   clearSyncState: fixture.clearSync,
 }));
 vi.mock("@/lib/meals/cache", () => ({
-  localMeals: { read: fixture.read, write: fixture.write, clear: fixture.clear },
+  draftTabId: () => "test-tab",
+  prepareDraftTabId: async () => "test-tab",
+  localMeals: {
+    read: fixture.read, write: fixture.write,
+    writeSnapshot: fixture.snapshot, clear: fixture.clear,
+    listDrafts: fixture.savedDrafts, restoreDraft: fixture.restoreDraft,
+  },
 }));
 vi.mock("./kcalcue-app", () => ({
   KcalCueApp: ({ initialDraft, onDraftChange }: { initialDraft: MealDraft; onDraftChange: NonNullable<typeof fixture.draftChange> }) => {
@@ -117,12 +126,16 @@ async function startConflictRecovery(meal: MealRecord) {
 beforeEach(() => {
   states.clear(); caches.clear(); fixture.uid = "a";
   vi.restoreAllMocks(); vi.unstubAllGlobals();
-  for (const mock of [fixture.list, fixture.state, fixture.sync, fixture.save, fixture.remove, fixture.discard, fixture.read, fixture.write, fixture.clear, fixture.clearSync, fixture.signOut, fixture.photoFetch]) mock.mockReset();
+  for (const mock of [fixture.list, fixture.state, fixture.sync, fixture.save, fixture.remove, fixture.discard, fixture.read, fixture.write, fixture.snapshot, fixture.savedDrafts, fixture.restoreDraft, fixture.clear, fixture.clearSync, fixture.signOut, fixture.photoFetch]) mock.mockReset();
   fixture.list.mockImplementation(async (uid: string) => visibleMeals(structuredClone(states.get(uid) ?? emptySync())));
   fixture.state.mockImplementation(async (uid: string) => structuredClone(states.get(uid) ?? emptySync()));
   fixture.sync.mockResolvedValue(undefined);
   fixture.read.mockImplementation(async (uid: string) => structuredClone(caches.get(uid) ?? emptyCache()));
   fixture.write.mockImplementation(async (uid: string, value: LocalMeals) => { caches.set(uid, structuredClone(value)); });
+  fixture.snapshot.mockImplementation(async (uid: string, value: Pick<LocalMeals, "records" | "syncedAt">) => {
+    caches.set(uid, { ...structuredClone(caches.get(uid) ?? emptyCache()), ...structuredClone(value) });
+  });
+  fixture.savedDrafts.mockResolvedValue([]);
   fixture.clear.mockImplementation(async (uid: string) => { caches.delete(uid); });
   fixture.discard.mockResolvedValue(undefined);
   fixture.clearSync.mockResolvedValue(undefined);
@@ -203,11 +216,39 @@ it("ignores a delayed B account load when authentication has returned to A", asy
   const loadingB = deferred<LocalMeals>();
   fixture.read.mockImplementation(async (uid: string) => uid === "b" ? loadingB.promise : emptyCache());
   await signIn("b");
-  await waitFor(() => expect(fixture.read).toHaveBeenCalledWith("b"));
+  await waitFor(() => expect(fixture.read).toHaveBeenCalledWith("b", "test-tab"));
   await signIn("a");
   await act(async () => { loadingB.resolve(emptyCache()); });
   await screen.findByRole("heading", { name: "meal-a" });
   expect(screen.queryByRole("heading", { name: "meal-b" })).not.toBeInTheDocument();
+});
+
+it("does not show A's recoverable draft after its delayed refresh completes under B", async () => {
+  const privateDraft = { ...newDraft(),
+    items: [{ ...createEditableFoodItems(demoFoodAnalysis.foods)[0], displayName: "private-a" }],
+  };
+  const summary = {
+    tabId: "other-tab", revision: crypto.randomUUID(), mealId: privateDraft.id,
+    label: "private-a", date: privateDraft.date, updatedAt: Date.now(),
+  };
+  const delayed = deferred<typeof summary[]>();
+  let delayA = false;
+  fixture.savedDrafts.mockImplementation(async (uid: string) =>
+    uid === "a" ? (delayA ? delayed.promise : [summary]) : []);
+  fixture.restoreDraft.mockResolvedValue(privateDraft);
+  render(<MealJournal initialProviderMode="live" />);
+  await signIn("a");
+  await screen.findByText(/private-a/);
+  delayA = true;
+  fireEvent.click(screen.getByRole("button", { name: "恢復草稿" }));
+  await waitFor(() => expect(fixture.restoreDraft).toHaveBeenCalledWith("a", "test-tab", "other-tab"));
+  await signIn("b");
+  await waitFor(() => expect(fixture.read).toHaveBeenCalledWith("b", "test-tab"));
+  fireEvent.click(screen.getByRole("button", { name: "今日" }));
+  await screen.findByRole("heading", { name: "尚未確認今日記錄" });
+  await act(async () => { delayed.resolve([summary]); });
+  expect(screen.queryByText(/private-a/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "其他未儲存草稿" })).not.toBeInTheDocument();
 });
 
 it("rejects a pre-delete refresh snapshot and follows up with the current snapshot", async () => {

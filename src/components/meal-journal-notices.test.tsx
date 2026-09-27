@@ -11,7 +11,7 @@ import type { LocalMeals } from "@/lib/meals/cache";
 const fixture = vi.hoisted(() => ({
   callback: null as null | ((user: { uid: string; email: string }) => void),
   list: vi.fn(), state: vi.fn(), sync: vi.fn(), remove: vi.fn(), save: vi.fn(),
-  read: vi.fn(), write: vi.fn(), clear: vi.fn(),
+  read: vi.fn(), write: vi.fn(), snapshot: vi.fn(), clear: vi.fn(),
 }));
 vi.mock("@/lib/firebase/client", () => ({
   cloudConfigured: () => true,
@@ -34,7 +34,13 @@ vi.mock("@/lib/meals/repository", () => ({
   },
 }));
 vi.mock("@/lib/meals/cache", () => ({
-  localMeals: { read: fixture.read, write: fixture.write, clear: fixture.clear },
+  draftTabId: () => "test-tab",
+  prepareDraftTabId: async () => "test-tab",
+  localMeals: {
+    read: fixture.read, write: fixture.write,
+    writeSnapshot: fixture.snapshot, clear: fixture.clear,
+    listDrafts: async () => [], restoreDraft: vi.fn(),
+  },
 }));
 vi.mock("./kcalcue-app", () => ({ KcalCueApp: () => null }));
 vi.mock("./pwa-controls", () => ({ PwaControls: () => null }));
@@ -78,7 +84,7 @@ async function removeMeal() {
 
 beforeEach(() => {
   vi.restoreAllMocks(); vi.unstubAllGlobals();
-  for (const mock of [fixture.list, fixture.state, fixture.sync, fixture.remove, fixture.save, fixture.read, fixture.write, fixture.clear]) mock.mockReset();
+  for (const mock of [fixture.list, fixture.state, fixture.sync, fixture.remove, fixture.save, fixture.read, fixture.write, fixture.snapshot, fixture.clear]) mock.mockReset();
   state = emptyState();
   cache = { records: [], draft: null, syncedAt: null };
   fixture.list.mockImplementation(async () => visibleMeals(structuredClone(state)));
@@ -86,6 +92,9 @@ beforeEach(() => {
   fixture.sync.mockResolvedValue(undefined);
   fixture.read.mockImplementation(async () => structuredClone(cache));
   fixture.write.mockImplementation(async (_uid: string, value: LocalMeals) => { cache = structuredClone(value); });
+  fixture.snapshot.mockImplementation(async (_uid: string, value: Pick<LocalMeals, "records" | "syncedAt">) => {
+    cache = { ...cache, ...structuredClone(value) };
+  });
   fixture.clear.mockResolvedValue(undefined);
   fixture.remove.mockImplementation(async (meal: MealRecord) => {
     state.jobs.push({ id: crypto.randomUUID(), kind: "delete", record: meal, expectedVersion: meal.version });
@@ -131,7 +140,7 @@ it.each([undefined, "conflict"])("keeps the local notice when durable jobs remai
 });
 
 it("preserves an unrelated local storage error after a current empty durable snapshot", async () => {
-  fixture.write.mockRejectedValueOnce(new Error("Storage full"));
+  fixture.snapshot.mockRejectedValueOnce(new Error("Storage full"));
   await start();
   await screen.findByText(storageNotice);
   state = { ...emptyState(), syncedAt: new Date().toISOString() };
