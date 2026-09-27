@@ -210,6 +210,80 @@ it("ignores a delayed B account load when authentication has returned to A", asy
   expect(screen.queryByRole("heading", { name: "meal-b" })).not.toBeInTheDocument();
 });
 
+it("hides the previous account's email, pending meal, and sync time while the next account loads", async () => {
+  Object.defineProperty(navigator, "onLine", { value: true });
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true })));
+  const meal = record("a", "private-a");
+  conflict(meal);
+  states.set("a", { ...states.get("a")!, syncedAt: "2026-09-01T12:34:00.000Z" });
+  caches.set("a", { ...emptyCache(), syncedAt: "2026-09-01T12:34:00.000Z" });
+  render(<MealJournal initialProviderMode="live" />);
+  await signIn("a");
+  await screen.findByRole("heading", { name: "private-a" });
+  expect(screen.getByText(/上次同步/)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "帳戶與安裝" }));
+  expect(screen.getByText("a@example.com")).toBeVisible();
+
+  const loadingB = deferred<LocalMeals>();
+  fixture.read.mockImplementation(async (uid: string) =>
+    uid === "b" ? loadingB.promise : structuredClone(caches.get(uid) ?? emptyCache()));
+  await signIn("b");
+  await waitFor(() => expect(fixture.read).toHaveBeenCalledWith("b"));
+  expect(screen.getByText("正在讀取記錄…")).toBeVisible();
+  expect(screen.queryByText(/private-a/)).not.toBeInTheDocument();
+  expect(screen.queryByText("a@example.com")).not.toBeInTheDocument();
+  expect(screen.queryByText(/上次同步/)).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "帳戶與安裝" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "新增" })).toBeDisabled();
+
+  await act(async () => { loadingB.resolve(emptyCache()); });
+  expect(await screen.findByText("b@example.com")).toBeVisible();
+});
+
+it("clears private pending state and saved login email after a logout in another tab", async () => {
+  conflict(record("a", "private-a"));
+  localStorage.setItem("kcalcue-login-email", "a@example.com");
+  render(<MealJournal initialProviderMode="live" />);
+  await signIn("a");
+  await screen.findByRole("heading", { name: "private-a" });
+  await act(async () => {
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: "kcalcue-logout", newValue: `a:${Date.now()}`,
+    }));
+  });
+  await waitFor(() => expect(screen.getByText("這個帳戶已在另一個分頁登出，本機資料已清除。")).toBeVisible());
+  expect(screen.queryByText(/private-a/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/項修改待同步/)).not.toBeInTheDocument();
+  expect(localStorage.getItem("kcalcue-login-email")).toBeNull();
+});
+
+it("does not unlock the guest screen when old logout cleanup finishes during a new account load", async () => {
+  render(<MealJournal initialProviderMode="live" />);
+  await signIn("a");
+  await screen.findByRole("heading", { name: "今日未有記錄" });
+  const clearingA = deferred<void>();
+  fixture.clear.mockImplementationOnce(() => clearingA.promise);
+  await act(async () => {
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: "kcalcue-logout", newValue: `a:${Date.now()}`,
+    }));
+  });
+  await waitFor(() => expect(fixture.clear).toHaveBeenCalledWith("a"));
+
+  const loadingB = deferred<LocalMeals>();
+  fixture.read.mockImplementation(async (uid: string) => uid === "b" ? loadingB.promise : emptyCache());
+  await signIn("b");
+  await waitFor(() => expect(fixture.read).toHaveBeenCalledWith("b"));
+  await act(async () => { clearingA.resolve(); });
+  expect(screen.getByText("正在讀取記錄…")).toBeVisible();
+  expect(screen.getByRole("button", { name: "新增" })).toBeDisabled();
+  expect(screen.queryByText("這個帳戶已在另一個分頁登出，本機資料已清除。")).not.toBeInTheDocument();
+
+  await act(async () => { loadingB.resolve(emptyCache()); });
+  expect(await screen.findByRole("heading", { name: "今日未有記錄" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "新增" })).toBeEnabled();
+});
+
 it("rejects a pre-delete refresh snapshot and follows up with the current snapshot", async () => {
   const meal = record("a");
   const original = { ...emptySync(), remote: [meal] };

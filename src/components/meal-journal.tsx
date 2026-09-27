@@ -334,7 +334,9 @@ export function MealJournal({
       )
         return;
       const old = current.current.userId;
+      localStorage.removeItem("kcalcue-login-email");
       accountGeneration.current++;
+      const logoutGeneration = accountGeneration.current;
       cacheEnabled.current = false;
       refreshGeneration.current++;
       photoGeneration.current++;
@@ -349,22 +351,25 @@ export function MealJournal({
       setDraft(null);
       setInitialDraft(undefined);
       setRecords([]);
+      setPending([]);
+      setSyncedAt(null);
       setUserId("guest");
       setTab("today");
       loadGeneration++;
       void writes.current
         .then(() => localMeals.clear(old))
         .then(() => {
-          if (active) setNotice("這個帳戶已在另一個分頁登出，本機資料已清除。");
+          if (active && accountGeneration.current === logoutGeneration)
+            setNotice("這個帳戶已在另一個分頁登出，本機資料已清除。");
         })
         .catch(() => {
-          if (active)
+          if (active && accountGeneration.current === logoutGeneration)
             setNotice(
               "帳戶已登出，但本機資料清理失敗，請清除瀏覽器的網站資料。",
             );
         })
         .finally(() => {
-          if (active) {
+          if (active && accountGeneration.current === logoutGeneration && current.current.userId === "guest") {
             cacheEnabled.current = true;
             setReady(true);
           }
@@ -737,6 +742,7 @@ export function MealJournal({
           setRecords([]);
           current.current = { ...current.current, draft: null, records: [] };
           localStorage.setItem("kcalcue-logout", `${userId}:${Date.now()}`);
+          localStorage.removeItem("kcalcue-login-email");
           const auth = firebaseAuth();
           if (auth) await signOut(auth);
         }),
@@ -825,7 +831,7 @@ export function MealJournal({
         </a>
         <button
           className="button button-ghost"
-          disabled={busy}
+          disabled={busy || !ready}
           onClick={() => {
             setInitialDraft(draft ?? undefined);
             setEditorKey((key) => key + 1);
@@ -836,14 +842,16 @@ export function MealJournal({
         </button>
       </header>
       <div className="journal-status" role="status">
-        {online
+        {!ready
+          ? "正在切換帳戶…"
+          : online
           ? syncedAt
             ? `上次同步：${new Date(syncedAt).toLocaleString("zh-HK")}`
             : "連線中 · 尚未同步"
           : "離線中 · 可新增、修改及刪除，重連後自動同步"}
         {!cloudConfigured() && <span> · 雲端尚未設定，無法登入或同步</span>}
       </div>
-      {displayedNotice && (
+      {ready && displayedNotice && (
         <div className="journal-notice" role="status">
           <span>{displayedNotice}</span>
           <button aria-label="關閉訊息" onClick={() => { setNotice(""); setSyncNotice(""); }}>
@@ -851,7 +859,7 @@ export function MealJournal({
           </button>
         </div>
       )}
-      {!!pending.length && (
+      {ready && !!pending.length && (
         <section className="journal-card">
           <p>
             {pending.length} 項修改待同步{syncing ? " · 同步中…" : ""}
@@ -898,7 +906,7 @@ export function MealJournal({
         </section>
       )}
       <PwaControls
-        visible={account}
+        visible={account && ready}
         beforeUpdate={async () => {
           if (busyRef.current) throw new Error("Save in progress");
           await writes.current;
@@ -911,7 +919,11 @@ export function MealJournal({
           allowUpdateReload.current = true;
         }}
       />
-      {account ? (
+      {!ready ? (
+        <main className="journal-main" aria-busy="true">
+          正在讀取記錄…
+        </main>
+      ) : account ? (
         <main className="journal-main">
           <h1>帳戶與資料</h1>
           {email && !reauth ? (
@@ -957,10 +969,6 @@ export function MealJournal({
               分析需要連線。
             </p>
           </section>
-        </main>
-      ) : !ready ? (
-        <main className="journal-main" aria-busy="true">
-          正在讀取記錄…
         </main>
       ) : tab === "new" ? (
         <div className="journal-editor">
@@ -1303,7 +1311,7 @@ export function MealJournal({
         ].map(([key, label]) => (
           <button
             key={key}
-            disabled={busy}
+            disabled={busy || !ready}
             aria-current={!account && tab === key ? "page" : undefined}
             onClick={() => {
               if (key === "new") start();
