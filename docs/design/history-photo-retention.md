@@ -124,7 +124,7 @@ Cleanup只delete該asset記錄的**確切generation**；precondition mismatch不
 - 不對同一object prefix套「24小時全刪」bucket lifecycle：staged後會attach並保持相同key，這樣會誤刪正常History圖。若未來拆staging/attached prefix則需copy/finalize另一套補償，**不放進第一版**。
 - attached物件保留到使用者detach/delete或明確account lifecycle；不暗中按短TTL刪正常歷史圖。既有帳戶刪除若尚無產品流程，須把對應object清理列release runbook，不能讓storage資料游離於資料擁有人生命週期。
 
-**實體清理需要可信的背景執行者。** Request-after-response、只有使用者再登入時順手清理或process內setTimeout都不能保證清理。Source-only per-asset原語、逾期`uploading/staged`掃描及`deleting`掃描已存在；兩個有界scanner分別持久化游標、掃至尾端回繞，並逐筆從document path重驗owner。逾期掃描只把Registry交易式轉成`deleting`，不直接刪object。`deleting`且generation未知時，掃描器只會在同一固定bucket/key查到物件、核對reservation與指定generation的實際JPEG bytes後補記generation，再按精確generation刪除；404／讀取失敗／不符仍保留工作及quota。這仍未涵蓋registry已標`deleted`後才出現、且finalizer未回來的晚到write；需另以有界namespace對帳找出。`docs/design/photo-assets-indexes.example.json`列出所需索引範本，**未接入firebase.json／未部署**；啟用前須核對既有雲端索引，再安全合併。尚無可信排程／監測、完整晚到write對帳及404缺席證明，**不能稱實體cleanup已運作**。沒有已授權scheduler/執行環境前，不得宣稱有24h刪除SLA；新付費排程/worker資源須授權，且是啟用photo retention的release gate。時間目標建議每15分鐘有限批次、pending逾24h告警；這是待配置驗收的目標，不是目前承諾。
+**實體清理需要可信的背景執行者。** Request-after-response、只有使用者再登入時順手清理或process內setTimeout都不能保證清理。Source-only per-asset原語，以及逾期`uploading/staged`、`deleting`、`deleted`三個有界掃描器已存在；各自持久化游標、掃至尾端回繞，並逐筆從document path重驗owner。逾期掃描只把Registry交易式轉成`deleting`，不直接刪object。`deleting`且generation未知時，掃描器只會在同一固定bucket/key查到物件、核對reservation與指定generation的實際JPEG bytes後補記generation，再按精確generation刪除。`deleted`掃描器重訪不可重用的reservation key；若晚到新generation出現，驗證metadata與實際bytes，交易式重新計入quota並進入`deleting`，再精確刪除。404／讀取失敗／不符均不視為已證明永久缺席。這只涵蓋已建立registry的固定key，仍未完成整個object namespace與registry對帳、可信執行排程及真實GCS競態驗收。`docs/design/photo-assets-indexes.example.json`列出所需索引範本，**未接入firebase.json／未部署**；啟用前須核對既有雲端索引，再安全合併。**不能稱實體cleanup已運作**。沒有已授權scheduler/執行環境前，不得宣稱有24h刪除SLA；新付費排程/worker資源須授權，且是啟用photo retention的release gate。時間目標建議每15分鐘有限批次、pending逾24h告警；這是待配置驗收的目標，不是目前承諾。
 
 ## 6. 離線、本機原子性與unknown outcome
 
@@ -174,7 +174,7 @@ Cleanup只delete該asset記錄的**確切generation**；precondition mismatch不
 
 1. **合約＋server primitive（預設disabled）：**typed asset/command/schema、fake object adapter、transaction reservation/attach/remove/cleanup狀態機、ownership與meaningful tests；普通meal與既有prepare route行為不变。不單獨啟用未有cleanup的upload endpoint。
 2. **可恢復 server lifecycle：**實際server-only object adapter、generation conditional operations、private read、upload/status、cleanup runner/reconciler及provider-specific本機測試；與step1整合emulator。沒有實際資源/config也可完成可審核source，cloud parity明列待驗。
-3. **Client vertical slice：**History按需private blob rendering已有source-only分片；仍需IDB payload store、outbox依赖／unknown recovery、opt-in、replace/remove、legacy/離線UX、Daily/provenance相容，以及獨立browser重做完整journey。同步更新條件式隱私文案與SETUP，不把預設disabled寫成已發布。
+3. **Client vertical slice：**History按需private blob rendering、IDB payload store與outbox依賴已有source-only分片；仍需upload/status恢復器、opt-in、replace/remove、legacy/離線UX、Daily/provenance相容，以及獨立browser重做完整journey。同步更新條件式隱私文案與SETUP，不把預設disabled寫成已發布。
 4. **授權release：**確認資源、quota、delete/retention/IAM與背景執行；exact-source CI/build/codec證據、rollback floor；QA帳戶真流程＋cleanup readback後才標功能production PASS。
 
 前三步可按實際diff大小再拆，但不能把「能upload」當成可發布feature而留下ownership、delete、unknown recovery待日後。也不為此加入大型admin、相簿、AI重分析、公開分享、billing或原圖永久保存。
