@@ -490,6 +490,9 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
         formData.set("mode", "demo");
       } else {
         formData.set("image", file);
+        // One ID per explicit analysis action. Transport replays of this POST
+        // must not reserve or invoke the paid provider a second time.
+        formData.set("attemptId", crypto.randomUUID());
       }
 
       const [response] = await Promise.all([

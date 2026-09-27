@@ -45,11 +45,13 @@ function imageRequest(
   name = "meal.jpg",
   type = "image/jpeg",
   headers?: HeadersInit,
+  attemptId?: string,
 ) {
   const form = new FormData();
   const blobBytes = new ArrayBuffer(bytes.byteLength);
   new Uint8Array(blobBytes).set(bytes);
   form.set("image", new File([blobBytes], name, { type }));
+  if (attemptId !== undefined) form.set("attemptId", attemptId);
   return new Request("http://localhost/api/analyze", {
     method: "POST",
     headers,
@@ -57,8 +59,8 @@ function imageRequest(
   });
 }
 
-function jpegRequest(name = "meal.jpg", type = "image/jpeg", headers?: HeadersInit) {
-  return imageRequest(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), name, type, headers);
+function jpegRequest(name = "meal.jpg", type = "image/jpeg", headers?: HeadersInit, attemptId?: string) {
+  return imageRequest(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), name, type, headers, attemptId);
 }
 
 function heifBytes(brand = "mif1"): Uint8Array {
@@ -178,7 +180,7 @@ describe("POST /api/analyze", () => {
     expect(response.status).toBe(200);
     expect(body.mode).toBe("live");
     expect(body.analysis.analysisStatus).toBe("success");
-    expect(reserveDailyLiveAnalysis).toHaveBeenCalledWith({ fixture: true }, "test-user");
+    expect(reserveDailyLiveAnalysis).toHaveBeenCalledWith({ fixture: true }, "test-user", undefined, undefined, undefined);
     expect(analyzeImage).toHaveBeenCalledWith(
       {
         data: expect.any(String),
@@ -186,6 +188,46 @@ describe("POST /api/analyze", () => {
       },
       { signal: expect.any(AbortSignal), onMetadata: expect.any(Function) },
     );
+  });
+
+  it("passes a validated attempt fingerprint and blocks a duplicate before the paid provider", async () => {
+    const id = "9cded041-a32e-4f85-8d88-ff4ec9913ac7";
+    analyzeImage.mockResolvedValue(demoFoodAnalysis);
+    expect((await POST(jpegRequest("meal.jpg", "image/jpeg", undefined, id))).status).toBe(200);
+    expect(reserveDailyLiveAnalysis).toHaveBeenCalledWith(
+      { fixture: true }, "test-user", undefined, undefined,
+      { id, imageDigest: expect.stringMatching(/^[0-9a-f]{64}$/) },
+    );
+    vi.mocked(reserveDailyLiveAnalysis).mockResolvedValueOnce({
+      allowed: false, retryAfterSeconds: 0, duplicate: "same",
+    });
+    const duplicate = await POST(jpegRequest("meal.jpg", "image/jpeg", undefined, id));
+    expect(duplicate.status).toBe(409);
+    expect((await duplicate.json()).error.code).toBe("analysis_outcome_unknown");
+    expect(analyzeImage).toHaveBeenCalledOnce();
+  });
+
+  it("normalizes an uppercase UUID before reserving an attempt", async () => {
+    const id = "9CDED041-A32E-4F85-8D88-FF4EC9913AC7";
+    analyzeImage.mockResolvedValueOnce(demoFoodAnalysis);
+    expect((await POST(jpegRequest("meal.jpg", "image/jpeg", undefined, id))).status).toBe(200);
+    expect(reserveDailyLiveAnalysis).toHaveBeenCalledWith(
+      { fixture: true }, "test-user", undefined, undefined,
+      { id: id.toLowerCase(), imageDigest: expect.stringMatching(/^[0-9a-f]{64}$/) },
+    );
+  });
+
+  it("rejects invalid attempt IDs and same IDs reused for different images", async () => {
+    const invalid = await POST(jpegRequest("meal.jpg", "image/jpeg", undefined, "not-a-uuid"));
+    expect(invalid.status).toBe(400);
+    expect(reserveDailyLiveAnalysis).not.toHaveBeenCalled();
+    vi.mocked(reserveDailyLiveAnalysis).mockResolvedValueOnce({
+      allowed: false, retryAfterSeconds: 0, duplicate: "mismatch",
+    });
+    const mismatch = await POST(jpegRequest("meal.jpg", "image/jpeg", undefined,
+      "9cded041-a32e-4f85-8d88-ff4ec9913ac7"));
+    expect(mismatch.status).toBe(400);
+    expect(analyzeImage).not.toHaveBeenCalled();
   });
 
   it("returns separate metadata only from the provider hook, with legacy providers remaining unknown", async () => {

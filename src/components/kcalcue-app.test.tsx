@@ -98,4 +98,23 @@ describe("KcalCueApp analysis cancel", () => {
     expect(screen.getByRole("button", { name: /開始分析/ })).toBeEnabled();
     expect(screen.queryByText("食物明細")).not.toBeInTheDocument();
   });
+
+  it("assigns a new attempt ID to each explicit Live analysis without an automatic retry", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>(async () => Response.json(
+      { error: { code: "service_unavailable" } }, { status: 503 },
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<KcalCueApp initialProviderMode="live" />);
+    await user.upload(document.querySelectorAll<HTMLInputElement>('input[type="file"]')[1], pngFile());
+    await user.click(screen.getByRole("button", { name: /開始分析/ }));
+    expect(await screen.findByRole("heading", { name: "AI 服務暫時有問題" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: "再試一次" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const ids = fetchMock.mock.calls.map(([, init]) => (init?.body as FormData).get("attemptId"));
+    expect(ids).toHaveLength(2);
+    expect(ids.every((id) => typeof id === "string" && /^[0-9a-f-]{36}$/i.test(id))).toBe(true);
+    expect(ids[0]).not.toBe(ids[1]);
+  });
 });
