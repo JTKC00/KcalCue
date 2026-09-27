@@ -13,6 +13,7 @@ function cloud() {
   const records = new Map<string, TestRecord>();
   const saves: TestRecord[] = [];
   let failSave = false;
+  let revision = 0;
   const offline = new WeakSet<BrowserContext>();
   async function install(context: BrowserContext) {
     const token = `${Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url")}.${Buffer.from(JSON.stringify({ sub: userId, user_id: userId, email: "tester@example.com", email_verified: true, iat: Math.floor(Date.now() / 1000), auth_time: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 3600, aud: "demo-kcalcue", iss: "https://securetoken.google.com/demo-kcalcue", firebase: { sign_in_provider: "password" } })).toString("base64url")}.test`;
@@ -82,11 +83,13 @@ function cloud() {
         return;
       }
       if (req.method() === "GET") {
-        await route.fulfill({ json: { records: [...records.values()] } });
+        await route.fulfill({ json: {
+          records: [...records.values()], revision: revision ? String(revision) : "empty",
+        } });
         return;
       }
       if (req.method() === "DELETE") {
-        records.delete(url.pathname.split("/").at(-1)!);
+        if (records.delete(url.pathname.split("/").at(-1)!)) revision++;
         await route.fulfill({ json: { ok: true } });
         return;
       }
@@ -112,17 +115,19 @@ function cloud() {
         });
         return;
       }
+      if (old?.mutationId === input.mutationId) {
+        await route.fulfill({ json: { record: old } });
+        return;
+      }
       const record = {
         ...input,
         userId,
-        version:
-          old?.mutationId === input.mutationId
-            ? old.version
-            : input.version + 1,
+        version: input.version + 1,
         updatedAt: new Date().toISOString(),
         originalItems: old?.originalItems ?? input.items,
       };
       records.set(input.id, record);
+      revision++;
       await route.fulfill({ json: { record } });
     });
   }

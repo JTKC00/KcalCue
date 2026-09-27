@@ -23,6 +23,23 @@ async function result(response: Response) {
     );
   return body;
 }
+function mealListResponse(body: unknown, since?: string): {
+  revision: string;
+  records?: MealRecord[];
+} {
+  if (!body || typeof body !== "object" ||
+      !("revision" in body) || typeof body.revision !== "string" || !body.revision)
+    throw new RepositoryError("service_unavailable", 502);
+  const records = "records" in body ? body.records : undefined;
+  // A revision-only response is valid only for the unchanged non-empty
+  // revision shortcut. Otherwise accepting it would hide new cloud meals
+  // while advancing the local cursor past them.
+  if (records === undefined
+    ? !since || since === "empty" || body.revision !== since
+    : !Array.isArray(records))
+    throw new RepositoryError("service_unavailable", 502);
+  return { revision: body.revision, records: records as MealRecord[] | undefined };
+}
 function currentUser() {
   const user = firebaseAuth()?.currentUser;
   const uid = user?.uid;
@@ -248,13 +265,13 @@ export class MealRepository {
       }
       if (uid !== firebaseAuth()?.currentUser?.uid) return;
       const since = (await changeSyncState(uid)).revision;
-      const response = await result(
+      const response = mealListResponse(await result(
         await authorizedFetch(
           `/api/meals${since ? `?since=${encodeURIComponent(since)}` : ""}`,
           { cache: "no-store" },
           uid,
         ),
-      );
+      ), since);
       await changeSyncState(uid, (state) => ({
         ...state,
         remote: response.records ?? state.remote,

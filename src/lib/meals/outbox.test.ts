@@ -65,7 +65,7 @@ describe("durable offline meal outbox", () => {
     const mutationId = crypto.randomUUID();
     const first = await repository.save(draft(), mutationId);
     fixture.fetch.mockResolvedValueOnce(Response.json({ record: first }))
-      .mockResolvedValueOnce(Response.json({ records: [first] }));
+      .mockResolvedValueOnce(Response.json({ records: [first], revision: "server" }));
     await repository.sync();
     expect((await repository.state()).jobs).toHaveLength(0);
     await expect(repository.save({ ...first, time: "19:30" }, mutationId))
@@ -84,7 +84,7 @@ describe("durable offline meal outbox", () => {
       id: mutationId, photoUpload: { uploadId, status: "pending" },
     });
     fixture.fetch.mockResolvedValueOnce(Response.json({ record: other }))
-      .mockResolvedValueOnce(Response.json({ records: [other] }));
+      .mockResolvedValueOnce(Response.json({ records: [other], revision: "server" }));
     await repository.sync();
     expect(fixture.fetch.mock.calls.filter(([, init]) => init?.method === "POST"))
       .toHaveLength(1);
@@ -93,7 +93,7 @@ describe("durable offline meal outbox", () => {
 
     await markPhotoUploadStaged("a", uploadId);
     fixture.fetch.mockResolvedValueOnce(Response.json({ record: first }))
-      .mockResolvedValueOnce(Response.json({ records: [first, other] }));
+      .mockResolvedValueOnce(Response.json({ records: [first, other], revision: "server" }));
     await new MealRepository().sync();
     expect((await repository.state()).jobs).toHaveLength(0);
     expect(await readPhotoPayload("a", uploadId)).toBeNull();
@@ -175,7 +175,7 @@ describe("durable offline meal outbox", () => {
     await expect(repository.sync()).rejects.toThrow("ACK lost");
     const cloud = { ...saved, schemaVersion: 3, createdAt: "2026-09-26T20:00:00.000Z" };
     fixture.fetch.mockResolvedValueOnce(Response.json({ record: cloud }))
-      .mockResolvedValueOnce(Response.json({ records: [cloud] }));
+      .mockResolvedValueOnce(Response.json({ records: [cloud], revision: "server" }));
     await new MealRepository().sync();
     expect(await repository.list()).toEqual([cloud]);
     const commands = fixture.fetch.mock.calls.filter(([, init]) => init?.method === "POST").map(([, init]) => JSON.parse(init.body));
@@ -327,7 +327,7 @@ describe("durable offline meal outbox", () => {
     expect((await repository.state()).jobs[0].id).toBe(mutationId);
     fixture.fetch
       .mockResolvedValueOnce(Response.json({ record: saved }))
-      .mockResolvedValueOnce(Response.json({ records: [saved] }));
+      .mockResolvedValueOnce(Response.json({ records: [saved], revision: "server" }));
     await new MealRepository().sync();
     expect((await repository.state()).jobs).toHaveLength(0);
     expect(await repository.list()).toEqual([saved]);
@@ -349,7 +349,7 @@ describe("durable offline meal outbox", () => {
     });
     expect((await repository.state()).jobs).toMatchObject([{ id: mutationId }]);
     fixture.fetch.mockResolvedValueOnce(Response.json({ record: saved }))
-      .mockResolvedValueOnce(Response.json({ records: [saved] }));
+      .mockResolvedValueOnce(Response.json({ records: [saved], revision: "server" }));
     await new MealRepository().sync();
     expect((await repository.state()).jobs).toHaveLength(0);
     expect(fixture.fetch.mock.calls.filter(([, init]) => init?.method === "POST")
@@ -372,7 +372,7 @@ describe("durable offline meal outbox", () => {
             },
           })
         : Response.json(
-            init?.method === "DELETE" ? { ok: true } : { records: [] },
+            init?.method === "DELETE" ? { ok: true } : { records: [], revision: "server" },
           ),
     );
     await Promise.all([repository.sync(), new MealRepository().sync()]);
@@ -450,7 +450,7 @@ describe("durable offline meal outbox", () => {
         Response.json({ error: { code: "conflict" } }, { status: 409 }),
       )
       .mockResolvedValueOnce(Response.json({ record: other }))
-      .mockResolvedValueOnce(Response.json({ records: [other] }));
+      .mockResolvedValueOnce(Response.json({ records: [other], revision: "server" }));
     await repository.sync();
     const state = await repository.state();
     expect(state.jobs).toHaveLength(2);
@@ -544,6 +544,48 @@ describe("durable offline meal outbox", () => {
     expect((await repository.list())[0]).toMatchObject({ schemaVersion: 5, createdAt: future.createdAt });
     expect(fixture.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
+  it("does not advance the cloud cursor after an incomplete changed-revision response", async () => {
+    const first = await repository.save(draft(), crypto.randomUUID());
+    const second = { ...first, id: crypto.randomUUID(), mutationId: crypto.randomUUID() };
+    const lastSyncedAt = "2026-09-26T12:00:00.000Z";
+    await changeSyncState("a", (state) => ({
+      ...state, remote: [first], jobs: [], revision: "r1", syncedAt: lastSyncedAt,
+    }));
+    fixture.fetch.mockResolvedValueOnce(Response.json({ revision: "r2" }))
+      .mockResolvedValueOnce(Response.json({ records: [first, second], revision: "r2" }));
+
+    await expect(repository.sync()).rejects.toMatchObject({
+      code: "service_unavailable", status: 502,
+    });
+    expect(await repository.state()).toMatchObject({
+      remote: [first], revision: "r1", syncedAt: lastSyncedAt,
+    });
+    await new MealRepository().sync();
+    expect(fixture.fetch.mock.calls.map(([url]) => url)).toEqual([
+      "/api/meals?since=r1", "/api/meals?since=r1",
+    ]);
+    expect((await repository.state()).revision).toBe("r2");
+    expect(await repository.list()).toEqual([first, second]);
+  });
+  it("rejects a meal list without a revision before marking the cloud confirmed", async () => {
+    fixture.fetch.mockResolvedValueOnce(Response.json({ records: [] }));
+    await expect(repository.sync()).rejects.toMatchObject({
+      code: "service_unavailable", status: 502,
+    });
+    expect((await repository.state()).syncedAt).toBeNull();
+    expect((await repository.state()).revision).toBeUndefined();
+  });
+  it("requires records when the cached revision is the empty sentinel", async () => {
+    await changeSyncState("a", (state) => ({
+      ...state, revision: "empty", syncedAt: "2026-09-26T12:00:00.000Z",
+    }));
+    fixture.fetch.mockResolvedValueOnce(Response.json({ revision: "empty" }));
+    await expect(repository.sync()).rejects.toMatchObject({
+      code: "service_unavailable", status: 502,
+    });
+    expect(fixture.fetch.mock.calls[0][0]).toBe("/api/meals?since=empty");
+    expect((await repository.state()).syncedAt).toBe("2026-09-26T12:00:00.000Z");
+  });
 
   it("preserves manual calories offline through reload, lost acknowledgement and retry without leaking raw input", async () => {
     const mutationId = crypto.randomUUID();
@@ -556,7 +598,7 @@ describe("durable offline meal outbox", () => {
     await expect(repository.sync()).rejects.toThrow();
     const cloud = { ...saved, schemaVersion: 2, createdAt: "2026-09-26T12:00:00.000Z" };
     fixture.fetch.mockResolvedValueOnce(Response.json({ record: cloud }))
-      .mockResolvedValueOnce(Response.json({ records: [cloud] }));
+      .mockResolvedValueOnce(Response.json({ records: [cloud], revision: "server" }));
     await new MealRepository().sync();
     expect(await repository.list()).toEqual([cloud]);
     const commands = fixture.fetch.mock.calls.filter(([, init]) => init?.method === "POST").map(([, init]) => JSON.parse(init.body));
