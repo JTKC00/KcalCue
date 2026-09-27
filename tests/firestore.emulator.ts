@@ -454,6 +454,19 @@ describe("Firebase meal API against real Firestore emulator", () => {
       });
     expect((await remove()).status).toBe(200);
     expect((await remove()).status).toBe(200);
+    const revision = (await db.doc(accountPath(uid)).get()).data()?.revision;
+    const secondMutation = crypto.randomUUID();
+    const sameVersion = await DELETE(
+      new Request(`http://localhost/api/meals/${body.id}?version=1&mutationId=${secondMutation}`, { method: "DELETE" }),
+      { params: Promise.resolve({ id: body.id }) },
+    );
+    expect(sameVersion.status).toBe(200);
+    expect((await db.doc(accountPath(uid)).get()).data()?.revision).toBe(revision);
+    const staleVersion = await DELETE(
+      new Request(`http://localhost/api/meals/${body.id}?version=0&mutationId=${crypto.randomUUID()}`, { method: "DELETE" }),
+      { params: Promise.resolve({ id: body.id }) },
+    );
+    expect(staleVersion.status).toBe(409);
     expect(
       (await mealCollection(db, uid).doc(body.id).get()).data(),
     ).not.toHaveProperty("record");
