@@ -1,0 +1,9 @@
+{
+  "projectId": "REPLACE_WITH_DEDICATED_PROJECT_ID",
+  "region": "asia-east1",
+  "firebaseApiKey": "REPLACE_WITH_PUBLIC_WEB_API_KEY",
+  "firebaseAuthDomain": "REPLACE_WITH_PROJECT_ID.firebaseapp.com",
+  "firebaseAppId": "REPLACE_WITH_WEB_APP_ID",
+  "allowedEmails": ["REPLACE_WITH_JAMES_EMAIL"],
+  "openaiSecretVersion": "1"
+}
