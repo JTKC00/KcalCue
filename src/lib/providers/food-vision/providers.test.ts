@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   responsesCreateMock,
@@ -77,6 +77,44 @@ import {
 import { FOOD_VISION_SYSTEM_INSTRUCTION } from "./prompt";
 import { createFoodVisionProvider, getFoodVisionProviderMode } from "./factory";
 
+type RasterMimeType = "image/jpeg" | "image/png" | "image/webp";
+let rasterImages: Record<RasterMimeType, string>;
+
+beforeAll(async () => {
+  const redPixel = await sharp({
+    create: { width: 1, height: 1, channels: 3, background: "red" },
+  }).png().toBuffer();
+  rasterImages = {
+    "image/jpeg": (await sharp(redPixel).jpeg().toBuffer()).toString("base64"),
+    "image/png": redPixel.toString("base64"),
+    "image/webp": (await sharp(redPixel).webp().toBuffer()).toString("base64"),
+  };
+});
+
+function rasterWithHeaderDimensions(
+  mimeType: RasterMimeType,
+  width: number,
+  height: number,
+): string {
+  const bytes = Buffer.from(rasterImages[mimeType], "base64");
+  if (mimeType === "image/png") {
+    bytes.writeUInt32BE(width, 16);
+    bytes.writeUInt32BE(height, 20);
+    bytes.writeUInt32BE(crc32(bytes.subarray(12, 29)), 29);
+  } else if (mimeType === "image/jpeg") {
+    const startOfFrame = bytes.indexOf(Buffer.from([0xff, 0xc0]));
+    expect(startOfFrame).toBeGreaterThan(0);
+    bytes.writeUInt16BE(height, startOfFrame + 5);
+    bytes.writeUInt16BE(width, startOfFrame + 7);
+  } else {
+    const frameHeader = bytes.indexOf(Buffer.from([0x9d, 0x01, 0x2a]));
+    expect(frameHeader).toBeGreaterThan(0);
+    bytes.writeUInt16LE(width, frameHeader + 3);
+    bytes.writeUInt16LE(height, frameHeader + 5);
+  }
+  return bytes.toString("base64");
+}
+
 describe("DemoFoodVisionProvider", () => {
   it("returns a validated independent copy of the deterministic demo result", async () => {
     const provider = new DemoFoodVisionProvider();
@@ -129,7 +167,7 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
     responsesCreateMock.mockResolvedValueOnce({ output_text: "{not-json" });
 
     await expect(
-      provider().analyzeImage({ data: "base64-data", mimeType: "image/webp" }),
+      provider().analyzeImage({ data: rasterImages["image/webp"], mimeType: "image/webp" }),
     ).rejects.toMatchObject({
       name: "FoodVisionError",
       code: "invalid_response",
@@ -152,7 +190,7 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
     });
 
     await expect(
-      provider().analyzeImage({ data: "base64-data", mimeType: "image/jpeg" }),
+      provider().analyzeImage({ data: rasterImages["image/jpeg"], mimeType: "image/jpeg" }),
     ).rejects.toMatchObject({
       name: "FoodVisionError",
       code: "invalid_response",
@@ -166,7 +204,7 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
     responsesCreateMock.mockResolvedValueOnce({ output_text: "" });
 
     await expect(
-      provider().analyzeImage({ data: "base64-data", mimeType: "image/png" }),
+      provider().analyzeImage({ data: rasterImages["image/png"], mimeType: "image/png" }),
     ).rejects.toMatchObject({ code: "invalid_response" });
   });
 
@@ -176,7 +214,7 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
     });
 
     await expect(
-      provider().analyzeImage({ data: "raw-base64", mimeType: "image/png" }),
+      provider().analyzeImage({ data: rasterImages["image/png"], mimeType: "image/png" }),
     ).resolves.toEqual(demoFoodAnalysis);
 
     expect(responsesCreateMock).toHaveBeenCalledWith(
@@ -190,7 +228,7 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
               { type: "input_text", text: expect.any(String) },
               {
                 type: "input_image",
-                image_url: "data:image/png;base64,raw-base64",
+                image_url: `data:image/png;base64,${rasterImages["image/png"]}`,
                 detail: "auto",
               },
             ],
@@ -235,7 +273,7 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
       const client = new RealOpenAI({ apiKey: "test-only", fetch: transport });
       responsesCreateMock.mockImplementation((body, options) => client.responses.create(body, options));
 
-      await expect(provider().analyzeImage({ data: "synthetic", mimeType: "image/jpeg" }))
+      await expect(provider().analyzeImage({ data: rasterImages["image/jpeg"], mimeType: "image/jpeg" }))
         .rejects.toMatchObject({ name: "FoodVisionError" });
       expect(responsesCreateMock).toHaveBeenCalledOnce();
       expect(transport).toHaveBeenCalledOnce();
@@ -252,7 +290,7 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
     });
 
     await expect(provider().analyzeImage(
-      { data: "base64-data", mimeType: "image/png" },
+      { data: rasterImages["image/png"], mimeType: "image/png" },
       { signal: controller.signal },
     )).rejects.toMatchObject({ code: "network_timeout" });
     expect(responsesCreateMock.mock.calls[0][1].signal.aborted).toBe(true);
@@ -262,7 +300,7 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
     const controller = new AbortController();
     controller.abort();
     await expect(provider().analyzeImage(
-      { data: "base64-data", mimeType: "image/png" },
+      { data: rasterImages["image/png"], mimeType: "image/png" },
       { signal: controller.signal },
     )).rejects.toMatchObject({ code: "network_timeout" });
     expect(responsesCreateMock).not.toHaveBeenCalled();
@@ -278,11 +316,54 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
       });
     });
     await expect(provider().analyzeImage(
-      { data: "base64-data", mimeType: "image/png" },
+      { data: rasterImages["image/png"], mimeType: "image/png" },
       { signal: new AbortController().signal },
     )).rejects.toMatchObject({ code: "network_timeout" });
     expect(timeout).toHaveBeenCalledWith(OPENAI_ABORT_TIMEOUT_MS);
   });
+
+  it.each(["image/jpeg", "image/png", "image/webp"] as const)(
+    "forwards valid %s bytes unchanged",
+    async (mimeType) => {
+      responsesCreateMock.mockResolvedValueOnce({ output_text: JSON.stringify(demoFoodAnalysis) });
+      await expect(provider().analyzeImage({ data: rasterImages[mimeType], mimeType }))
+        .resolves.toMatchObject({ analysisStatus: "success" });
+      expect(responsesCreateMock.mock.calls[0]?.[0].input[0].content[1].image_url)
+        .toBe(`data:${mimeType};base64,${rasterImages[mimeType]}`);
+    },
+  );
+
+  it.each(["image/jpeg", "image/png", "image/webp"] as const)(
+    "rejects malformed %s before calling OpenAI",
+    async (mimeType) => {
+      await expect(provider().analyzeImage({
+        data: Buffer.from("not-an-image").toString("base64"), mimeType,
+      })).rejects.toMatchObject({
+        code: "image_rejected", diagnostic: { stage: "image_prepare" },
+      });
+      expect(responsesCreateMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects a raster image whose detected format differs from its declared MIME", async () => {
+    await expect(provider().analyzeImage({
+      data: rasterImages["image/png"], mimeType: "image/jpeg",
+    })).rejects.toMatchObject({ code: "image_rejected", diagnostic: { stage: "image_prepare" } });
+    expect(responsesCreateMock).not.toHaveBeenCalled();
+  });
+
+  it.each(["image/jpeg", "image/png", "image/webp"] as const)(
+    "rejects a compressed %s header over 40M pixels before OpenAI",
+    async (mimeType) => {
+      const data = rasterWithHeaderDimensions(mimeType, 8001, 5000);
+      await expect(provider().analyzeImage({ data, mimeType })).rejects.toMatchObject({
+        code: "image_rejected",
+        cause: { message: "Input image exceeds pixel limit" },
+        diagnostic: { stage: "image_prepare" },
+      });
+      expect(responsesCreateMock).not.toHaveBeenCalled();
+    },
+  );
 
   it.each(["image/heic", "image/heif"] as const)("converts the %s branch to JPEG with a small PNG fixture", async (mimeType) => {
     responsesCreateMock.mockResolvedValueOnce({
@@ -374,7 +455,7 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
     });
 
     const analysis = await provider().analyzeImage({
-      data: "raw-base64",
+      data: rasterImages["image/jpeg"],
       mimeType: "image/jpeg",
     });
 
@@ -392,7 +473,7 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
     responsesCreateMock.mockResolvedValueOnce({ output_text: "{not-json" });
 
     const error = await provider()
-      .analyzeImage({ data: "abc", mimeType: "image/webp" })
+      .analyzeImage({ data: rasterImages["image/webp"], mimeType: "image/webp" })
       .catch((caught: unknown) => caught);
 
     expect(error).toMatchObject({
@@ -402,10 +483,11 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
         stage: "parse_json",
         model: "test-only-model",
         imageMimeType: "image/webp",
-        imageByteSize: 2,
+        imageByteSize: Buffer.from(rasterImages["image/webp"], "base64").length,
       },
     });
-    expect(JSON.stringify(error)).not.toMatch(/test-only-key|raw-base64|AIza|sk-/);
+    expect(JSON.stringify(error)).not.toMatch(/test-only-key|AIza|sk-/);
+    expect(JSON.stringify(error)).not.toContain(rasterImages["image/webp"]);
   });
 
   it("classifies OpenAI HTTP 400 invalid request as unknown and records the error code", async () => {
@@ -423,7 +505,7 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
     );
 
     const error = await provider()
-      .analyzeImage({ data: "abc", mimeType: "image/jpeg" })
+      .analyzeImage({ data: rasterImages["image/jpeg"], mimeType: "image/jpeg" })
       .catch((caught: unknown) => caught);
 
     expect(error).toMatchObject({
@@ -455,7 +537,7 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
     responsesCreateMock.mockRejectedValueOnce(new MockAPIError(status));
 
     await expect(
-      provider().analyzeImage({ data: "base64-data", mimeType: "image/jpeg" }),
+      provider().analyzeImage({ data: rasterImages["image/jpeg"], mimeType: "image/jpeg" }),
     ).rejects.toMatchObject({ name: "FoodVisionError", code });
   });
 
@@ -467,29 +549,29 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
     responsesCreateMock.mockRejectedValueOnce(new MockAPIError(400, message));
 
     await expect(
-      provider().analyzeImage({ data: "base64-data", mimeType: "image/jpeg" }),
+      provider().analyzeImage({ data: rasterImages["image/jpeg"], mimeType: "image/jpeg" }),
     ).rejects.toMatchObject({ name: "FoodVisionError", code });
   });
 
   it("maps connection and timeout failures separately from unknown failures", async () => {
     responsesCreateMock.mockRejectedValueOnce(new MockAPIConnectionTimeoutError());
     await expect(
-      provider().analyzeImage({ data: "base64-data", mimeType: "image/jpeg" }),
+      provider().analyzeImage({ data: rasterImages["image/jpeg"], mimeType: "image/jpeg" }),
     ).rejects.toMatchObject({ code: "network_timeout" });
 
     responsesCreateMock.mockRejectedValueOnce(new MockAPIUserAbortError());
     await expect(
-      provider().analyzeImage({ data: "base64-data", mimeType: "image/jpeg" }),
+      provider().analyzeImage({ data: rasterImages["image/jpeg"], mimeType: "image/jpeg" }),
     ).rejects.toMatchObject({ code: "network_timeout" });
 
     responsesCreateMock.mockRejectedValueOnce(new MockAPIConnectionError());
     await expect(
-      provider().analyzeImage({ data: "base64-data", mimeType: "image/jpeg" }),
+      provider().analyzeImage({ data: rasterImages["image/jpeg"], mimeType: "image/jpeg" }),
     ).rejects.toMatchObject({ code: "service_unavailable" });
 
     responsesCreateMock.mockRejectedValueOnce(new TypeError("network failed"));
     await expect(
-      provider().analyzeImage({ data: "base64-data", mimeType: "image/jpeg" }),
+      provider().analyzeImage({ data: rasterImages["image/jpeg"], mimeType: "image/jpeg" }),
     ).rejects.toMatchObject({ code: "unknown" });
   });
 });
