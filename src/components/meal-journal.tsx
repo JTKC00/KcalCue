@@ -51,6 +51,7 @@ type JournalNotice = string | { kind: "pending-sync"; message: string };
 
 function mealCalorieLabel(record: MealRecord) {
   const calories = mealCalories(record);
+  if (calories.coverage === "insufficient") return "整餐卡路里未知；詳情可查看已知食物估算";
   if (!calories.range) return "卡路里未知";
   if (calories.source === "user") return `手動記錄：${calories.range.min} kcal`;
   const range = roundRange(calories.range, 5);
@@ -1118,6 +1119,12 @@ export function MealJournal({
               </button>
             </label>
           )}
+          {tab === "today" && !visible.length && (
+            <div className="day-summary journal-card" aria-label="今日摘要">
+              <div><span>今日餐數</span><strong>0</strong><small>餐</small></div>
+              <div><span>卡路里</span><strong>0</strong><small>kcal</small></div>
+            </div>
+          )}
           {!visible.length && (
             <section className="journal-card empty-journal">
               <h2>{tab === "today" ? "今日未有記錄" : "未有餐點記錄"}</h2>
@@ -1144,7 +1151,7 @@ export function MealJournal({
                 <h2>{date}</h2>
                 <div className="day-summary journal-card">
                   <div>
-                    <span>卡路里</span>
+                    <span>{calorieRange && calories.partialCount + calories.unknownCount > 0 ? "已知部分卡路里" : "卡路里"}</span>
                     <strong>{calorieRange
                       ? calories.referenceCount ? `${calorieRange.min}–${calorieRange.max}` : calorieRange.min
                       : "未知"}</strong>
@@ -1173,7 +1180,7 @@ export function MealJournal({
                     );
                   })}
                   {calories.manualCount > 0 && <p>含 {calories.manualCount} 餐手動卡路里記錄；營養素仍按食物參考估算。</p>}
-                  {calories.partialCount + calories.unknownCount > 0 && <p>卡路里尚未完整：{calories.partialCount + calories.unknownCount} 餐有未計入部分，未知不代表零。</p>}
+                  {calories.partialCount + calories.unknownCount > 0 && <p>以上並非全日總數：{calories.partialCount + calories.unknownCount} 餐未完整計入，未知不代表零。</p>}
                   {nutrition.includedCount < nutrition.totalCount && (
                     <p>
                       營養素部分估算：只計入 {nutrition.includedCount}／

@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { EditableFoodItem } from "@/lib/domain/editable-meal";
 import { NutritionService } from "@/lib/nutrition/service";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
+import { mealShowsTotal } from "@/lib/nutrition/calculation";
 import type { NutrientRange } from "@/lib/nutrition/types";
 
 export const MAX_MANUAL_KCAL = 20_000;
@@ -50,7 +51,7 @@ export function resolveCalorieCorrection(
 export interface MealCalorieSummary {
   range: NutrientRange | null;
   source: "user" | "reference" | "unknown";
-  coverage: "complete" | "partial" | "none";
+  coverage: "complete" | "partial" | "insufficient" | "none";
   invalidCorrection: boolean;
 }
 
@@ -76,6 +77,9 @@ export function mealCalories(meal: CalorieMeal): MealCalorieSummary {
   const reference = new NutritionService(new LocalNutritionProvider()).calculateMeal(meal.items);
   const range = reference.totals.calories;
   if (!reference.includedCount || !Number.isFinite(range.min) || !Number.isFinite(range.max)) return unknown;
+  // A sum of one known item is not a final whole-meal estimate when coverage
+  // is below the same threshold used by the result screen.
+  if (!mealShowsTotal(reference.coverage)) return { ...unknown, coverage: "insufficient" };
   return {
     range: { ...range },
     source: "reference",
@@ -98,7 +102,7 @@ export function dayCalories(records: CalorieMeal[]) {
     if (summary.source === "user") manualCount++;
     if (summary.source === "reference") referenceCount++;
     if (summary.coverage === "partial") partialCount++;
-    if (summary.coverage === "none") unknownCount++;
+    if (summary.coverage === "none" || summary.coverage === "insufficient") unknownCount++;
     if (summary.invalidCorrection) invalidCount++;
   }
   return { range, mealCount: meals.length, manualCount, referenceCount, partialCount, unknownCount, invalidCount };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createEditableFoodItems } from "@/lib/domain/editable-meal";
+import { createEditableFoodItems, type EditableFoodItem } from "@/lib/domain/editable-meal";
 import { demoFoodAnalysis } from "@/lib/providers/food-vision/demo";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { dayNutrition, mealInputSchema, newDraft, type MealRecord } from "./types";
@@ -20,7 +20,7 @@ function unknownFood() {
     ...known.nutritionMatch, includedInTotal: false, profile: null,
   } };
 }
-function record(items = [referenceFood()]): MealRecord {
+function record(items: EditableFoodItem[] = [referenceFood()]): MealRecord {
   return { ...newDraft(), items, userId: "a", updatedAt: "2026-09-26T00:00:00.000Z", mutationId: crypto.randomUUID() };
 }
 
@@ -77,8 +77,23 @@ describe("final calories without fabricated macros", () => {
   it("distinguishes complete reference, known partial calories and wholly unknown food", () => {
     const known = record();
     expect(mealCalories(known)).toMatchObject({ range: { min: 180, max: 220 }, source: "reference", coverage: "complete" });
-    expect(mealCalories({ ...known, items: [...known.items, unknownFood()] })).toMatchObject({ range: { min: 180, max: 220 }, coverage: "partial" });
+    expect(mealCalories({ ...known, items: [...known.items, unknownFood()] })).toMatchObject({ range: null, coverage: "insufficient" });
+    expect(mealCalories({ ...known, items: [referenceFood("a"), referenceFood("b"), referenceFood("c"), unknownFood()] })).toMatchObject({
+      range: { min: 540, max: 660 }, coverage: "partial",
+    });
     expect(mealCalories({ ...known, items: [unknownFood()] })).toMatchObject({ range: null, source: "unknown", coverage: "none" });
+  });
+  it("never treats insufficient known food as final whole-meal calories or adds it to the day", () => {
+    const incomplete = record([referenceFood(), unknownFood()]);
+    const complete = record();
+    expect(mealCalories(incomplete)).toMatchObject({ range: null, source: "unknown", coverage: "insufficient" });
+    expect(dayCalories([incomplete])).toMatchObject({ range: null, mealCount: 1, unknownCount: 1 });
+    expect(dayCalories([complete, incomplete])).toMatchObject({
+      range: { min: 180, max: 220 }, mealCount: 2, referenceCount: 1, unknownCount: 1,
+    });
+    expect(mealCalories({ ...incomplete, calorieCorrection: { kcal: 650, source: "user" } })).toMatchObject({
+      range: { min: 650, max: 650 }, coverage: "complete", source: "user",
+    });
   });
   it("uses an exact user-entered integer without rounding, reference double-counting or macro changes", () => {
     const before = record();
@@ -105,7 +120,7 @@ describe("final calories without fabricated macros", () => {
       range: { min: 780, max: 820 }, mealCount: 3, manualCount: 1,
       referenceCount: 1, partialCount: 0, unknownCount: 1, invalidCount: 0,
     });
-    expect(dayCalories([{ ...known, items: [...known.items, unknownFood()] }]).partialCount).toBe(1);
+    expect(dayCalories([{ ...known, items: [referenceFood("a"), referenceFood("b"), referenceFood("c"), unknownFood()] }]).partialCount).toBe(1);
     expect(dayCalories([unknown, demo]).range).toBeNull();
     expect(dayCalories([]).range).toBeNull();
   });
