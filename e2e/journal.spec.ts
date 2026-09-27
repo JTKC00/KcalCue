@@ -975,6 +975,12 @@ test("real photo preview with mocked analysis supports correction, reload, histo
   finishAnalysis();
   await expect(page.getByText("AI 分析結果", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: /約 .*kcal/ })).toBeVisible();
+  const reviewNote = page.getByRole("note");
+  await expect(reviewNote).toContainText("AI 可能認錯或漏掉食物、估錯份量");
+  expect(await reviewNote.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    return rect.top >= 0 && rect.bottom <= innerHeight && rect.width <= innerWidth;
+  })).toBe(true);
   await page.getByRole("spinbutton", { name: "最少份量", exact: true }).fill("150");
   await page.getByRole("spinbutton", { name: "最多份量", exact: true }).fill("180");
   // PortionInput commits on blur. selectOption changes a select without moving
@@ -1002,6 +1008,7 @@ test("real photo preview with mocked analysis supports correction, reload, histo
   await page.getByRole("button", { name: "歷史", exact: true }).click();
   await expect(page.getByRole("heading", { name: "港式奶茶", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "查看／修正", exact: true }).click();
+  await expect(page.getByRole("note")).toContainText("按實際吃的內容逐項核對");
   await expect(page.getByRole("spinbutton", { name: "最少份量", exact: true })).toHaveValue("150");
   await page.getByRole("spinbutton", { name: "最多份量", exact: true }).fill("220");
   await page.getByRole("spinbutton", { name: "最多份量", exact: true }).press("Tab");

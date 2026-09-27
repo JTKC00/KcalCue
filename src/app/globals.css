@@ -1845,8 +1845,9 @@ svg {
 .metadata-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .editor-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
 .journal-editor { padding-bottom: 90px; }
-.save-bar { position: sticky; z-index: 35; bottom: calc(68px + env(safe-area-inset-bottom)); display: flex; gap: 12px; justify-content: center; padding: 14px 16px; background: #fffdf8; border-top: 1px solid #dce2d7; }
+.save-bar { position: sticky; z-index: 35; bottom: calc(68px + env(safe-area-inset-bottom)); display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; padding: 14px 16px; background: #fffdf8; border-top: 1px solid #dce2d7; }
 .save-bar button { flex: 1; max-width: 260px; }
+.save-review-note { flex-basis: 100%; margin: 0; color: #725523; font-size: 0.78rem; line-height: 1.4; text-align: center; }
 .account-form { max-width: 540px; display: grid; gap: 18px; }
 .account-form p { margin: 0; }
 .pwa-card { width: min(100% - 32px, 1000px); margin: 20px auto; }

@@ -1194,6 +1194,11 @@ export function MealJournal({
                 )}
               </section>
               <div className="save-bar">
+                {draft.mode === "live" ? (
+                  <p className="save-review-note" id="save-review-note" role="note">
+                    AI 可能認錯或漏掉食物、估錯份量；請按實際吃的內容逐項核對後再儲存。
+                  </p>
+                ) : null}
                 <button
                   className="button button-secondary"
                   disabled={busy}
@@ -1203,6 +1208,7 @@ export function MealJournal({
                 </button>
                 <button
                   className="button button-primary"
+                  aria-describedby={draft.mode === "live" ? "save-review-note" : undefined}
                   disabled={
                     busy || !draft.items.length || draft.mode === "demo"
                   }
