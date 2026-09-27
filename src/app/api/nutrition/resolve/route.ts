@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { authenticated, apiError } from "@/lib/server/auth";
 import { foodEstimateSchema } from "@/lib/domain/food-analysis";
 import { isCompositeIdentity } from "@/lib/nutrition/canonical";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
@@ -56,6 +57,7 @@ export async function POST(request: Request) {
   const matches: NutritionMatch[] = [];
   const warnings: Array<{ index: number; code: string }> = [];
   const startedAt = performance.now();
+  let remoteAuthorized = false;
 
   try {
     for (const [index, food] of parsed.data.foods.entries()) {
@@ -67,6 +69,17 @@ export async function POST(request: Request) {
       ) {
         matches.push(localMatch);
         continue;
+      }
+
+      // Local reference/demo resolution remains public. A provider-backed
+      // lookup requires the same verified trial account as Live analysis.
+      if (!remoteAuthorized) {
+        try {
+          await authenticated(request);
+          remoteAuthorized = true;
+        } catch (error) {
+          return apiError(error);
+        }
       }
 
       try {

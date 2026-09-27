@@ -5,8 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/server/env", () => ({
   getNutritionApiKey: vi.fn(() => null),
 }));
+vi.mock("@/lib/server/auth", async (original) => ({
+  ...await original<typeof import("@/lib/server/auth")>(),
+  authenticated: vi.fn(),
+}));
 
 import { getNutritionApiKey } from "@/lib/server/env";
+import { authenticated, HttpError } from "@/lib/server/auth";
 import { NUTRITION_RATE_LIMIT, clearRateLimitStore } from "@/lib/server/rate-limit";
 import { clearUsdaCache } from "@/lib/nutrition/usda";
 import { POST } from "./route";
@@ -25,6 +30,8 @@ const banana = {
 
 describe("POST /api/nutrition/resolve", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(authenticated).mockResolvedValue({} as Awaited<ReturnType<typeof authenticated>>);
     vi.mocked(getNutritionApiKey).mockReturnValue(null);
     clearRateLimitStore();
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -131,6 +138,43 @@ describe("POST /api/nutrition/resolve", () => {
     expect(body.matches[1].includedInTotal).toBe(false);
     expect(body.warnings).toEqual([{ index: 1, code: "rate_limited" }]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(authenticated).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    [401, "login_required"],
+    [403, "trial_access_required"],
+    [403, "email_unverified"],
+    [503, "cloud_unavailable"],
+  ] as const)("denies external lookup with %s %s before contacting the provider", async (status, code) => {
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    vi.mocked(authenticated).mockRejectedValue(new HttpError(status, code));
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await POST(new Request("http://localhost/api/nutrition/resolve", {
+      method: "POST",
+      body: JSON.stringify({ foods: [{ ...banana, displayName: "scallops", normalizedName: "scallops" }] }),
+    }));
+    expect(response.status).toBe(status);
+    expect(await response.json()).toEqual({ error: { code } });
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(authenticated).toHaveBeenCalledOnce();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each(["local", "composite", "no-key"])("keeps %s resolution available without remote authorization", async (mode) => {
+    vi.mocked(getNutritionApiKey).mockReturnValue(mode === "no-key" ? null : "test-only-key");
+    vi.mocked(authenticated).mockRejectedValue(new HttpError(401, "login_required"));
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const food = mode === "local" ? banana : { ...banana, displayName: "unrecognized food", normalizedName: "unrecognized food", identityLevel: mode === "composite" ? "dish" : "ingredient" };
+    const response = await POST(new Request("http://localhost/api/nutrition/resolve", {
+      method: "POST",
+      body: JSON.stringify({ foods: [food] }),
+    }));
+    expect(response.status).toBe(200);
+    expect(authenticated).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("returns 429 after the nutrition rate limit is exceeded", async () => {

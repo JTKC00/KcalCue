@@ -47,6 +47,7 @@ export const copy = {
   nutritionLabel: "營養資料",
   nutritionIncomplete: "未完整",
   nutritionUnavailable: "未有足夠資料",
+  nutritionLookupFailed: "補充營養資料暫時未能取得，這項食物仍未計入總數。你可以手動選擇有資料的食物。",
   addFood: "新增食物",
   emptyName: "未命名食物",
   deleteFood: "刪除",
