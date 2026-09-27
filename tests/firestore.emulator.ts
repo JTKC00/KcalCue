@@ -196,6 +196,35 @@ describe("Firebase meal API against real Firestore emulator", () => {
       "private photo",
     );
   });
+  it("preserves account metadata while create, edit and delete advance only the revision", async () => {
+    const account = db.doc(accountPath(uid));
+    const metadata = { preferences: { units: "metric" }, migration: { version: 2 } };
+    await account.set({ ...metadata, revision: "initial" });
+    const body = input();
+    const created = (await (await POST(request(body))).json()).record;
+    const afterCreate = (await account.get()).data()!;
+    expect(afterCreate).toMatchObject(metadata);
+    expect(afterCreate.revision).not.toBe("initial");
+
+    const edit = { ...created, mutationId: crypto.randomUUID(), time: "18:00" };
+    const edited = (await (await POST(request(edit))).json()).record;
+    const afterEdit = (await account.get()).data()!;
+    expect(afterEdit).toMatchObject(metadata);
+    expect(afterEdit.revision).not.toBe(afterCreate.revision);
+    expect((await (await POST(request(edit))).json()).record).toEqual(edited);
+    expect((await account.get()).data()?.revision).toBe(afterEdit.revision);
+
+    const url = `http://localhost/api/meals/${body.id}?version=2&mutationId=${crypto.randomUUID()}`;
+    const remove = () => DELETE(new Request(url, { method: "DELETE" }), {
+      params: Promise.resolve({ id: body.id }),
+    });
+    expect((await remove()).status).toBe(200);
+    const afterDelete = (await account.get()).data()!;
+    expect(afterDelete).toMatchObject(metadata);
+    expect(afterDelete.revision).not.toBe(afterEdit.revision);
+    expect((await remove()).status).toBe(200);
+    expect((await account.get()).data()?.revision).toBe(afterDelete.revision);
+  });
   it("preserves the original analysis and rejects a competing device's stale edit", async () => {
     const body = { ...input(), analysis: demoFoodAnalysis };
     const created = (await (await POST(request(body))).json()).record;

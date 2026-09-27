@@ -87,7 +87,7 @@ export async function commitMeal(
         }),
       ),
     );
-    tx.set(db.doc(accountPath(uid)), { revision: crypto.randomUUID() });
+    tx.set(db.doc(accountPath(uid)), { revision: crypto.randomUUID() }, { merge: true });
     return saved;
   });
 }
@@ -116,6 +116,6 @@ export async function deleteMeal(
     // Reject its record rather than tombstoning the meal without its lifecycle work.
     assertWritableMealSchema(previous?.record);
     tx.set(ref, { deleted: true, version: expected + 1, mutationId });
-    tx.set(db.doc(accountPath(uid)), { revision: crypto.randomUUID() });
+    tx.set(db.doc(accountPath(uid)), { revision: crypto.randomUUID() }, { merge: true });
   });
 }
