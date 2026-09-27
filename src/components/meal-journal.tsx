@@ -116,6 +116,7 @@ export function MealJournal({
   const [email, setEmail] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [online, setOnline] = useState(true);
+  const [today, setToday] = useState(() => localDate());
   const [records, setRecords] = useState<MealRecord[]>([]);
   const [draft, setDraft] = useState<MealDraft | null>(null);
   const [initialDraft, setInitialDraft] = useState<MealDraft | undefined>();
@@ -318,7 +319,10 @@ export function MealJournal({
       }
     };
     const foreground = () => {
-      if (document.visibilityState === "visible") connection();
+      if (document.visibilityState === "visible") {
+        setToday(localDate());
+        connection();
+      }
     };
     const signedOutElsewhere = (event: StorageEvent) => {
       if (
@@ -377,6 +381,7 @@ export function MealJournal({
       void refresh();
     };
     const syncTimer = setInterval(() => {
+      if (document.visibilityState === "visible") setToday(localDate());
       if (
         document.visibilityState === "visible" &&
         Date.now() - lastAttempt.current >=
@@ -802,7 +807,7 @@ export function MealJournal({
       (r) =>
         r.mode !== "demo" &&
         (tab === "today"
-          ? r.date === localDate()
+          ? r.date === today
           : !filter || r.date === filter),
     )
     .sort((a, b) => `${b.date}${b.time}`.localeCompare(`${a.date}${a.time}`));
@@ -1177,6 +1182,9 @@ export function MealJournal({
             <section className="journal-card empty-journal">
               <h2>{tab === "today" ? "今日未有記錄" : "未有餐點記錄"}</h2>
               <p>
+                {tab === "today" &&
+                  records.some((record) => record.mode !== "demo" && record.date < today) &&
+                  "之前的餐點可在歷史記錄查看。"}
                 拍張相，或者手動記低你的一餐。
                 {!email && "登入後可以跨裝置同步。"}
               </p>
