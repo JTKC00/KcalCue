@@ -21,6 +21,7 @@ import {
 import { elapsedMs, logSafeTiming } from "@/lib/server/timing";
 import { authenticated, apiError } from "@/lib/server/auth";
 import { acquireLiveAnalysis } from "@/lib/server/live-analysis-admission";
+import { acquirePublicBody } from "@/lib/server/public-body-admission";
 import { reserveDailyLiveAnalysis } from "@/lib/server/durable-analysis-quota";
 import {
   readBoundedRequestBody,
@@ -67,6 +68,15 @@ export async function POST(request: Request) {
       });
     }
 
+    const bodyAdmission = acquirePublicBody("analyze");
+    if (!bodyAdmission.release) {
+      const limited = rateLimitedJsonResponse(bodyAdmission.retryAfterSeconds);
+      return NextResponse.json(limited.body, {
+        status: limited.status,
+        headers: limited.headers,
+      });
+    }
+
     let formData: FormData;
     try {
       const bytes = await readBoundedRequestBody(request, MAX_MULTIPART_BYTES);
@@ -77,6 +87,8 @@ export async function POST(request: Request) {
         : error instanceof RequestBodyTimeoutError
           ? errorResponse("network_timeout", 408)
         : errorResponse("invalid_file", 400);
+    } finally {
+      bodyAdmission.release();
     }
     const forceDemo = formData.get("mode") === "demo";
     const provider = forceDemo

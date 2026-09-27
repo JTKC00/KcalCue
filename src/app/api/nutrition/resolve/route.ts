@@ -6,6 +6,7 @@ import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { supportsUsdaPortionUnit, UsdaNutritionClient, UsdaNutritionError } from "@/lib/nutrition/usda";
 import { getNutritionApiKey } from "@/lib/server/env";
 import { reserveHourlyUsdaCall } from "@/lib/server/durable-nutrition-quota";
+import { acquirePublicBody } from "@/lib/server/public-body-admission";
 import {
   NUTRITION_RATE_LIMIT,
   clientIpFromHeaders,
@@ -38,6 +39,15 @@ export async function POST(request: Request) {
     });
   }
 
+  const bodyAdmission = acquirePublicBody("nutrition");
+  if (!bodyAdmission.release) {
+    const limited = rateLimitedJsonResponse(bodyAdmission.retryAfterSeconds);
+    return NextResponse.json(limited.body, {
+      status: limited.status,
+      headers: limited.headers,
+    });
+  }
+
   let body: unknown;
   try {
     const bytes = await readBoundedRequestBody(request, 150_000);
@@ -48,6 +58,8 @@ export async function POST(request: Request) {
       { status: error instanceof RequestBodyTooLargeError ? 413
         : error instanceof RequestBodyTimeoutError ? 408 : 400 },
     );
+  } finally {
+    bodyAdmission.release();
   }
 
   const parsed = requestSchema.safeParse(body);
