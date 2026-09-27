@@ -1,5 +1,14 @@
 {
-  "indexes": [],
+  "indexes": [
+    {
+      "collectionGroup": "photoAssets",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "state", "order": "ASCENDING" },
+        { "fieldPath": "expiresAt", "order": "ASCENDING" }
+      ]
+    }
+  ],
   "fieldOverrides": [
     {
       "collectionGroup": "photoAssets",
