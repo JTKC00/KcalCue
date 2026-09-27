@@ -48,10 +48,16 @@ jobs:
           context_dir="$(mktemp -d)"
           docker cp "$probe:/context/." "$context_dir"
           for path in src/.env.local src/service-account.json src/private-meal.gif scripts/local-note.txt public/private-meal.jpg scripts/e2e-server.mjs; do
-            test ! -e "$context_dir/$path"
+            if [[ -e "$context_dir/$path" ]]; then
+              echo "::error::Unexpected build-context path: $path"
+              exit 1
+            fi
           done
           for path in src/app/page.tsx public/icon-192.png scripts/check-codecs.mjs scripts/smoke-container.mjs; do
-            test -f "$context_dir/$path"
+            if [[ ! -f "$context_dir/$path" ]]; then
+              echo "::error::Missing build-context path: $path"
+              exit 1
+            fi
           done
       - name: Build secret-free image and verify HEVC in builder and runtime
         run: >-
