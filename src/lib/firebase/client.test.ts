@@ -64,6 +64,25 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe("Firebase login methods", () => {
+  it("uses the production continue URL from any origin only for the branded KcalCue build", async () => {
+    vi.stubEnv("NEXT_PUBLIC_FIREBASE_PROJECT_ID", "gen-lang-client-0116641325");
+    vi.stubEnv("NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN", "kcalcue.snugzap.com");
+    await sendEmailLink("tester@example.com");
+    expect(mocks.send).toHaveBeenLastCalledWith(mocks.auth, "tester@example.com", {
+      url: "https://kcalcue.snugzap.com/", handleCodeInApp: true,
+    });
+    vi.stubEnv("NEXT_PUBLIC_FIREBASE_PROJECT_ID", "demo-kcalcue");
+    await sendEmailLink("tester@example.com");
+    expect(mocks.send).toHaveBeenLastCalledWith(mocks.auth, "tester@example.com", {
+      url: `${location.origin}/`, handleCodeInApp: true,
+    });
+    vi.stubEnv("NEXT_PUBLIC_FIREBASE_PROJECT_ID", "gen-lang-client-0116641325");
+    vi.stubEnv("NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN", "gen-lang-client-0116641325.firebaseapp.com");
+    await sendEmailLink("tester@example.com");
+    expect(mocks.send).toHaveBeenLastCalledWith(mocks.auth, "tester@example.com", {
+      url: `${location.origin}/`, handleCodeInApp: true,
+    });
+  });
   it("sends a same-origin Email link without placing the email in the callback URL", async () => {
     await sendEmailLink("tester@example.com");
     expect(mocks.send).toHaveBeenCalledWith(mocks.auth, "tester@example.com", {
