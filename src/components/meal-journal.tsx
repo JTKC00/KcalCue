@@ -22,6 +22,7 @@ import {
 } from "@/lib/meals/types";
 import { preparePhoto } from "@/lib/meals/photo";
 import { unitCopy } from "@/content/zh-HK";
+import { foodAnalysisSchema } from "@/lib/domain/food-analysis";
 import { roundRange } from "@/lib/nutrition/calculation";
 import { KcalCueApp } from "./kcalcue-app";
 import { PwaControls } from "./pwa-controls";
@@ -61,7 +62,10 @@ function mealCalorieLabel(record: MealRecord) {
 
 function OriginalAnalysisDetails({ record }: { record: MealRecord }) {
   if (record.mode !== "live") return null;
-  const analysis = record.analysis;
+  // Cloud records predating schema validation can contain truthy, incomplete
+  // analysis objects. Render only a complete original analysis as AI evidence.
+  const parsed = foodAnalysisSchema.safeParse(record.analysis);
+  const analysis = parsed.success ? parsed.data : null;
   return (
     <details className="meal-original-analysis">
       <summary>{analysis ? "查看原始 AI 辨識" : "原始 AI 辨識未保存"}</summary>
