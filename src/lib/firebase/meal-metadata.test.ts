@@ -18,6 +18,10 @@ vi.mock("@/lib/server/env", async (original) => ({
   ...(await original<typeof import("@/lib/server/env")>()),
   getNutritionApiKey: fixture.nutritionKey,
 }));
+vi.mock("@/lib/server/meal-lookup-attempt", () => ({
+  claimMealLookupAttempt: vi.fn().mockResolvedValue({ state: "claimed", token: "test-token" }),
+  releaseMealLookupAttempt: vi.fn().mockResolvedValue(true),
+}));
 import { assertWritableMealSchema } from "./meals";
 import { POST } from "@/app/api/meals/route";
 

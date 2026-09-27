@@ -13,6 +13,10 @@ vi.mock("@/lib/firebase/meals", async (original) => ({
   previousMeal: fixture.previous, commitMeal: fixture.commit,
 }));
 vi.mock("@/lib/server/env", () => ({ getNutritionApiKey: () => undefined }));
+vi.mock("@/lib/server/meal-lookup-attempt", () => ({
+  claimMealLookupAttempt: vi.fn().mockResolvedValue({ state: "claimed", token: "test-token" }),
+  releaseMealLookupAttempt: vi.fn().mockResolvedValue(true),
+}));
 import { POST } from "./route";
 import { HttpError } from "@/lib/server/auth";
 

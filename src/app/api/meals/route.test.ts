@@ -13,10 +13,14 @@ vi.mock("@/lib/firebase/meals", async (original) => ({
 }));
 vi.mock("@/lib/server/env", () => ({ getNutritionApiKey: vi.fn(() => null) }));
 vi.mock("@/lib/server/durable-nutrition-quota", () => ({ reserveHourlyUsdaCall: vi.fn() }));
+vi.mock("@/lib/server/meal-lookup-attempt", () => ({
+  claimMealLookupAttempt: vi.fn(), releaseMealLookupAttempt: vi.fn(),
+}));
 
 import { commitMeal, listMeals, previousMeal } from "@/lib/firebase/meals";
 import { getNutritionApiKey } from "@/lib/server/env";
 import { reserveHourlyUsdaCall } from "@/lib/server/durable-nutrition-quota";
+import { claimMealLookupAttempt, releaseMealLookupAttempt } from "@/lib/server/meal-lookup-attempt";
 import { copy } from "@/content/zh-HK";
 import type { MealRecord } from "@/lib/meals/types";
 import { HttpError } from "@/lib/server/auth";
@@ -92,6 +96,8 @@ describe("POST /api/meals bounded input", () => {
     authorize.mockReset().mockResolvedValue({ db: {}, user: { id: "qa-user" } });
     vi.mocked(getNutritionApiKey).mockReset().mockReturnValue(null);
     vi.mocked(reserveHourlyUsdaCall).mockReset().mockResolvedValue({ allowed: true, retryAfterSeconds: 0 });
+    vi.mocked(claimMealLookupAttempt).mockReset().mockResolvedValue({ state: "claimed", token: "test-token" });
+    vi.mocked(releaseMealLookupAttempt).mockReset().mockResolvedValue(true);
     vi.mocked(previousMeal).mockReset().mockResolvedValue(undefined);
     vi.mocked(commitMeal).mockReset().mockImplementation(async (_db, _userId, record) => ({
       ...record,
@@ -137,6 +143,41 @@ describe("POST /api/meals bounded input", () => {
     expect(commitMeal).toHaveBeenCalledOnce();
     expect(reserveHourlyUsdaCall).toHaveBeenCalledOnce();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps a concurrent same-mutation save retryable before any USDA request", async () => {
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    vi.mocked(claimMealLookupAttempt).mockResolvedValue({ state: "busy", retryAfterSeconds: 20 });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const liveMeal = { ...meal, mode: "live", items: [{
+      ...meal.items[0], id: "unknown", displayName: "mystery food", normalizedName: "mystery food",
+    }] };
+    const response = await POST(jsonRequest(JSON.stringify(liveMeal)));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: { code: "operation_in_progress" } });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(reserveHourlyUsdaCall).not.toHaveBeenCalled();
+    expect(commitMeal).not.toHaveBeenCalled();
+  });
+
+  it("saves a lease-expired retry with unresolved coverage and no second provider call", async () => {
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    vi.mocked(claimMealLookupAttempt).mockResolvedValue({ state: "fallback", token: "retry-token" });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const liveMeal = { ...meal, mode: "live", items: [{
+      ...meal.items[0], id: "unknown", displayName: "mystery food", normalizedName: "mystery food",
+    }] };
+    const response = await POST(jsonRequest(JSON.stringify(liveMeal)));
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.record.items[0].nutritionMatch.includedInTotal).toBe(false);
+    expect(body.record.items[0].nutritionMatch.reasons).toContain(copy.nutritionLookupFailed);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(reserveHourlyUsdaCall).not.toHaveBeenCalled();
+    expect(commitMeal).toHaveBeenCalledOnce();
+    expect(releaseMealLookupAttempt).toHaveBeenCalledOnce();
   });
 
   it.each([undefined, "8"])(

@@ -23,6 +23,10 @@ import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { provenance } from "@/test/provenance-fixture";
 import { reserveDailyLiveAnalysis } from "@/lib/server/durable-analysis-quota";
 import { reserveHourlyUsdaCall } from "@/lib/server/durable-nutrition-quota";
+import { clearUsdaCache } from "@/lib/nutrition/usda";
+import { isCompositeIdentity } from "@/lib/nutrition/canonical";
+import { getNutritionApiKey } from "@/lib/server/env";
+import { claimMealLookupAttempt, releaseMealLookupAttempt } from "@/lib/server/meal-lookup-attempt";
 
 const fixture = vi.hoisted(() => ({ auth: vi.fn() }));
 vi.mock("@/lib/server/auth", async (original) => ({
@@ -171,6 +175,185 @@ describe("durable USDA hourly quota against real Firestore emulator", () => {
     await expect(reserveHourlyUsdaCall(db, uid, nextHour, { perUser: 0, project: 1 })).rejects.toThrow("Invalid USDA quota input");
   });
 });
+
+describe("meal USDA lookup attempt lease against real Firestore emulator", () => {
+  const nowMs = Date.UTC(2026, 8, 27, 12, 0, 0);
+  const fingerprint = "a".repeat(64);
+  function claim(
+    database: typeof db,
+    fields: Partial<Parameters<typeof claimMealLookupAttempt>[1]> = {},
+  ) {
+    return claimMealLookupAttempt(database, {
+      uid,
+      mealId: "11111111-1111-4111-8111-111111111111",
+      mutationId: "22222222-2222-4222-8222-222222222222",
+      expectedVersion: 0,
+      fingerprint,
+      nowMs,
+      ...fields,
+    });
+  }
+
+  it("lets one of two server instances claim a mutation and keeps the other busy", async () => {
+    const secondApp = initializeApp({ projectId: "demo-kcalcue" }, "lookup-second-instance");
+    const secondDb = getFirestore(secondApp);
+    try {
+      const results = await Promise.all([claim(db), claim(secondDb)]);
+      expect(results.map((result) => result.state).sort()).toEqual(["busy", "claimed"]);
+      expect(results.find((result) => result.state === "busy")).toEqual({
+        state: "busy", retryAfterSeconds: 120,
+      });
+      expect((await db.doc(`kcalcueUsers/${uid}/mealLookupAttempts/11111111-1111-4111-8111-111111111111`).get()).data()).toMatchObject({
+        mutationId: "22222222-2222-4222-8222-222222222222",
+        fingerprint,
+        expectedVersion: 0,
+        state: "active",
+      });
+    } finally {
+      await secondDb.terminate();
+      await deleteApp(secondApp);
+    }
+  });
+
+  it("never grants a second remote lookup for the same mutation after expiry or release", async () => {
+    const first = await claim(db);
+    expect(first.state).toBe("claimed");
+    if (first.state !== "claimed") throw new Error("Expected first claim");
+    const expired = await claim(db, { nowMs: nowMs + 120_001 });
+    expect(expired.state).toBe("fallback");
+    if (expired.state !== "fallback") throw new Error("Expected local fallback claim");
+    expect(expired.token).not.toBe(first.token);
+    expect(await releaseMealLookupAttempt(db, {
+      uid, mealId: "11111111-1111-4111-8111-111111111111", token: first.token,
+    })).toBe(false);
+    expect((await claim(db, { nowMs: nowMs + 120_001 })).state).toBe("busy");
+    expect(await releaseMealLookupAttempt(db, {
+      uid, mealId: "11111111-1111-4111-8111-111111111111", token: expired.token,
+    })).toBe(true);
+    expect((await claim(db, { nowMs: nowMs + 120_002 })).state).toBe("fallback");
+  });
+
+  it("admits a different mutation after lease expiry only at the current meal version", async () => {
+    const first = await claim(db);
+    expect(first.state).toBe("claimed");
+    const nextMutation = "33333333-3333-4333-8333-333333333333";
+    expect((await claim(db, { mutationId: nextMutation, nowMs: nowMs + 120_001 })).state).toBe("claimed");
+    if (first.state !== "claimed") throw new Error("Expected first claim");
+    expect(await releaseMealLookupAttempt(db, {
+      uid, mealId: "11111111-1111-4111-8111-111111111111", token: first.token,
+    })).toBe(false);
+    await expect(claim(db, { mutationId: nextMutation, expectedVersion: 1, nowMs: nowMs + 240_002 })).rejects.toMatchObject({
+      status: 409, code: "conflict",
+    });
+  });
+
+  it("acknowledges committed mutation before another lookup and rejects stale or changed input", async () => {
+    const committed = await seedLegacy();
+    expect(await claim(db, {
+      mealId: committed.id,
+      mutationId: committed.mutationId,
+      expectedVersion: committed.version - 1,
+    })).toEqual({ state: "committed", record: committed });
+    await expect(claim(db, { mealId: committed.id, expectedVersion: 0 })).rejects.toMatchObject({
+      status: 409, code: "conflict",
+    });
+    await claim(db);
+    await expect(claim(db, { fingerprint: "b".repeat(64) })).rejects.toMatchObject({
+      status: 409, code: "conflict",
+    });
+    await expect(claim(db, { mutationId: "33333333-3333-4333-8333-333333333333" })).resolves.toMatchObject({
+      state: "busy",
+    });
+  });
+
+  it("isolates attempts by account and fails closed on malformed state", async () => {
+    expect((await claim(db)).state).toBe("claimed");
+    expect((await claim(db, { uid: "other-user" })).state).toBe("claimed");
+    expect((await db.doc(`kcalcueUsers/${uid}/mealLookupAttempts/11111111-1111-4111-8111-111111111111`).get()).exists).toBe(true);
+    expect((await db.doc("kcalcueUsers/other-user/mealLookupAttempts/11111111-1111-4111-8111-111111111111").get()).exists).toBe(true);
+    await expect(claim(db, { uid: "other/user" })).rejects.toMatchObject({ status: 400 });
+    const malformed = db.doc(`kcalcueUsers/${uid}/mealLookupAttempts/11111111-1111-4111-8111-111111111111`);
+    await malformed.set({ mutationId: "corrupt" });
+    await expect(claim(db)).rejects.toThrow("Invalid meal lookup attempt state");
+  });
+
+  it("rejects deleted and future-schema meals before claiming a lookup", async () => {
+    const deleted = await seedLegacy();
+    await mealCollection(db, uid).doc(deleted.id).update({ deleted: true });
+    await expect(claim(db, { mealId: deleted.id, expectedVersion: deleted.version })).rejects.toMatchObject({
+      status: 409, code: "conflict",
+    });
+    const future = await seedLegacy({ schemaVersion: 900 });
+    await expect(claim(db, { mealId: future.id, expectedVersion: future.version })).rejects.toMatchObject({
+      status: 409, code: "unsupported_schema",
+    });
+    expect((await db.collection(`kcalcueUsers/${uid}/mealLookupAttempts`).get()).size).toBe(0);
+  });
+
+  it("lets one cross-instance meal POST fetch USDA while a same-mutation retry waits", async () => {
+    const secondApp = initializeApp({ projectId: "demo-kcalcue" }, "lookup-route-second-instance");
+    const secondDb = getFirestore(secondApp);
+    vi.stubEnv("NUTRITION_API_KEY", "test-only-key");
+    clearUsdaCache();
+    let finishFetch!: (value: Response) => void;
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => { finishFetch = resolve; }));
+    vi.stubGlobal("fetch", fetchMock);
+    fixture.auth.mockImplementation(async (request: Request) => ({
+      db: request.headers.get("x-qa-instance") === "two" ? secondDb : db,
+      user: { id: uid },
+    }));
+    try {
+      const body = input();
+      body.mode = "live";
+      body.items = [{
+        id: crypto.randomUUID(), displayName: "mystery food",
+        normalizedName: "mystery food", identityLevel: "ingredient",
+        portionMin: 100, portionMax: 120,
+        originalPortionMin: 100, originalPortionMax: 120,
+        unit: "g", recognitionConfidence: 0.8, portionConfidence: 0.7,
+        uncertaintyReasons: [],
+      }];
+      expect(getNutritionApiKey()).toBe("test-only-key");
+      const localMatch = new LocalNutritionProvider().resolve(body.items[0]);
+      expect(localMatch.includedInTotal).toBe(false);
+      expect(isCompositeIdentity(localMatch.identity)).toBe(false);
+      const first = POST(request(body));
+      await Promise.race([
+        vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce()),
+        first.then((response) => { throw new Error(`First meal POST returned ${response.status} before USDA fetch`); }),
+      ]);
+      const changed = await POST(new Request("http://localhost/api/meals", {
+        method: "POST", headers: { "x-qa-instance": "two" },
+        body: JSON.stringify({
+          ...body, mode: "manual", items: [{
+            ...body.items[0], displayName: "banana", normalizedName: "banana",
+          }],
+        }),
+      }));
+      expect(changed.status).toBe(409);
+      expect(await changed.json()).toEqual({ error: { code: "conflict" } });
+      const second = await POST(new Request("http://localhost/api/meals", {
+        method: "POST", headers: { "x-qa-instance": "two" }, body: JSON.stringify(body),
+      }));
+      expect(second.status).toBe(503);
+      expect(await second.json()).toEqual({ error: { code: "operation_in_progress" } });
+      finishFetch(Response.json({ foods: [] }));
+      const saved = await first;
+      expect(saved.status).toBe(200);
+      expect((await saved.json()).record.items[0].nutritionMatch.includedInTotal).toBe(false);
+      expect((await POST(request(body))).status).toBe(200);
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect((await db.collection("kcalcueUsdaUsage").get()).docs[0]?.data().count).toBe(1);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+      clearUsdaCache();
+      await secondDb.terminate();
+      await deleteApp(secondApp);
+    }
+  });
+});
+
 afterAll(async () => {
   await db.terminate();
   await deleteApp(app);

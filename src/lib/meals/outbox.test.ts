@@ -198,6 +198,23 @@ describe("durable offline meal outbox", () => {
       [mutationId, mutationId],
     );
   });
+  it("retains an in-progress meal attempt for automatic retry with the same mutation", async () => {
+    const mutationId = crypto.randomUUID();
+    const saved = await repository.save(draft(), mutationId);
+    fixture.fetch.mockResolvedValueOnce(Response.json(
+      { error: { code: "operation_in_progress" } }, { status: 503 },
+    ));
+    await expect(repository.sync()).rejects.toMatchObject({
+      code: "operation_in_progress", status: 503,
+    });
+    expect((await repository.state()).jobs).toMatchObject([{ id: mutationId }]);
+    fixture.fetch.mockResolvedValueOnce(Response.json({ record: saved }))
+      .mockResolvedValueOnce(Response.json({ records: [saved] }));
+    await new MealRepository().sync();
+    expect((await repository.state()).jobs).toHaveLength(0);
+    expect(fixture.fetch.mock.calls.filter(([, init]) => init?.method === "POST")
+      .map(([, init]) => JSON.parse(init.body).mutationId)).toEqual([mutationId, mutationId]);
+  });
   it("queues edits and deletion in order while a concurrent tab syncs", async () => {
     const first = await repository.save(draft(), crypto.randomUUID());
     const second = await repository.save(

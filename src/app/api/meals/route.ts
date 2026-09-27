@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { authenticated, apiError, HttpError } from "@/lib/server/auth";
 import { mealInputSchema, type MealRecord } from "@/lib/meals/types";
 import { readAnalysisProvenance } from "@/lib/domain/analysis-provenance";
@@ -12,9 +13,11 @@ import {
 import { accountPath } from "@/lib/firebase/admin";
 import { createEditableFoodItems } from "@/lib/domain/editable-meal";
 import { canReuseNutritionMatchForNameEdit } from "@/lib/nutrition/client";
+import { isCompositeIdentity } from "@/lib/nutrition/canonical";
 import { UsdaNutritionClient } from "@/lib/nutrition/usda";
 import { getNutritionApiKey } from "@/lib/server/env";
 import { reserveHourlyUsdaCall } from "@/lib/server/durable-nutrition-quota";
+import { claimMealLookupAttempt, releaseMealLookupAttempt } from "@/lib/server/meal-lookup-attempt";
 import { copy } from "@/content/zh-HK";
 import {
   readBoundedRequestBody,
@@ -83,15 +86,41 @@ export async function POST(request: Request) {
     const key = getNutritionApiKey();
     const usda = key ? new UsdaNutritionClient(key, async () =>
       (await reserveHourlyUsdaCall(db, user.id)).allowed) : null;
-    const items = await Promise.all(
-      input.items.map(async (item) => {
-        const old = previous?.items.find((food) => food.id === item.id);
-        let match =
-          old &&
-          canReuseNutritionMatchForNameEdit(old, item, old.nutritionMatch)
-            ? old.nutritionMatch!
-            : local.resolve(item);
-        if (!match.includedInTotal && usda && input.mode === "live") {
+    const initialItems = input.items.map((item) => {
+      const old = previous?.items.find((food) => food.id === item.id);
+      const match =
+        old &&
+        canReuseNutritionMatchForNameEdit(old, item, old.nutritionMatch)
+          ? old.nutritionMatch!
+          : local.resolve(item);
+      return { ...item, nutritionMatch: match };
+    });
+    const needsRemote = (item: typeof initialItems[number]) =>
+      !item.nutritionMatch.includedInTotal &&
+      !isCompositeIdentity(item.nutritionMatch.identity);
+    // All writes participate in this claim. Otherwise a changed local/manual
+    // payload with the same mutation ID could race a Live lookup and commit
+    // first, causing the eventual Live request to acknowledge the wrong body.
+    const attempt = await claimMealLookupAttempt(db, {
+      uid: user.id,
+      mealId: input.id,
+      mutationId: input.mutationId,
+      expectedVersion: input.version,
+      fingerprint: createHash("sha256").update(JSON.stringify(input)).digest("hex"),
+    });
+    if (attempt.state === "committed")
+      return Response.json(
+        { record: attempt.record },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    if (attempt.state === "busy")
+      throw new HttpError(503, "operation_in_progress");
+    const attemptToken = attempt.token;
+    const allowRemote = attempt.state === "claimed";
+    try {
+      const items = await Promise.all(initialItems.map(async (item) => {
+        let match = item.nutritionMatch;
+        if (needsRemote(item) && usda && input.mode === "live" && allowRemote) {
           try {
             const remote = await usda.resolve(item);
             if (remote.includedInTotal) match = remote;
@@ -104,36 +133,48 @@ export async function POST(request: Request) {
                 ...match.reasons.filter((reason) => reason !== copy.nutritionLookupFailed)],
             };
           }
+        } else if (needsRemote(item) && usda && input.mode === "live" && !allowRemote) {
+          match = {
+            ...match,
+            reasons: [copy.nutritionLookupFailed,
+              ...match.reasons.filter((reason) => reason !== copy.nutritionLookupFailed)],
+          };
         }
         return { ...item, nutritionMatch: match };
-      }),
-    );
-    const analysis = previous ? previous.analysis : input.analysis;
-    const originalItems =
-      previous?.originalItems ??
-      (analysis
-        ? createEditableFoodItems(
-            analysis.foods,
-            analysis.foods.map((food) => local.resolve(food)),
-          )
-        : items);
-    const record: Omit<MealRecord, "updatedAt"> = {
-      ...input,
-      calorieCorrection: resolveCalorieCorrection(input.calorieCorrection, input.items, previous),
-      items,
-      analysis,
-      analysisProvenance: previous
-        ? previous.analysisProvenance ?? null
-        : analysis ? readAnalysisProvenance(input.analysisProvenance, input.mode) : null,
-      originalItems,
-      userId: user.id,
-      version: input.version + 1,
-    };
-    const saved = await commitMeal(db, user.id, record, input.version);
-    return Response.json(
-      { record: saved },
-      { headers: { "Cache-Control": "no-store" } },
-    );
+      }));
+      const analysis = previous ? previous.analysis : input.analysis;
+      const originalItems =
+        previous?.originalItems ??
+        (analysis
+          ? createEditableFoodItems(
+              analysis.foods,
+              analysis.foods.map((food) => local.resolve(food)),
+            )
+          : items);
+      const record: Omit<MealRecord, "updatedAt"> = {
+        ...input,
+        calorieCorrection: resolveCalorieCorrection(input.calorieCorrection, input.items, previous),
+        items,
+        analysis,
+        analysisProvenance: previous
+          ? previous.analysisProvenance ?? null
+          : analysis ? readAnalysisProvenance(input.analysisProvenance, input.mode) : null,
+        originalItems,
+        userId: user.id,
+        version: input.version + 1,
+      };
+      const saved = await commitMeal(db, user.id, record, input.version);
+      return Response.json(
+        { record: saved },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    } finally {
+      // The meal write remains authoritative even when best-effort lease
+      // cleanup is unavailable. A committed retry is acknowledged by ID.
+      await releaseMealLookupAttempt(db, {
+        uid: user.id, mealId: input.id, token: attemptToken,
+      }).catch(() => {});
+    }
   } catch (error) {
     return apiError(error);
   }

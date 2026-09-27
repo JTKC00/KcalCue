@@ -25,6 +25,10 @@ vi.mock("@/lib/firebase/meals", async (original) => ({
   commitMeal: mocks.commitMeal,
 }));
 vi.mock("@/lib/server/env", () => ({ getNutritionApiKey: () => null }));
+vi.mock("@/lib/server/meal-lookup-attempt", () => ({
+  claimMealLookupAttempt: vi.fn().mockResolvedValue({ state: "claimed", token: "test-token" }),
+  releaseMealLookupAttempt: vi.fn().mockResolvedValue(true),
+}));
 vi.mock("@/lib/nutrition/client", async (original) => ({
   ...await original<typeof import("@/lib/nutrition/client")>(),
   resolveNutritionMatchWithFallback: vi.fn((_food, local) => new Promise((resolve) => {
