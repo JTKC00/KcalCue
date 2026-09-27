@@ -485,7 +485,7 @@ describe("Firebase meal API against real Firestore emulator", () => {
       (await mealCollection(db, uid).doc(body.id).get()).data()?.record.time,
     ).toBe(body.time);
   });
-  it("returns only a revision when meals have not changed, and invalidates it on a write", async () => {
+  it("checks meals when revision is absent, then short-circuits unchanged known revisions", async () => {
     const initial = await (
       await GET(new Request("http://localhost/api/meals"))
     ).json();
@@ -494,7 +494,8 @@ describe("Firebase meal API against real Firestore emulator", () => {
         new Request(`http://localhost/api/meals?since=${initial.revision}`),
       )
     ).json();
-    expect(unchanged).not.toHaveProperty("records");
+    expect(initial).toEqual({ records: [], revision: "empty" });
+    expect(unchanged).toEqual({ records: [], revision: "empty" });
     await POST(request(input()));
     const changed = await (
       await GET(
@@ -503,6 +504,12 @@ describe("Firebase meal API against real Firestore emulator", () => {
     ).json();
     expect(changed.records).toHaveLength(1);
     expect(changed.revision).not.toBe(initial.revision);
+    const knownUnchanged = await (
+      await GET(
+        new Request(`http://localhost/api/meals?since=${changed.revision}`),
+      )
+    ).json();
+    expect(knownUnchanged).toEqual({ revision: changed.revision });
   });
   it("denies direct Firestore reads and writes even to a signed-in client", async () => {
     const client = clientApp(

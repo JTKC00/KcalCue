@@ -13,9 +13,10 @@ vi.mock("@/lib/firebase/meals", async (original) => ({
 }));
 vi.mock("@/lib/server/env", () => ({ getNutritionApiKey: () => null }));
 
-import { commitMeal, previousMeal } from "@/lib/firebase/meals";
+import { commitMeal, listMeals, previousMeal } from "@/lib/firebase/meals";
+import type { MealRecord } from "@/lib/meals/types";
 import { HttpError } from "@/lib/server/auth";
-import { POST } from "./route";
+import { GET, POST } from "./route";
 
 const meal = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -51,6 +52,36 @@ function jsonRequest(body: string) {
     body,
   });
 }
+
+describe("GET /api/meals revision reads", () => {
+  beforeEach(() => {
+    authorize.mockReset();
+    vi.mocked(listMeals).mockReset().mockResolvedValue([meal as unknown as MealRecord]);
+  });
+
+  it("returns existing meals when the account revision document is absent", async () => {
+    const get = vi.fn().mockResolvedValue({ data: () => undefined });
+    authorize.mockResolvedValue({ db: { doc: () => ({ get }) }, user: { id: "qa-user" } });
+
+    const response = await GET(new Request("http://localhost/api/meals?since=empty"));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ records: [meal], revision: "empty" });
+    expect(listMeals).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the unchanged-revision shortcut when a revision exists", async () => {
+    const get = vi.fn().mockResolvedValue({ data: () => ({ revision: "rev-1" }) });
+    authorize.mockResolvedValue({ db: { doc: () => ({ get }) }, user: { id: "qa-user" } });
+
+    const response = await GET(new Request("http://localhost/api/meals?since=rev-1"));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ revision: "rev-1" });
+    expect(listMeals).not.toHaveBeenCalled();
+  });
+});
 
 describe("POST /api/meals bounded input", () => {
   beforeEach(() => {
