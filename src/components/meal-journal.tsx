@@ -21,6 +21,7 @@ import {
   type MealRecord,
 } from "@/lib/meals/types";
 import { preparePhoto } from "@/lib/meals/photo";
+import { unitCopy } from "@/content/zh-HK";
 import { roundRange } from "@/lib/nutrition/calculation";
 import { KcalCueApp } from "./kcalcue-app";
 import { PwaControls } from "./pwa-controls";
@@ -56,6 +57,42 @@ function mealCalorieLabel(record: MealRecord) {
   if (calories.source === "user") return `手動記錄：${calories.range.min} kcal`;
   const range = roundRange(calories.range, 5);
   return `${calories.coverage === "complete" ? "估算" : "已知部分"}：約 ${range.min}–${range.max} kcal`;
+}
+
+function OriginalAnalysisDetails({ record }: { record: MealRecord }) {
+  if (record.mode !== "live") return null;
+  const analysis = record.analysis;
+  return (
+    <details className="meal-original-analysis">
+      <summary>{analysis ? "查看原始 AI 辨識" : "原始 AI 辨識未保存"}</summary>
+      {analysis ? (
+        <div>
+          <p>拍照時的辨識結果，不會取代目前記錄。卡路里另按食物參考資料估算，或採用你的手動修正。</p>
+          {analysis.foods.length ? (
+            <ul>
+              {analysis.foods.map((food, index) => (
+                <li key={index}>
+                  {food.displayName}：約 {food.portionMin}–{food.portionMax} {unitCopy[food.unit]}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>當時未能可靠辨認相片中的食物。</p>
+          )}
+          {analysis.uncertaintyReasons.length > 0 && (
+            <div>
+              <strong>當時未能確認</strong>
+              <ul>
+                {analysis.uncertaintyReasons.map((reason, index) => <li key={index}>{reason}</li>)}
+              </ul>
+            </div>
+          )}
+        </div>
+      ) : (
+        <p>這筆舊紀錄沒有可核實的原始 AI 分析；目前記錄仍可查看及修正。</p>
+      )}
+    </details>
+  );
 }
 
 export function MealJournal({
@@ -1191,12 +1228,14 @@ export function MealJournal({
                         <p>
                           {record.time} · {mealTypes[record.mealType]}
                         </p>
+                        {tab === "history" && <p className="meal-current-note">目前記錄</p>}
                         <h3>
                           {record.items
                             .map((item) => item.displayName)
                             .join("、")}
                         </h3>
                         <p className="meal-calories">{mealCalorieLabel(record)}</p>
+                        {tab === "history" && <OriginalAnalysisDetails record={record} />}
                         <div className="journal-actions">
                           <button
                             className="button button-secondary"

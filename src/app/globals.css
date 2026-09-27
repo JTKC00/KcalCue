@@ -1813,6 +1813,13 @@ svg {
 .meal-row > div { min-width: 0; }
 .meal-row h3 { overflow-wrap: anywhere; margin: 8px 0 14px; }
 .meal-row .meal-calories { margin: 0 0 16px; font-weight: 700; color: #244d38; }
+.meal-row .meal-current-note { margin: 8px 0 0; }
+.meal-original-analysis { margin-bottom: 16px; border: 1px solid #dce2d7; border-radius: 10px; background: #f5f8f2; }
+.meal-original-analysis summary { min-height: 44px; padding: 11px 14px; color: #244d38; font-weight: 700; cursor: pointer; }
+.meal-original-analysis > div, .meal-original-analysis > p { padding: 0 14px 14px; }
+.meal-original-analysis p, .meal-original-analysis ul { margin: 0 0 10px; }
+.meal-original-analysis ul { padding-left: 20px; }
+.meal-original-analysis li { line-height: 1.6; overflow-wrap: anywhere; }
 .calorie-control { margin: 18px auto; width: min(100% - 32px, 1000px); }
 .calorie-control label { max-width: 360px; }
 .calorie-control input { width: 100%; }
