@@ -5,7 +5,7 @@ This slice packages the existing Next.js app for a secret-free, synthetic Cloud 
 ## Build boundary
 
 - The build stage copies only the dependency manifests, Next/TypeScript configuration, `src`, `public`, and the two codec/container smoke scripts. It does not use `COPY . .`.
-- `.dockerignore` excludes environment files, build/test output, and JPEG, PNG, WebP, HEIC, and HEIF images outside `public`. `.gcloudignore` is stricter: it allows only the Dockerfile's build inputs plus the Cloud Build config, then excludes image formats within `src`. A local `gcloud meta list-files-for-upload` check confirmed a synthetic root CSV and `src` meal JPG were omitted while source, Cloud Build config and public PWA icons remained. The `public` exception is for deliberate public assets; do not place private meal photos there.
+- Both ignore files use an explicit build-input allowlist. `src` admits only TypeScript/TSX/CSS files; `public` admits only the four committed PWA icons; `scripts` admits only the codec and smoke scripts. `.gcloudignore` also admits the Cloud Build config. A local `gcloud meta list-files-for-upload` probe confirmed all current source and required build files are included, while synthetic nested `.env`, key JSON, GIF/JPG, root CSV, extra script and public JPG are excluded. Container CI separately injects synthetic private files and probes the actual Docker context before the full build. New source extensions or public assets require an explicit allowlist update. Never put private meal data in source files.
 - Public Firebase Web config is passed as build arguments. Admin credentials, OpenAI keys, and real QA photos are never build inputs.
 
 ## Validation
