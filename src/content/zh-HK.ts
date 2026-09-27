@@ -67,6 +67,7 @@ export const unitCopy = {
 } as const;
 
 export const errorCopy: Record<string, { title: string; body: string }> = {
+  analysis_paused: { title: "AI 分析暫停中", body: "目前暫停新的圖片分析。你仍可手動記餐、修正及同步已有記錄。" },
   login_required: { title: "請先登入", body: "到帳戶使用 Email 登入連結或 Google 登入後，再試一次。相片仍保留於目前頁面。" },
   trial_access_required: { title: "尚未開通試用權限", body: "請聯絡管理員為這個 Email 開通試用權限，再試一次。" },
   email_unverified: { title: "請驗證 Email", body: "請使用 Email 登入連結或已驗證的 Google 帳戶重新登入。" },

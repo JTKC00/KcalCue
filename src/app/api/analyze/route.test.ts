@@ -68,6 +68,24 @@ describe("POST /api/analyze", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("pauses paid analysis while preserving demo and account authorization", async () => {
+    vi.stubEnv("KCALCUE_ANALYSIS_ENABLED", "false");
+    const { HttpError } = await import("@/lib/server/auth");
+    authorize.mockRejectedValueOnce(new HttpError(401, "login_required"));
+    const unauthenticated = await POST(jpegRequest());
+    expect(unauthenticated.status).toBe(401);
+    expect((await unauthenticated.json()).error.code).toBe("login_required");
+    const response = await POST(jpegRequest());
+    expect(response.status).toBe(503);
+    expect((await response.json()).error.code).toBe("analysis_paused");
+    expect(authorize).toHaveBeenCalledTimes(2);
+    expect(analyzeImage).not.toHaveBeenCalled();
+    const form = new FormData(); form.set("mode", "demo");
+    const demo = await POST(new Request("http://localhost/api/analyze", { method: "POST", body: form }));
+    expect(demo.status).toBe(200);
   });
 
   it("runs demo mode without requiring or reading an image", async () => {

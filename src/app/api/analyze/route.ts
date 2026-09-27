@@ -70,6 +70,9 @@ export async function POST(request: Request) {
 
     if (provider.mode === "live") {
       try { await authenticated(request); } catch (error) { return apiError(error); }
+      if (process.env.KCALCUE_ANALYSIS_ENABLED === "false") {
+        return errorResponse("analysis_paused", 503);
+      }
     }
 
     if (provider.mode === "demo") {
