@@ -1055,6 +1055,12 @@ export function MealJournal({
                   onExit={() => {
                     void discard();
                   }}
+                  onNewMeal={() => {
+                    if (busyRef.current ||
+                        !confirm("放棄這份草稿並開啟另一餐？已儲存的記錄不會改變。"))
+                      return;
+                    openDraft(newDraft());
+                  }}
                 />
               </fieldset>
               <section className="journal-card journal-actions">

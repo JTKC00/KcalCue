@@ -372,6 +372,38 @@ test("correcting an AI dish to banana survives cloud save, reload and history ed
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
 });
 
+test("another meal from History starts a fresh draft without changing the saved meal", async ({ page, context }) => {
+  const backend = cloud();
+  await backend.install(context);
+  await page.goto("/");
+  await login(page);
+  await rice(page);
+  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  await expect.poll(() => backend.records.size).toBe(1);
+  const original = [...backend.records.values()][0];
+
+  await page.getByRole("button", { name: "歷史", exact: true }).click();
+  await page.getByRole("button", { name: "查看／修正", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "修正餐點", exact: true })).toBeVisible();
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await page.getByRole("button", { name: "分析另一餐", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "修正餐點", exact: true })).toBeVisible();
+  expect(backend.records.size).toBe(1);
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "分析另一餐", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "新餐點草稿", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "手動加入食物", exact: true }).click();
+  await page.getByRole("combobox", { name: "食物名稱", exact: true }).fill("香蕉");
+  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  await expect.poll(() => backend.records.size).toBe(2);
+  expect(backend.records.get(original.id)).toEqual(original);
+  await page.reload();
+  await page.getByRole("button", { name: "歷史", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "白飯", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "香蕉", exact: true })).toBeVisible();
+});
+
 test("Email link login restores a guest draft and automatically retries a failed save", async ({
   page,
   context,

@@ -68,6 +68,7 @@ interface KcalCueAppProps {
   calorieCorrection?: MealDraft["calorieCorrection"];
   onDraftChange?: (change: Pick<MealDraft, "items" | "analysis" | "analysisProvenance" | "mode">, file: File | null) => void;
   onExit?: () => void;
+  onNewMeal?: () => void;
   manual?: boolean;
   onPhotoSelected?: (file: File | null) => void;
 }
@@ -352,7 +353,7 @@ function SiteFooter() {
   );
 }
 
-export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrection, onDraftChange, onExit, manual, onPhotoSelected }: KcalCueAppProps) {
+export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrection, onDraftChange, onExit, onNewMeal, manual, onPhotoSelected }: KcalCueAppProps) {
   const [stage, setStage] = useState<AppStage>(initialDraft?.items.length || manual ? "result" : "input");
   const [file, setFile] = useState<File | null>(() => initialDraft?.photo && !initialDraft.items.length ? new File([initialDraft.photo], "餐點.jpg", { type: "image/jpeg" }) : null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -771,7 +772,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
           onPreset={handlePreset}
           onDelete={(id) => setItems((current) => current.filter((item) => item.id !== id))}
           onAdd={() => setItems((current) => [...current, createManualItem()])}
-          onReset={reset}
+          onReset={onNewMeal ?? reset}
         />
       ) : null}
 
