@@ -157,6 +157,7 @@ export function readPhotoQuota(data: FirebaseFirestore.DocumentData | undefined)
 function storedAsset(data: FirebaseFirestore.DocumentData | undefined): PhotoAsset {
   if (!data || !["uploading", "staged", "attached", "deleting", "deleted"].includes(data.state) ||
       !isValidPhotoBucketName(data.bucketName) ||
+      data.reservedBytes !== MAX_PHOTO_JPEG_BYTES ||
       !(data.expiresAt instanceof Timestamp) || !(data.createdAt instanceof Timestamp))
     throw new HttpError(503, "photo_registry_corrupt");
   return data as PhotoAsset;
@@ -304,8 +305,12 @@ export async function finalizePhotoAsset(
       // upload enablement requires a bounded in-flight lease and reconciler.
       const user = readPhotoQuota(userSnap.data());
       const project = readPhotoQuota(projectSnap.data());
-      tx.set(refs.user, { ...user, reservedBytes: user.reservedBytes + asset.reservedBytes });
-      tx.set(refs.project, { ...project, reservedBytes: project.reservedBytes + asset.reservedBytes });
+      const userReserved = user.reservedBytes + asset.reservedBytes;
+      const projectReserved = project.reservedBytes + asset.reservedBytes;
+      if (!Number.isSafeInteger(userReserved) || !Number.isSafeInteger(projectReserved))
+        throw new HttpError(503, "photo_quota_corrupt");
+      tx.set(refs.user, { ...user, reservedBytes: userReserved });
+      tx.set(refs.project, { ...project, reservedBytes: projectReserved });
     }
     return saved;
   });
