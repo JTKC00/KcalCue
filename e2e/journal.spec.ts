@@ -11,8 +11,12 @@ type TestRecord = {
 };
 function cloud() {
   const records = new Map<string, TestRecord>();
+  const tombstones = new Map<string, { version: number; mutationId: string }>();
   const saves: TestRecord[] = [];
   let failSave = false;
+  let failAfterCommittedSave = false;
+  let committedSaveAckGate: Promise<void> | null = null;
+  let releaseCommittedSaveAck: (() => void) | null = null;
   let failMealRead = false;
   const offline = new WeakSet<BrowserContext>();
   async function install(context: BrowserContext) {
@@ -94,7 +98,20 @@ function cloud() {
         return;
       }
       if (req.method() === "DELETE") {
-        records.delete(url.pathname.split("/").at(-1)!);
+        const id = url.pathname.split("/").at(-1)!;
+        const version = Number(url.searchParams.get("version"));
+        const mutationId = url.searchParams.get("mutationId")!;
+        const previous = records.get(id);
+        const tombstone = tombstones.get(id);
+        if (tombstone) {
+          if (tombstone.mutationId !== mutationId && tombstone.version !== version + 1)
+            return route.fulfill({ status: 409, json: { error: { code: "conflict" } } });
+        } else if ((previous?.version ?? 0) !== version) {
+          return route.fulfill({ status: 409, json: { error: { code: "conflict" } } });
+        } else {
+          records.delete(id);
+          tombstones.set(id, { version: version + 1, mutationId });
+        }
         await route.fulfill({ json: { ok: true } });
         return;
       }
@@ -109,28 +126,35 @@ function cloud() {
         return;
       }
       const old = records.get(input.id);
-      if (
-        old &&
-        old.version !== input.version &&
-        old.mutationId !== input.mutationId
-      ) {
-        await route.fulfill({
-          status: 409,
-          json: { error: { code: "conflict" } },
-        });
+      if (tombstones.has(input.id)) {
+        await route.fulfill({ status: 409, json: { error: { code: "conflict" } } });
+        return;
+      }
+      if (old?.mutationId === input.mutationId) {
+        if (committedSaveAckGate) await committedSaveAckGate;
+        await route.fulfill({ json: { record: old } });
+        return;
+      }
+      if ((old?.version ?? 0) !== input.version) {
+        await route.fulfill({ status: 409, json: { error: { code: "conflict" } } });
         return;
       }
       const record = {
         ...input,
         userId,
-        version:
-          old?.mutationId === input.mutationId
-            ? old.version
-            : input.version + 1,
+        version: input.version + 1,
         updatedAt: new Date().toISOString(),
         originalItems: old?.originalItems ?? input.items,
       };
       records.set(input.id, record);
+      if (failAfterCommittedSave) {
+        failAfterCommittedSave = false;
+        committedSaveAckGate = new Promise<void>((resolve) => {
+          releaseCommittedSaveAck = resolve;
+        });
+        await route.fulfill({ status: 503, json: { error: { code: "save_failed" } } });
+        return;
+      }
       await route.fulfill({ json: { record } });
     });
   }
@@ -145,6 +169,12 @@ function cloud() {
     },
     failNextSave: () => {
       failSave = true;
+    },
+    failAfterNextCommittedSave: () => { failAfterCommittedSave = true; },
+    allowCommittedSaveAck: () => {
+      releaseCommittedSaveAck?.();
+      releaseCommittedSaveAck = null;
+      committedSaveAckGate = null;
     },
     failMealReads: (value: boolean) => { failMealRead = value; },
   };
@@ -576,6 +606,38 @@ test("Email link login restores a guest draft and automatically retries a failed
   ).toBe(false);
 });
 
+test("a committed save with a lost response replays one mutation after reload", async ({ page, context }) => {
+  const backend = cloud();
+  await backend.install(context);
+  await page.goto("/");
+  await login(page);
+  await rice(page);
+  await page.getByRole("button", { name: "自行填寫本餐卡路里", exact: true }).click();
+  await page.getByRole("spinbutton", { name: "手動卡路里（整餐 kcal）", exact: true }).fill("650");
+  backend.failAfterNextCommittedSave();
+  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  await expect.poll(() => backend.records.size).toBe(1);
+  await expect(page.getByText(/1 項修改待同步/)).toBeVisible();
+  await page.reload();
+  await expect(page.getByText(/1 項修改待同步/)).toBeVisible();
+
+  await expect.poll(() => backend.saves.length).toBeGreaterThanOrEqual(2);
+  backend.allowCommittedSaveAck();
+  await expect(page.getByText(/項修改待同步/)).not.toBeVisible();
+  expect(backend.saves.length).toBeGreaterThanOrEqual(2);
+  expect(new Set(backend.saves.map((save) => save.mutationId)).size).toBe(1);
+  expect(backend.records.size).toBe(1);
+  const summary = page.locator('.day-summary[aria-label="今日摘要"]');
+  await expect(summary).toContainText("今日餐數1餐");
+  await expect(page.locator(".day-summary > div").filter({ hasText: "卡路里" }).locator("strong"))
+    .toHaveText("650");
+  await expect(page.locator(".meal-row")).toHaveCount(1);
+  await page.getByRole("button", { name: "歷史", exact: true }).click();
+  await expect(page.locator(".meal-row")).toHaveCount(1);
+  await page.reload();
+  await expect(page.locator(".meal-row")).toHaveCount(1);
+});
+
 test("offline creation, edit and deletion survive reload and synchronize on reconnection", async ({
   page,
   context,
@@ -674,6 +736,47 @@ test("cross-device conflict preserves the offline edit for recovery", async ({
     second.getByRole("spinbutton", { name: "最多份量", exact: true }),
   ).toHaveValue("300");
   expect([...backend.records.values()][0].version).toBe(2);
+  await Promise.all(contexts.map((context) => context.close()));
+});
+
+test("a stale offline delete cannot erase another device's newer meal", async ({ browser }) => {
+  const backend = cloud();
+  const contexts = await Promise.all([browser.newContext(), browser.newContext()]);
+  const pages = await Promise.all(contexts.map(async (context) => {
+    await backend.install(context);
+    const page = await context.newPage();
+    await page.goto("/");
+    await login(page);
+    return page;
+  }));
+  const [first, second] = pages;
+  await rice(first);
+  await first.getByRole("button", { name: "自行填寫本餐卡路里", exact: true }).click();
+  await first.getByRole("spinbutton", { name: "手動卡路里（整餐 kcal）", exact: true }).fill("650");
+  await first.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  await expect.poll(() => [...backend.records.values()][0]?.version).toBe(1);
+  await second.reload();
+  await first.evaluate(async () => { await navigator.serviceWorker.ready; });
+  await backend.setOffline(contexts[0], true);
+  first.once("dialog", (dialog) => dialog.accept());
+  await first.getByRole("button", { name: "刪除", exact: true }).click();
+  await expect(first.getByRole("heading", { name: "今日未有記錄", exact: true })).toBeVisible();
+
+  await second.getByRole("button", { name: "查看／修正", exact: true }).click();
+  await second.getByRole("spinbutton", { name: "手動卡路里（整餐 kcal）", exact: true }).fill("700");
+  await second.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  await expect.poll(() => [...backend.records.values()][0]?.version).toBe(2);
+  await backend.setOffline(contexts[0], false);
+  await expect(first.getByRole("button", { name: "放棄待同步修改", exact: true })).toBeVisible();
+  expect([...backend.records.values()][0].calorieCorrection).toEqual({ kcal: 700, source: "user" });
+  first.once("dialog", (dialog) => dialog.accept());
+  await first.getByRole("button", { name: "放棄待同步修改", exact: true }).click();
+  await expect(first.locator(".meal-calories")).toHaveText("手動記錄：700 kcal");
+  await first.reload();
+  await expect(first.locator(".meal-row")).toHaveCount(1);
+  await expect(first.locator(".meal-calories")).toHaveText("手動記錄：700 kcal");
+  await first.getByRole("button", { name: "歷史", exact: true }).click();
+  await expect(first.locator(".meal-row")).toHaveCount(1);
   await Promise.all(contexts.map((context) => context.close()));
 });
 
