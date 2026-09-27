@@ -1,0 +1,36 @@
+.gcloudignore
+# Cloud Build receives only Dockerfile inputs. Private local files are never
+# uploaded to the remote builder merely because they sit in the checkout.
+*
+!Dockerfile
+!.dockerignore
+!.gcloudignore
+!package.json
+!package-lock.json
+!next.config.ts
+!tsconfig.json
+!next-env.d.ts
+!deploy/
+!deploy/cloudbuild.yaml
+!src/
+!src/**
+!public/
+!public/**
+!scripts/
+!scripts/check-codecs.mjs
+!scripts/smoke-container.mjs
+
+# A misplaced meal image inside src must not enter a remote build context.
+**/*.heic
+**/*.heif
+**/*.jpg
+**/*.jpeg
+**/*.png
+**/*.webp
+**/*.HEIC
+**/*.HEIF
+**/*.JPG
+**/*.JPEG
+**/*.PNG
+**/*.WEBP
+!public/**
