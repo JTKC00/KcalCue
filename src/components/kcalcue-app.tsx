@@ -74,6 +74,8 @@ interface KcalCueAppProps {
 }
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+// Give the server's 12-second partial-result deadline time to reach the client.
+const NUTRITION_ENRICH_TIMEOUT_MS = 15_000;
 
 function delay(ms: number, signal?: AbortSignal) {
   return new Promise<void>((resolve, reject) => {
@@ -254,7 +256,7 @@ function LoadingView({
           <p className="eyebrow">{demoMode ? "準備示範結果" : "AI 圖片分析"}</p>
           <h1>{copy.loadingTitle}</h1>
           <p>{copy.loadingBody}</p>
-          <p className={loadingStepClass(step, 0)}>等候分析及營養配對完成，通常需要一段時間。</p>
+          <p className={loadingStepClass(step, 0)}>等候 AI 圖片分析完成；營養資料會在結果頁繼續補查。</p>
           <div className="loading-actions">
             <button className="button button-secondary" type="button" onClick={onCancel}>
               {copy.cancelAnalyze}
@@ -366,6 +368,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
     initialDraft?.items.length ? initialDraft.mode : manual ? "manual" : initialProviderMode,
   );
   const [appError, setAppError] = useState<AppError | null>(null);
+  const [nutritionPending, setNutritionPending] = useState(false);
   const nutritionProvider = useMemo(() => new LocalNutritionProvider(), []);
   const originalFoods = useMemo(
     () => new Map(createEditableFoodItems(analysis?.foods ?? []).map(food => [food.id, food])),
@@ -414,6 +417,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
     editAbortRef.current.abort();
     editAbortRef.current = new AbortController();
     setAppError(null);
+    setNutritionPending(false);
     setPreviewFailed(false);
     setAnalysis(null);
     setAnalysisProvenance(null);
@@ -479,6 +483,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
     setActiveMode(demoRequest ? "demo" : "live");
     setStage("analyzing");
     setAppError(null);
+    setNutritionPending(false);
 
     const timeoutId = window.setTimeout(
       () => controller.abort("timeout"),
@@ -528,14 +533,58 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
         const localMatches = parsed.data.foods.map((food) =>
           nutritionProvider.resolve(food),
         );
-        const matches =
-          responseMode === "live"
-            ? await enrichUnresolvedMatches(parsed.data.foods, localMatches, controller.signal)
-            : localMatches;
-        controller.signal.throwIfAborted();
-        if (analyzeAbortRef.current !== controller) return;
-        setItems(createEditableFoodItems(parsed.data.foods, matches));
+        const initialItems = createEditableFoodItems(parsed.data.foods, localMatches);
+        setItems(initialItems);
         setStage("result");
+        if (responseMode === "live" && localMatches.some((match) => !match.includedInTotal)) {
+          setNutritionPending(true);
+          const unchangedFood = (item: EditableFoodItem, index: number) => {
+            const original = initialItems[index];
+            return Boolean(
+              original && item.id === original.id &&
+              item.displayName === original.displayName &&
+              item.normalizedName === original.normalizedName &&
+              item.unit === original.unit &&
+              item.nutritionMatch === localMatches[index]
+            );
+          };
+          const editSignal = editAbortRef.current.signal;
+          const nutritionController = new AbortController();
+          const nutritionSignal = AbortSignal.any([editSignal, nutritionController.signal]);
+          const nutritionTimeoutId = window.setTimeout(
+            () => {
+              nutritionController.abort("timeout");
+              if (editSignal.aborted) return;
+              setItems((current) => current.map((item, index) => {
+                const match = localMatches[index];
+                if (!match || match.includedInTotal || !unchangedFood(item, index)) return item;
+                return {
+                  ...item,
+                  nutritionMatch: {
+                    ...match,
+                    reasons: [copy.nutritionLookupFailed,
+                      ...match.reasons.filter((reason) => reason !== copy.nutritionLookupFailed)],
+                  },
+                };
+              }));
+              setNutritionPending(false);
+            },
+            NUTRITION_ENRICH_TIMEOUT_MS,
+          );
+          void enrichUnresolvedMatches(parsed.data.foods, localMatches, nutritionSignal)
+            .then((matches) => {
+              if (nutritionSignal.aborted) return;
+              setItems((current) => current.map((item, index) => {
+                if (!unchangedFood(item, index) || matches[index] === localMatches[index]) return item;
+                return { ...item, nutritionMatch: matches[index] };
+              }));
+            })
+            .catch(() => {})
+            .finally(() => {
+              window.clearTimeout(nutritionTimeoutId);
+              if (!editSignal.aborted) setNutritionPending(false);
+            });
+        }
       }
     } catch (error) {
       if (analyzeAbortRef.current !== controller) return;
@@ -582,6 +631,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
     setAnalysisProvenance(null);
     setItems([]);
     setAppError(null);
+    setNutritionPending(false);
     setActiveMode(initialProviderMode);
   };
 
@@ -762,6 +812,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
           analysis={analysis}
           items={items}
           mode={activeMode}
+          nutritionPending={nutritionPending}
           calorieCorrection={calorieCorrection}
           previewUrl={previewUrl}
           previewFailed={previewFailed}

@@ -79,6 +79,7 @@ describe("POST /api/nutrition/resolve", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     clearUsdaCache();
     vi.restoreAllMocks();
@@ -233,6 +234,112 @@ describe("POST /api/nutrition/resolve", () => {
       { index: 1, code: "rate_limited" },
       { index: 8, code: "rate_limited" },
     ]);
+  });
+
+  it("returns completed USDA matches at the batch deadline and does not schedule later foods", async () => {
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const pending = new Map<string, (response: Response) => void>();
+    const fetchMock = vi.fn((input: RequestInfo | URL) => new Promise<Response>((resolve) => {
+      const query = new URL(String(input)).searchParams.get("query") ?? "";
+      pending.set(query, resolve);
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const responsePromise = POST(resolveRequest(remoteNames.map(remoteFood)));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    pending.get(remoteNames[0])!(usdaResponse(0));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+
+    await vi.advanceTimersByTimeAsync(12_000);
+    const response = await responsePromise;
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.matches[0].profile.id).toBe("usda-5000");
+    expect(body.matches[0].includedInTotal).toBe(true);
+    expect(body.matches.slice(1).every((match: { includedInTotal: boolean }) => !match.includedInTotal)).toBe(true);
+    expect(body.warnings).toEqual(remoteNames.slice(1).map((_, offset) => ({
+      index: offset + 1, code: "timeout",
+    })));
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(reserveHourlyUsdaCall).toHaveBeenCalledTimes(4);
+  });
+
+  it("returns at the batch deadline even when durable quota reservation has not settled", async () => {
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const finishReservations: Array<(value: { allowed: boolean; retryAfterSeconds: number }) => void> = [];
+    vi.mocked(reserveHourlyUsdaCall).mockImplementation(() => new Promise((resolve) => {
+      finishReservations.push(resolve);
+    }));
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const responsePromise = POST(resolveRequest(remoteNames.map(remoteFood)));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(finishReservations).toHaveLength(3);
+    await vi.advanceTimersByTimeAsync(12_000);
+    const response = await responsePromise;
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.matches.every((match: { includedInTotal: boolean }) => !match.includedInTotal)).toBe(true);
+    expect(body.warnings).toEqual(remoteNames.map((_, index) => ({ index, code: "timeout" })));
+    expect(reserveHourlyUsdaCall).toHaveBeenCalledTimes(3);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    for (const finish of finishReservations) finish({ allowed: true, retryAfterSeconds: 0 });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("bounds USDA enrichment while authentication is pending", async () => {
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.mocked(authenticated).mockImplementationOnce(() => new Promise(() => {}));
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const responsePromise = POST(resolveRequest([remoteFood(remoteNames[0])]));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(authenticated).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(12_000);
+    const response = await responsePromise;
+    expect(response.status).toBe(200);
+    expect((await response.json()).warnings).toEqual([{ index: 0, code: "timeout" }]);
+    expect(reserveHourlyUsdaCall).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps a shared USDA lookup running for a later caller after the first batch deadline", async () => {
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let finishFetch: (response: Response) => void = () => {};
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => { finishFetch = resolve; }));
+    vi.stubGlobal("fetch", fetchMock);
+    const food = remoteFood(remoteNames[0]);
+
+    const first = POST(resolveRequest([food]));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(fetchMock).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(6_000);
+    const second = POST(resolveRequest([food]));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(authenticated).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(6_000);
+    const firstResponse = await first;
+    expect((await firstResponse.json()).warnings).toEqual([{ index: 0, code: "timeout" }]);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    finishFetch(usdaResponse(0));
+    const secondResponse = await second;
+    const secondBody = await secondResponse.json();
+    expect(secondResponse.status).toBe(200);
+    expect(secondBody.matches[0].profile.id).toBe("usda-5000");
+    expect(secondBody.warnings).toBeUndefined();
+    expect(reserveHourlyUsdaCall).toHaveBeenCalledOnce();
   });
 
   it("does not schedule or reserve later USDA lookups after the request is aborted", async () => {

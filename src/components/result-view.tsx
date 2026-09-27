@@ -28,6 +28,7 @@ interface ResultViewProps {
   analysis: FoodAnalysis | null;
   items: EditableFoodItem[];
   mode: "live" | "demo" | "manual";
+  nutritionPending?: boolean;
   calorieCorrection?: MealCalorieCorrection | null;
   previewUrl: string | null;
   previewFailed: boolean;
@@ -96,6 +97,7 @@ export function ResultView({
   analysis,
   items,
   mode,
+  nutritionPending = false,
   calorieCorrection,
   previewUrl,
   previewFailed,
@@ -170,6 +172,12 @@ export function ResultView({
 
       <div className="result-grid">
         <div className="result-main-column">
+          {nutritionPending ? (
+            <p className="coverage-notice" role="status">
+              <RefreshIcon />
+              AI 辨認已完成，正在補查營養參考；你可以先修正餐點。
+            </p>
+          ) : null}
           {showTotal ? (
             <section className="macro-grid" aria-label="主要營養素估算範圍" aria-live="polite">
               <div className="macro-card macro-protein">

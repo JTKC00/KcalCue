@@ -26,6 +26,7 @@ const requestSchema = z.object({
   foods: z.array(foodEstimateSchema).max(12),
 });
 const MAX_PARALLEL_USDA_LOOKUPS = 3;
+const USDA_ENRICHMENT_DEADLINE_MS = 12_000;
 
 export async function POST(request: Request) {
   const ip = clientIpFromHeaders(request.headers);
@@ -65,37 +66,68 @@ export async function POST(request: Request) {
       supportsUsdaPortionUnit(parsed.data.foods[index].unit) &&
       !isCompositeIdentity(match.identity) ? [index] : []) : [];
     if (apiKey && remoteIndexes.length > 0 && !request.signal.aborted) {
-      // Local reference/demo resolution remains public. A provider-backed
-      // lookup requires the same verified trial account as Live analysis.
-      let remoteAccount: Awaited<ReturnType<typeof authenticated>>;
+      const deadline = new AbortController();
+      const timeout = setTimeout(() => deadline.abort(), USDA_ENRICHMENT_DEADLINE_MS);
+      const signal = AbortSignal.any([request.signal, deadline.signal]);
+      let stopAuthentication: () => void = () => {};
+      const stopped = new Promise<null>((resolve) => {
+        const stop = () => resolve(null);
+        signal.addEventListener("abort", stop, { once: true });
+        stopAuthentication = () => signal.removeEventListener("abort", stop);
+      });
+      const completed = new Set<number>();
       try {
-        remoteAccount = await authenticated(request);
-      } catch (error) {
-        return apiError(error);
-      }
-      const usda = new UsdaNutritionClient(apiKey, async () =>
-        (await reserveHourlyUsdaCall(remoteAccount.db, remoteAccount.user.id)).allowed,
-      remoteAccount.user.id);
-      let next = 0;
-      const worker = async () => {
-        while (next < remoteIndexes.length && !request.signal.aborted) {
-          // Taking an index is synchronous; workers cannot claim it twice.
-          const index = remoteIndexes[next++];
-          try {
-            const remote = await usda.resolve(parsed.data.foods[index], request.signal);
-            if (remote.includedInTotal) matches[index] = remote;
-          } catch (error) {
-            warnings.push({
-              index,
-              code: error instanceof UsdaNutritionError ? error.code : "unavailable",
-            });
+        // Local reference/demo resolution remains public. A provider-backed
+        // lookup requires the same verified trial account as Live analysis.
+        let remoteAccount: Awaited<ReturnType<typeof authenticated>>;
+        try {
+          const account = await Promise.race([authenticated(request), stopped]);
+          if (account === null) {
+            for (const index of remoteIndexes) {
+              warnings.push({ index, code: deadline.signal.aborted ? "timeout" : "canceled" });
+            }
+            return NextResponse.json({ matches, provider: "usda-fdc", warnings });
+          }
+          remoteAccount = account;
+        } catch (error) {
+          return apiError(error);
+        }
+        stopAuthentication();
+        const usda = new UsdaNutritionClient(apiKey, async () =>
+          (await reserveHourlyUsdaCall(remoteAccount.db, remoteAccount.user.id)).allowed,
+        remoteAccount.user.id);
+        let next = 0;
+        const worker = async () => {
+          while (next < remoteIndexes.length && !signal.aborted) {
+            // Taking an index is synchronous; workers cannot claim it twice.
+            const index = remoteIndexes[next++];
+            try {
+              const remote = await usda.resolve(parsed.data.foods[index], signal);
+              if (remote.includedInTotal) matches[index] = remote;
+            } catch (error) {
+              warnings.push({
+                index,
+                code: deadline.signal.aborted ? "timeout" :
+                  error instanceof UsdaNutritionError ? error.code : "unavailable",
+              });
+            } finally {
+              completed.add(index);
+            }
+          }
+        };
+        await Promise.all(Array.from(
+          { length: Math.min(MAX_PARALLEL_USDA_LOOKUPS, remoteIndexes.length) },
+          () => worker(),
+        ));
+        if (deadline.signal.aborted) {
+          for (const index of remoteIndexes) {
+            if (!completed.has(index)) warnings.push({ index, code: "timeout" });
           }
         }
-      };
-      await Promise.all(Array.from(
-        { length: Math.min(MAX_PARALLEL_USDA_LOOKUPS, remoteIndexes.length) },
-        () => worker(),
-      ));
+      } finally {
+        clearTimeout(timeout);
+        stopAuthentication();
+      }
     }
 
     warnings.sort((left, right) => left.index - right.index);

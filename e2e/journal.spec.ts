@@ -973,6 +973,54 @@ test("real photo preview with mocked analysis supports correction, reload, histo
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
 });
 
+test("a slow nutrition lookup keeps the completed AI result editable without another AI call", async ({ page, context }, testInfo) => {
+  const backend = cloud();
+  await backend.install(context);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  let analyses = 0;
+  let nutritionRequests = 0;
+  let finishNutrition!: () => void;
+  const nutritionGate = new Promise<void>((resolve) => { finishNutrition = resolve; });
+  await page.route("**/api/analyze", async (route) => {
+    analyses++;
+    await route.fulfill({ json: { mode: "live", analysis: {
+      analysisStatus: "success",
+      foods: [{ displayName: "帶子", normalizedName: "scallops",
+        identityLevel: "ingredient", portionMin: 100, portionMax: 150, unit: "g",
+        recognitionConfidence: 0.8, portionConfidence: 0.5, uncertaintyReasons: [] }],
+      uncertaintyReasons: [], visibleEvidence: ["碟上的食物"],
+      estimatedInformation: ["份量"], unknownInformation: [],
+    } } });
+  });
+  await page.route("**/api/nutrition/resolve", async (route) => {
+    nutritionRequests++;
+    await nutritionGate;
+    await route.fulfill({ json: { matches: [] } });
+  });
+  await page.goto("/");
+  await login(page);
+  await page.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await page.locator('input[type="file"]').nth(1).setInputFiles(
+    path.join(testInfo.project.testDir, "fixtures/hk-milk-tea.jpg"),
+  );
+  await page.getByRole("button", { name: "開始分析", exact: true }).click();
+
+  await expect(page.getByText("AI 分析結果", { exact: true })).toBeVisible();
+  await expect(page.getByText(/正在補查營養參考/)).toBeVisible();
+  await expect.poll(() => nutritionRequests).toBe(1);
+  await page.getByRole("combobox", { name: "食物名稱" }).fill("banana");
+  await expect(page.getByRole("combobox", { name: "食物名稱" })).toHaveValue("banana");
+  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  await expect.poll(() => backend.records.size).toBe(1);
+  expect([...backend.records.values()][0]).toMatchObject({ items: [{ displayName: "banana" }] });
+  finishNutrition();
+  await page.getByRole("button", { name: "歷史", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "banana", exact: true })).toBeVisible();
+  expect(analyses).toBe(1);
+  expect(errors).toEqual([]);
+});
+
 test("AI failure keeps the selected photo and a double tap starts one new analysis", async ({ page, context }, testInfo) => {
   const backend = cloud();
   await backend.install(context);

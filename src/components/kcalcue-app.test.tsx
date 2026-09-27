@@ -6,6 +6,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { demoFoodAnalysis } from "@/lib/providers/food-vision/demo";
+import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
+import { copy } from "@/content/zh-HK";
 import { KcalCueApp } from "./kcalcue-app";
 
 function pngFile() {
@@ -26,6 +28,8 @@ describe("KcalCueApp analysis cancel", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
@@ -79,7 +83,7 @@ describe("KcalCueApp analysis cancel", () => {
     expect(screen.getByText("示範結果")).toBeInTheDocument();
   });
 
-  it("does not show a late nutrition response after the user cancels", async () => {
+  it("does not show a late nutrition response after the user starts another meal", async () => {
     const user = userEvent.setup();
     let completeNutrition: (response: Response) => void = () => {};
     const fetchMock = vi.fn(async (url: string) => {
@@ -93,10 +97,102 @@ describe("KcalCueApp analysis cancel", () => {
     await user.upload(document.querySelectorAll<HTMLInputElement>('input[type="file"]')[1], pngFile());
     await user.click(screen.getByRole("button", { name: /開始分析/ }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    await user.click(screen.getByRole("button", { name: "取消分析" }));
+    expect(screen.getByText("AI 分析結果")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "分析另一餐" }));
     await act(async () => { completeNutrition(Response.json({ matches: [] })); });
-    expect(screen.getByRole("button", { name: /開始分析/ })).toBeEnabled();
+    expect(screen.getByRole("heading", { name: /一張相/ })).toBeInTheDocument();
     expect(screen.queryByText("食物明細")).not.toBeInTheDocument();
+  });
+
+  it("shows a completed AI result before slow nutrition and never retries AI when nutrition times out", async () => {
+    const user = userEvent.setup();
+    const timerSpy = vi.spyOn(window, "setTimeout");
+    let completeNutrition: (response: Response) => void = () => {};
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/analyze") return Response.json({ mode: "live", analysis: {
+        ...demoFoodAnalysis, foods: [{ ...demoFoodAnalysis.foods[0], displayName: "帶子", normalizedName: "scallops" }],
+      } });
+      return new Promise<Response>(resolve => { completeNutrition = resolve; });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const onDraftChange = vi.fn();
+    render(<KcalCueApp initialProviderMode="live" onDraftChange={onDraftChange} />);
+    await user.upload(document.querySelectorAll<HTMLInputElement>('input[type="file"]')[1], pngFile());
+    await user.click(screen.getByRole("button", { name: /開始分析/ }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    expect(screen.getByText("AI 分析結果")).toBeInTheDocument();
+    expect(screen.getByText(/正在補查營養參考/)).toBeInTheDocument();
+    const nutritionTimeout = timerSpy.mock.calls.find(([, ms]) => ms === 15_000)?.[0];
+    expect(typeof nutritionTimeout).toBe("function");
+    await act(async () => { if (typeof nutritionTimeout === "function") nutritionTimeout(); });
+    expect(screen.getByText("AI 分析結果")).toBeInTheDocument();
+    expect(screen.queryByText(/正在補查營養參考/)).not.toBeInTheDocument();
+    expect(onDraftChange.mock.lastCall?.[0].items[0].nutritionMatch.reasons[0])
+      .toBe(copy.nutritionLookupFailed);
+    expect(screen.queryByText("今次未能完成分析")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/analyze")).toHaveLength(1);
+
+    await act(async () => { completeNutrition(Response.json({ matches: [] })); });
+    expect(screen.getByText("AI 分析結果")).toBeInTheDocument();
+    expect(onDraftChange.mock.lastCall?.[0].items[0].nutritionMatch.reasons[0])
+      .toBe(copy.nutritionLookupFailed);
+  });
+
+  it("adds a completed nutrition match to an unchanged AI food", async () => {
+    const user = userEvent.setup();
+    const remoteMatch = new LocalNutritionProvider().resolve(demoFoodAnalysis.foods[0]);
+    let completeNutrition: (response: Response) => void = () => {};
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/analyze") return Response.json({ mode: "live", analysis: {
+        ...demoFoodAnalysis, foods: [{ ...demoFoodAnalysis.foods[0], displayName: "帶子", normalizedName: "scallops" }],
+      } });
+      return new Promise<Response>(resolve => { completeNutrition = resolve; });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const onDraftChange = vi.fn();
+    render(<KcalCueApp initialProviderMode="live" onDraftChange={onDraftChange} />);
+    await user.upload(document.querySelectorAll<HTMLInputElement>('input[type="file"]')[1], pngFile());
+    await user.click(screen.getByRole("button", { name: /開始分析/ }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(onDraftChange.mock.lastCall?.[0].items[0].nutritionMatch?.includedInTotal).toBe(false);
+
+    await act(async () => { completeNutrition(Response.json({ matches: [remoteMatch] })); });
+    expect(onDraftChange.mock.lastCall?.[0].items[0].nutritionMatch?.profile?.id)
+      .toBe(remoteMatch.profile?.id);
+    expect(screen.queryByText(/正在補查營養參考/)).not.toBeInTheDocument();
+  });
+
+  it("does not replace a user's name correction with a late nutrition match", async () => {
+    const user = userEvent.setup();
+    const unknownFood = { ...demoFoodAnalysis.foods[0], displayName: "帶子", normalizedName: "scallops" };
+    const remoteMatch = new LocalNutritionProvider().resolve(demoFoodAnalysis.foods[0]);
+    expect(remoteMatch.includedInTotal).toBe(true);
+    let completeNutrition: (response: Response) => void = () => {};
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/analyze") return Response.json({ mode: "live", analysis: {
+        ...demoFoodAnalysis, foods: [unknownFood],
+      } });
+      return new Promise<Response>(resolve => { completeNutrition = resolve; });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const onDraftChange = vi.fn();
+    render(<KcalCueApp initialProviderMode="live" onDraftChange={onDraftChange} />);
+    await user.upload(document.querySelectorAll<HTMLInputElement>('input[type="file"]')[1], pngFile());
+    await user.click(screen.getByRole("button", { name: /開始分析/ }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    const name = screen.getByRole("combobox", { name: "食物名稱" });
+    await user.clear(name);
+    await user.type(name, "banana");
+    const corrected = onDraftChange.mock.lastCall?.[0].items[0].nutritionMatch;
+    expect(corrected?.includedInTotal).toBe(true);
+    expect(corrected?.profile?.id).not.toBe(remoteMatch.profile?.id);
+
+    await act(async () => { completeNutrition(Response.json({ matches: [remoteMatch] })); });
+    expect(onDraftChange.mock.lastCall?.[0].items[0].nutritionMatch?.profile?.id)
+      .toBe(corrected.profile.id);
+    expect(name).toHaveValue("banana");
   });
 
   it("assigns a new attempt ID to each explicit Live analysis without an automatic retry", async () => {
