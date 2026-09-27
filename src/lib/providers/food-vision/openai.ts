@@ -44,6 +44,8 @@ interface OpenAIImageInput {
   mimeType: OpenAIImageMimeType;
 }
 
+const MAX_INPUT_PIXELS = 40_000_000;
+
 function mapOpenAIError(error: unknown): FoodVisionError {
   if (error instanceof FoodVisionError) return error;
 
@@ -157,13 +159,21 @@ function stripNulls(value: unknown): unknown {
 
 async function prepareOpenAIImage(image: FoodImageInput): Promise<OpenAIImageInput> {
   const mimeType = image.mimeType;
-  if (mimeType !== "image/heic" && mimeType !== "image/heif") {
-    return { data: image.data, mimeType };
-  }
-
   try {
-    // Match the existing photo-preparation pixel bound before decoding HEIC/HEIF.
-    const jpeg = await sharp(Buffer.from(image.data, "base64"), { limitInputPixels: 40_000_000 })
+    const input = sharp(Buffer.from(image.data, "base64"), {
+      limitInputPixels: MAX_INPUT_PIXELS,
+    });
+    if (mimeType !== "image/heic" && mimeType !== "image/heif") {
+      // Inspect the header before forwarding the original compressed bytes.
+      const metadata = await input.metadata();
+      const expectedFormat = mimeType === "image/jpeg" ? "jpeg" : mimeType.slice(6);
+      if (metadata.format !== expectedFormat) {
+        throw new Error("Image format does not match its MIME type");
+      }
+      return { data: image.data, mimeType };
+    }
+
+    const jpeg = await input
       .rotate()
       .jpeg()
       .toBuffer();
