@@ -1,6 +1,6 @@
 # History 圖片：最小持久化合約與分片方案
 
-2026-09-27 完成（檔名沿用9月26日工作批次）；其後source-only分片已加入registry、meal transaction、authenticated private read route及History按需顯圖。**上傳、實體cleanup及production驗收仍未實作；沒有完整功能／production PASS聲明。** 未建立照片資源或更改雲端設定。
+2026-09-27 完成（檔名沿用9月26日工作批次）；其後source-only分片已加入registry、meal transaction、authenticated private read route、History按需顯圖及獨立的generation字串精確JSON API adapter。**新adapter尚未接入read route；上傳、實體cleanup及production驗收仍未實作；沒有完整功能／production PASS聲明。** 未建立照片資源或更改雲端設定。
 
 ## 目標與既有基礎
 
@@ -72,7 +72,7 @@ photoRef?: {
 3. 用**指定generation**取object，不能自動fallback最新generation。物件缺失顯示圖片暫不可用；餐點與kcal保持，不能清空其他資料或建立另一餐。
 4. 回 `image/jpeg`、`Cache-Control: private, no-store`、適當nosniff；不提供公開bucket URL、永久download token或長效signed URL，不redirect到公開第三方origin。
 
-目前安裝的Storage SDK會把指定generation轉成JavaScript Number，對0更會略去generation查詢；finalize會把不可精確讀取的實際generation持久記為`deleting`，保留配額與清理依據，不讓它附餐；讀取route對既存異常引用亦fail closed。若實際bucket回覆無法安全表示的generation，須先改用能精確傳遞字串的讀取／刪除adapter再啟用照片功能；目前source不能據此宣稱可在正式GCS bucket使用。
+目前安裝的Storage SDK會把指定generation轉成JavaScript Number，對0更會略去generation查詢；finalize會把不可精確讀取的實際generation持久記為`deleting`，保留配額與清理依據，不讓它附餐；讀取route對既存異常引用亦fail closed。獨立的`photo-object-store`已用Google JSON API的字串query實作有界讀取、metadata及精確generation刪除，單元測試覆蓋超過2^53的值；**它仍未接入read route／cleanup runner，也沒有真實bucket parity**。404可能是bucket設定錯誤，adapter不把它當物件已刪或釋放quota。接入、真實generation讀刪及bucket設定驗收前，不得啟用照片功能。
 
 History由使用者點「查看餐點附圖」後才以authorized fetch→Blob/object URL顯圖，避免進入舊餐列表時批量下載；相同attachment/generation的同步快照不重抓。account generation change／unmount／換圖立即取消請求、撤銷object URL並清掉舊帳戶state。SW繼續不攔截`/api/`，不把照片放公共shell cache。初版只保證已登入且連線可重新取cloud圖片；不悄悄新增永久離線history圖片cache。
 
