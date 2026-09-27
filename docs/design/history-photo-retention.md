@@ -1,6 +1,6 @@
 # History 圖片：最小持久化合約與分片方案
 
-2026-09-27 完成（檔名沿用9月26日工作批次）；其後source-only分片已加入registry、meal transaction和authenticated private read route，**上傳、實體cleanup、客戶端顯圖及production驗收仍未實作；沒有完整功能／production PASS聲明。** 未建立照片資源或更改雲端設定。
+2026-09-27 完成（檔名沿用9月26日工作批次）；其後source-only分片已加入registry、meal transaction、authenticated private read route及History按需顯圖。**上傳、實體cleanup及production驗收仍未實作；沒有完整功能／production PASS聲明。** 未建立照片資源或更改雲端設定。
 
 ## 目標與既有基礎
 
@@ -74,7 +74,7 @@ photoRef?: {
 
 目前安裝的Storage SDK會把指定generation轉成JavaScript Number，對0更會略去generation查詢；finalize會把不可精確讀取的實際generation持久記為`deleting`，保留配額與清理依據，不讓它附餐；讀取route對既存異常引用亦fail closed。若實際bucket回覆無法安全表示的generation，須先改用能精確傳遞字串的讀取／刪除adapter再啟用照片功能；目前source不能據此宣稱可在正式GCS bucket使用。
 
-瀏覽器使用authorized fetch→Blob/object URL顯圖；account generation change／unmount／換圖立即取消請求、撤銷object URL並清掉舊帳戶state。SW繼續不攔截`/api/`，不把照片放公共shell cache。初版只保證已登入且連線可重新取cloud圖片；不悄悄新增永久離線history圖片cache。
+History由使用者點「查看餐點附圖」後才以authorized fetch→Blob/object URL顯圖，避免進入舊餐列表時批量下載；相同attachment/generation的同步快照不重抓。account generation change／unmount／換圖立即取消請求、撤銷object URL並清掉舊帳戶state。SW繼續不攔截`/api/`，不把照片放公共shell cache。初版只保證已登入且連線可重新取cloud圖片；不悄悄新增永久離線history圖片cache。
 
 **刪除時序界線：**tombstone完成後新進的read會拒絕；已在刪除前通過授權並開始下載的bytes無法收回，也不能抹掉使用者曾保存的截圖。可在stream前再讀revision降低競態，但不能承諾遠端既得副本被撤銷。
 
@@ -173,7 +173,7 @@ Cleanup只delete該asset記錄的**確切generation**；404可當該generation�
 
 1. **合約＋server primitive（預設disabled）：**typed asset/command/schema、fake object adapter、transaction reservation/attach/remove/cleanup狀態機、ownership與meaningful tests；普通meal與既有prepare route行為不变。不單獨啟用未有cleanup的upload endpoint。
 2. **可恢復 server lifecycle：**實際server-only object adapter、generation conditional operations、private read、upload/status、cleanup runner/reconciler及provider-specific本機測試；與step1整合emulator。沒有實際資源/config也可完成可審核source，cloud parity明列待驗。
-3. **Client vertical slice：**IDB payload store、outbox依赖／unknown recovery、opt-in、private blob rendering、replace/remove、legacy/離線UX、Daily/provenance相容；獨立browser重做完整journey。同步更新條件式隱私文案與SETUP，不把預設disabled寫成已發布。
+3. **Client vertical slice：**History按需private blob rendering已有source-only分片；仍需IDB payload store、outbox依赖／unknown recovery、opt-in、replace/remove、legacy/離線UX、Daily/provenance相容，以及獨立browser重做完整journey。同步更新條件式隱私文案與SETUP，不把預設disabled寫成已發布。
 4. **授權release：**確認資源、quota、delete/retention/IAM與背景執行；exact-source CI/build/codec證據、rollback floor；QA帳戶真流程＋cleanup readback後才標功能production PASS。
 
 前三步可按實際diff大小再拆，但不能把「能upload」當成可發布feature而留下ownership、delete、unknown recovery待日後。也不為此加入大型admin、相簿、AI重分析、公開分享、billing或原圖永久保存。
