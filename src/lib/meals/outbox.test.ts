@@ -96,6 +96,26 @@ describe("durable offline meal outbox", () => {
     expect((await repository.list())[0].analysisProvenance).toBeNull();
     expect((await repository.list())[0].analysis).toEqual(first.analysis);
   });
+  it("keeps a confirmed private photo visible during an offline edit without queueing its reference", async () => {
+    const first = await repository.save(draft(), crypto.randomUUID());
+    const photoRef = {
+      attachmentId: crypto.randomUUID(), generation: "1234567890123",
+      contentType: "image/jpeg" as const, width: 1200, height: 900, byteSize: 100_000,
+    };
+    const confirmed = {
+      ...first, schemaVersion: 4, createdAt: "2026-09-26T20:00:00.000Z", photoRef,
+    };
+    await changeSyncState("a", () => ({ remote: [confirmed], syncedAt: null, jobs: [] }));
+    Object.defineProperty(navigator, "onLine", { value: false });
+
+    const visible = await repository.save({ ...confirmed, time: "19:30" }, crypto.randomUUID());
+    expect(visible.time).toBe("19:30");
+    expect(visible.photoRef).toEqual(photoRef);
+    expect((await new MealRepository().list())[0].photoRef).toEqual(photoRef);
+    const queued = (await repository.state()).jobs[0].record;
+    expect(queued).not.toHaveProperty("photoRef");
+    expect(queued.schemaVersion).toBe(4);
+  });
   it("never discards another account's pending meal after a delayed recovery", async () => {
     const input = draft();
     await repository.save(input, crypto.randomUUID());
@@ -337,14 +357,14 @@ describe("durable offline meal outbox", () => {
   });
   it("retains an unsupported-schema edit without automatically replaying it or downgrading remote metadata", async () => {
     const saved = await repository.save(draft(), crypto.randomUUID());
-    const future = { ...saved, schemaVersion: 4, createdAt: "2026-09-26T14:00:00.000Z" };
+    const future = { ...saved, schemaVersion: 5, createdAt: "2026-09-26T14:00:00.000Z" };
     fixture.fetch.mockResolvedValueOnce(Response.json({ error: { code: "unsupported_schema" } }, { status: 409 }))
       .mockResolvedValueOnce(Response.json({ records: [future], revision: "future" }))
       .mockResolvedValueOnce(Response.json({ revision: "future" }));
     await repository.sync();
     await new MealRepository().sync();
     expect((await repository.state()).jobs[0]).toMatchObject({ id: saved.mutationId, error: "unsupported_schema" });
-    expect((await repository.list())[0]).toMatchObject({ schemaVersion: 4, createdAt: future.createdAt });
+    expect((await repository.list())[0]).toMatchObject({ schemaVersion: 5, createdAt: future.createdAt });
     expect(fixture.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
 

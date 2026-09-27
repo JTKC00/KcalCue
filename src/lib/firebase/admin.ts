@@ -6,6 +6,7 @@ import {
 } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
+import { getStorage } from "firebase-admin/storage";
 
 export function adminServices() {
   const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
@@ -30,7 +31,7 @@ export function adminServices() {
       },
       "kcalcue-server",
     );
-  return { auth: getAuth(app), db: getFirestore(app) };
+  return { auth: getAuth(app), db: getFirestore(app), storage: getStorage(app) };
 }
 export function accountPath(uid: string) {
   return `kcalcueUsers/${uid}`;

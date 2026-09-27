@@ -78,6 +78,9 @@ export function visibleMeals(state: SyncState) {
         ...(confirmed ? {
           schemaVersion: confirmed.schemaVersion,
           createdAt: confirmed.createdAt,
+          // A queued edit contains editable meal fields, not the server-owned
+          // photo reference. Keep the confirmed attachment visible offline.
+          ...("photoRef" in confirmed ? { photoRef: confirmed.photoRef } : {}),
         } : {}),
       });
     }

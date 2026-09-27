@@ -1,6 +1,6 @@
 # History 圖片：最小持久化合約與分片方案
 
-2026-09-27 完成（檔名沿用9月26日工作批次）；**設計文件，尚未實作，沒有功能／production PASS 聲明。** 未建立資源、修改產品、啟動服務、讀取 secrets 或存取雲端。此 PR 只交付設計文件；本機合約測試、adapter、UI 及雲端驗收皆尚未實作。
+2026-09-27 完成（檔名沿用9月26日工作批次）；其後source-only分片已加入registry、meal transaction和authenticated private read route，**上傳、實體cleanup、客戶端顯圖及production驗收仍未實作；沒有完整功能／production PASS聲明。** 未建立照片資源或更改雲端設定。
 
 ## 目標與既有基礎
 
@@ -46,7 +46,7 @@ photoAction?: { kind: "attach"; uploadId: string } | { kind: "remove" };
 // Server-owned meal value：由asset registry複製權威欄位。
 photoRef?: {
   attachmentId: string;
-  generation: string;       // object service實際回覆；opaque，不轉JS number
+  generation: string;       // object service實際回覆；持久資料保留opaque字串
   contentType: "image/jpeg";
   width: number;
   height: number;
@@ -65,12 +65,14 @@ photoRef?: {
 
 ## 3. 私人讀取路徑
 
-新增專用例如 `GET /api/meals/{mealId}/photo`：
+已加入source-only `GET /api/meals/{mealId}/photo`；沒有配置私人bucket時維持停用，雲端實測仍是release gate。此route：
 
 1. authenticated→verified UID scope→讀meal；已刪／無圖／不屬目前UID以不洩漏存在資訊的404返回。
 2. 核對meal引用與同UID registry的mealID、attachmentID、generation、state attached一致。
 3. 用**指定generation**取object，不能自動fallback最新generation。物件缺失顯示圖片暫不可用；餐點與kcal保持，不能清空其他資料或建立另一餐。
 4. 回 `image/jpeg`、`Cache-Control: private, no-store`、適當nosniff；不提供公開bucket URL、永久download token或長效signed URL，不redirect到公開第三方origin。
+
+目前安裝的Storage SDK會把指定generation轉成JavaScript Number，對0更會略去generation查詢；finalize會把不可精確讀取的實際generation持久記為`deleting`，保留配額與清理依據，不讓它附餐；讀取route對既存異常引用亦fail closed。若實際bucket回覆無法安全表示的generation，須先改用能精確傳遞字串的讀取／刪除adapter再啟用照片功能；目前source不能據此宣稱可在正式GCS bucket使用。
 
 瀏覽器使用authorized fetch→Blob/object URL顯圖；account generation change／unmount／換圖立即取消請求、撤銷object URL並清掉舊帳戶state。SW繼續不攔截`/api/`，不把照片放公共shell cache。初版只保證已登入且連線可重新取cloud圖片；不悄悄新增永久離線history圖片cache。
 
@@ -78,7 +80,7 @@ photoRef?: {
 
 ## 4. Upload → meal save：跨系統狀態機
 
-Firestore與object storage不能做同一個transaction。只宣稱meal引用／registry狀態／cleanup工作可在同一Firestore transaction原子改動，不宣稱two-system atomic upload。
+Firestore與object storage不能做同一個transaction。meal引用與registry的`state=deleting`可在同一Firestore transaction原子改動；這個registry狀態本身是持久、可重試的cleanup work item，不宣稱two-system atomic upload或物件已刪除。
 
 建議registry狀態：`uploading → staged → attached → deleting → deleted`；`uploading/staged`過期可轉deleting，deleting不可重新attach。所有分支以CAS／transaction檢查實際前一狀態，不能靠client cache。
 
@@ -95,7 +97,7 @@ Firestore與object storage不能做同一個transaction。只宣稱meal引用／
 
 - Client收到stagedACK後，以原餐點mutationID送既有meal命令加`photoAction.attach(uploadId)`。同一mutation的內容一旦送出不可改寫。
 - Meal POST可先preflight，但**commit transaction內再次讀meal與asset**；維持tombstone、same-mutationACK、schema、expected version與UID guards，並驗asset staged/未過期、正確meal、generation已確定。所有Firestore讀取在寫入之前。
-- 同transaction寫meal新photo、asset attached及account revision；若替換舊photo，同時把舊asset標deleting並寫cleanup job。沒有先刪舊object再保存新meal的窗口。
+- 同transaction寫meal新photo、asset attached及account revision；若替換舊photo，同時把舊asset標deleting，留下持久cleanup work item。沒有先刪舊object再保存新meal的窗口。
 - 已ACK的mutation直接回原record，不重attach、不改version/createdAt、不重算provenance。並發另一裝置勝出時409，staged新圖仍不公開，等使用者明確處理或expiry清理。
 - Omitted photoAction保留previous photoRef（舊client只改餐別不丟圖）；remove明確置null並安排cleanup。Client偽造photoRef字段直接strip；只有registry可提供server photoRef。
 - Conflict「保留為新餐」不得把舊asset/ref移到新ID。初版清除已保存照片引用並說明需重新附圖；只有本機仍有實際Blob且使用者選擇附圖時，才建立新的uploadID。不做隱式server copy或共享reference counting。
@@ -104,13 +106,13 @@ Firestore與object storage不能做同一個transaction。只宣稱meal引用／
 
 ### 正式刪餐／移除圖片
 
-DeleteMeal transaction保留目前version/mutation/tombstone防復活語意，同時把已引用asset標deleting及寫deterministic cleanup job。meal tombstone仍只留原有最小meal狀態，object cleanup資訊留在獨立server-only job/asset。
+DeleteMeal transaction保留目前version/mutation/tombstone防復活語意，同時把已引用asset標deleting。該asset registry文件的固定路徑和`state=deleting`就是deterministic cleanup work item；meal tombstone仍只留原有最小meal狀態，object cleanup資訊留在server-only asset。
 
 DELETE ACK表示餐點與圖片引用已不可再新讀，不表示storage實體位元已完成刪除。UI不用因此把餐點留在History；隱私文案需說明背景實體清理。資料刪除的資料庫transaction失敗時，不能先物理刪object。
 
-Cleanup只delete該job記錄的**確切generation**；404可當該generation已不存在，precondition mismatch不得刪最新版或未知object。成功／confirmed absence後才release storage byte quota並標deleted。Retry重用同job，不新增mealmutation、不復活引用。
+Cleanup只delete該asset記錄的**確切generation**；404可當該generation已不存在，precondition mismatch不得刪最新版或未知object。成功／confirmed absence後才release storage byte quota並標deleted。Retry重用同asset，不新增mealmutation、不復活引用。
 
-同mutation DELETE重試仍ACK；即使第一個HTTP回覆遺失，cleanup job已與tombstone原子存在。一般500/網絡錯誤採有限每輪重試及backoff，不因一輪失敗清掉durable job。永久權限／配置錯誤保留工作並告警，不靜默成功或無界緊迴圈。
+同mutation DELETE重試仍ACK；即使第一個HTTP回覆遺失，asset的deleting狀態已與tombstone原子存在。一般500/網絡錯誤採有限每輪重試及backoff，不因一輪失敗清掉durable work item。永久權限／配置錯誤保留工作並告警，不靜默成功或無界緊迴圈。
 
 ### Orphan與晚到的upload
 
@@ -121,7 +123,7 @@ Cleanup只delete該job記錄的**確切generation**；404可當該generation已�
 - 不對同一object prefix套「24小時全刪」bucket lifecycle：staged後會attach並保持相同key，這樣會誤刪正常History圖。若未來拆staging/attached prefix則需copy/finalize另一套補償，**不放進第一版**。
 - attached物件保留到使用者detach/delete或明確account lifecycle；不暗中按短TTL刪正常歷史圖。既有帳戶刪除若尚無產品流程，須把對應object清理列release runbook，不能讓storage資料游離於資料擁有人生命週期。
 
-**實體清理需要可信的背景執行者。** Request-after-response、只有使用者再登入時順手清理或process內setTimeout都不能保證清理。可設計可重入server job與localrunner，但沒有已授權scheduler/執行環境前，不得宣稱有24h刪除SLA；新付費排程/worker資源須授權，且是啟用photo retention的release gate。時間目標建議每15分鐘有限批次、pending逾24h告警；這是待配置驗收的目標，不是目前承諾。
+**實體清理需要可信的背景執行者。** Request-after-response、只有使用者再登入時順手清理或process內setTimeout都不能保證清理。Runner須能以collection-group index/scanner或等效機制找出deleting asset，按確切generation可重入清理；目前尚未實作。沒有已授權scheduler/執行環境前，不得宣稱有24h刪除SLA；新付費排程/worker資源須授權，且是啟用photo retention的release gate。時間目標建議每15分鐘有限批次、pending逾24h告警；這是待配置驗收的目標，不是目前承諾。
 
 ## 6. 離線、本機原子性與unknown outcome
 
@@ -147,7 +149,7 @@ Cleanup只delete該job記錄的**確切generation**；404可當該generation已�
 ## 8. Release與rollback gate
 
 1. Source/local tests與PR可在現有授權範圍準備；不需要先拿productionsecret。付費Storage/scheduler、IAM、rules、CORS（若server-only則不需client跨域上傳）、productionflags/config及正式隱私行為變更，依實際授權release。
-2. 新schema guard保護edit，但**不足以保護delete**：既有`deleteMeal`允許正常刪future-schema餐點，舊writer不會建立photo cleanup job。因此所有active/rollback delete、detach、photo-read writer都須具備新lifecycle能力；不可只說「舊v2會拒schema所以安全」。Reconciler亦須能發現舊／異常路徑產生的meal tombstone＋attachedasset。
+2. 新schema guard保護edit，但**不足以保護delete**：舊版`deleteMeal`允許正常刪future-schema餐點，卻不會把photo asset標deleting。因此所有active/rollback delete、detach、photo-read writer都須具備新lifecycle能力；不可只說「舊v2會拒schema所以安全」。Reconciler亦須能發現舊／異常路徑產生的meal tombstone＋attachedasset。
 3. 先部署相容writer/read/delete/cleanup、驗證私人拒絕与cleanup執行，再最後開upload flag。此前UI仍表示圖片不會保存；只在enable後提供opt-in並使用新文案。
 4. Rollback先停新uploads，保持既有photo讀取／刪除／cleanup及new schema保護。不能route回忽略photo欄位的整份replace writer；不能以刪bucket／照片作回滾。
 5. 启用後只以QA帳戶做真縮圖upload→meal attach→GET→reload/History→replace→detach/delete→generation cleanup readback；不觸碰真實使用者資料。沒有cloud resource/config驗證時，整項標「source ready，未啟用／未production驗收」。

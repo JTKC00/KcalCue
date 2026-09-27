@@ -18,6 +18,20 @@ export const mealTypes = {
   snack: "小食",
 } as const;
 export const CURRENT_MEAL_SCHEMA_VERSION = 3;
+export const photoRefSchema = z.strictObject({
+  attachmentId: z.uuid(),
+  generation: z.string().regex(/^[0-9]{1,32}$/),
+  contentType: z.literal("image/jpeg"),
+  width: z.number().int().min(1).max(1600),
+  height: z.number().int().min(1).max(1600),
+  byteSize: z.number().int().min(1).max(2 * 1024 * 1024),
+});
+export type PhotoRef = z.infer<typeof photoRefSchema>;
+export const photoActionSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("attach"), uploadId: z.uuid() }),
+  z.strictObject({ kind: z.literal("remove") }),
+]);
+export type PhotoAction = z.infer<typeof photoActionSchema>;
 export interface MealDraft {
   id: string;
   date: string;
@@ -35,6 +49,7 @@ export interface MealDraft {
   readonly schemaVersion?: number;
   readonly createdAt?: string | null;
   photoPath: string | null;
+  readonly photoRef?: PhotoRef | null;
   photo?: Blob;
   removePhoto?: boolean;
   pendingMutation?: { id: string; fingerprint: string };
@@ -98,6 +113,7 @@ export const mealInputSchema = z.object({
     .min(1)
     .max(12),
   photoPath: z.string().max(250).nullable(),
+  photoAction: photoActionSchema.optional(),
 });
 export function dayNutrition(records: MealRecord[]) {
   const service = new NutritionService(new LocalNutritionProvider());

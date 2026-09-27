@@ -82,6 +82,7 @@ export async function POST(request: Request) {
     if ((previous?.version ?? 0) !== input.version)
       throw new HttpError(409, "conflict");
     if (input.photoPath) throw new HttpError(400, "photos_not_stored");
+    const { photoAction, ...mealInput } = input;
     const local = new LocalNutritionProvider();
     const key = getNutritionApiKey();
     const usda = key ? new UsdaNutritionClient(key, async () =>
@@ -153,7 +154,7 @@ export async function POST(request: Request) {
             )
           : items);
       const record: Omit<MealRecord, "updatedAt"> = {
-        ...input,
+        ...mealInput,
         calorieCorrection: resolveCalorieCorrection(input.calorieCorrection, input.items, previous),
         items,
         analysis,
@@ -164,7 +165,7 @@ export async function POST(request: Request) {
         userId: user.id,
         version: input.version + 1,
       };
-      const saved = await commitMeal(db, user.id, record, input.version);
+      const saved = await commitMeal(db, user.id, record, input.version, photoAction);
       return Response.json(
         { record: saved },
         { headers: { "Cache-Control": "no-store" } },

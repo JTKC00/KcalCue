@@ -31,7 +31,7 @@ const policy: PhotoQuotaPolicy = {
 const hashA = "a".repeat(64);
 const hashB = "b".repeat(64);
 const upload = () => ({ mealId: crypto.randomUUID(), uploadId: crypto.randomUUID(), inputSha256: hashA, inputBytes: 12_345 });
-const stored = { inputSha256: hashA, generation: "1234567890123456789", jpegSha256: hashB,
+const stored = { inputSha256: hashA, generation: "1234567890123456", jpegSha256: hashB,
   width: 1200, height: 900, byteSize: 123_456 };
 const uid = () => `photo-user-${crypto.randomUUID()}`;
 
@@ -163,9 +163,9 @@ describe("private photo asset registry in Firestore emulator", () => {
     await expect(reservePhotoAsset(db, owner, request, policy))
       .rejects.toMatchObject({ status: 409, code: "photo_upload_expired" });
     const newGeneration = await finalizePhotoAsset(db, owner, request.uploadId,
-      { ...stored, generation: "1234567890123456790" });
+      { ...stored, generation: "1234567890123457" });
     expect(newGeneration.state).toBe("deleting");
-    expect(newGeneration.generation).toBe("1234567890123456790");
+    expect(newGeneration.generation).toBe("1234567890123457");
     expect((await db.doc(`${accountPath(owner)}/photoQuota/current`).get()).data()?.reservedBytes)
       .toBe(MAX_PHOTO_JPEG_BYTES);
   });

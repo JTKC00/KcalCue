@@ -4,10 +4,10 @@ import { Timestamp } from "firebase-admin/firestore";
 import { z } from "zod";
 import { HttpError } from "@/lib/server/auth";
 import { accountPath } from "./admin";
-import { mealCollection } from "./meals";
 
-// Registry only. No route or object writer calls this until the private bucket,
-// cleanup runner, and photo-aware meal writer are ready to ship together.
+// Registry and meal transactions are source-only. Do not expose persistent
+// uploads until the private bucket, bounded quota, and durable generation-aware
+// cleanup runner have been configured and independently accepted together.
 export const PHOTO_SCHEMA_VERSION = 4;
 export const PHOTO_PIPELINE_VERSION = 1;
 export const PHOTO_STAGING_MS = 24 * 60 * 60 * 1000;
@@ -20,6 +20,13 @@ const uidSchema = z.string().min(1).max(128).refine(
   (uid) => !/[\/\x00-\x1f]/u.test(uid) && !/^__.*__$/.test(uid),
 );
 const generationSchema = z.string().regex(/^[0-9]{1,32}$/);
+
+// The installed Storage SDK coerces FileOptions.generation to Number. Until
+// a string-exact adapter is available, never attach an unreadable generation.
+export function isReadablePhotoGeneration(value: string): boolean {
+  const numeric = Number(value);
+  return Number.isSafeInteger(numeric) && numeric >= 1 && String(numeric) === value;
+}
 
 export type PhotoAssetState = "uploading" | "staged" | "attached" | "deleting" | "deleted";
 export interface PhotoAsset {
@@ -122,14 +129,14 @@ export function photoObjectKey(uid: string, mealId: string, uploadId: string) {
   return `meal-photos/v1/${Buffer.from(uid, "utf8").toString("base64url")}/${mealId}/${uploadId}.jpg`;
 }
 
-function quotaRefs(db: Firestore, uid: string) {
+export function photoQuotaRefs(db: Firestore, uid: string) {
   return {
     user: db.doc(`${accountPath(uid)}/photoQuota/current`),
     project: db.doc("kcalcuePhotoQuota/current"),
   };
 }
 
-function quota(data: FirebaseFirestore.DocumentData | undefined) {
+export function readPhotoQuota(data: FirebaseFirestore.DocumentData | undefined) {
   if (!data) return { pendingCount: 0, reservedBytes: 0 };
   const { pendingCount, reservedBytes } = data;
   if (!Number.isSafeInteger(pendingCount) || pendingCount < 0 ||
@@ -164,8 +171,8 @@ export async function reservePhotoAsset(
   const input = parseReservation(request);
   const limits = parsePolicy(policy);
   const ref = photoAssetRef(db, uid, input.uploadId);
-  const mealRef = mealCollection(db, uid).doc(input.mealId);
-  const refs = quotaRefs(db, uid);
+  const mealRef = db.doc(`${accountPath(uid)}/meals/${input.mealId}`);
+  const refs = photoQuotaRefs(db, uid);
   return db.runTransaction(async (tx) => {
     const [assetSnap, mealSnap, userSnap, projectSnap] = await Promise.all([
       tx.get(ref), tx.get(mealRef), tx.get(refs.user), tx.get(refs.project),
@@ -179,8 +186,8 @@ export async function reservePhotoAsset(
         throw new HttpError(409, "photo_upload_expired");
       return asset;
     }
-    const user = quota(userSnap.data());
-    const project = quota(projectSnap.data());
+    const user = readPhotoQuota(userSnap.data());
+    const project = readPhotoQuota(projectSnap.data());
     if (user.pendingCount >= limits.maxPendingPerUid ||
         user.reservedBytes + MAX_PHOTO_JPEG_BYTES > limits.maxReservedBytesPerUid ||
         project.reservedBytes + MAX_PHOTO_JPEG_BYTES > limits.maxReservedBytesProject)
@@ -234,7 +241,7 @@ export async function finalizePhotoAsset(
 ): Promise<PhotoAsset> {
   const input = parseStoredMetadata(metadata);
   const ref = photoAssetRef(db, uid, uploadId);
-  const refs = quotaRefs(db, uid);
+  const refs = photoQuotaRefs(db, uid);
   return db.runTransaction(async (tx) => {
     const [assetSnap, userSnap, projectSnap] = await Promise.all([
       tx.get(ref), tx.get(refs.user), tx.get(refs.project),
@@ -244,7 +251,7 @@ export async function finalizePhotoAsset(
     if (asset.ownerUid !== uid || asset.uploadId !== uploadId ||
         asset.inputSha256 !== input.inputSha256)
       throw new HttpError(409, "photo_upload_conflict");
-    const mealSnap = await tx.get(mealCollection(db, uid).doc(asset.mealId));
+    const mealSnap = await tx.get(db.doc(`${accountPath(uid)}/meals/${asset.mealId}`));
     if (asset.state === "deleted" && asset.generation === input.generation)
       // The exact generation was already confirmed gone. A delayed finalize
       // reply for that write cannot recreate it or consume quota again.
@@ -256,8 +263,10 @@ export async function finalizePhotoAsset(
       return asset;
     }
     if (asset.state === "deleting" && asset.generation !== null) return asset;
+    // The object may already exist. Keep its exact generation in durable
+    // cleanup state rather than losing it when this SDK cannot read it safely.
     const expired = asset.state !== "uploading" || mealSnap.data()?.deleted === true ||
-      asset.expiresAt.toMillis() <= Date.now();
+      asset.expiresAt.toMillis() <= Date.now() || !isReadablePhotoGeneration(input.generation);
     const now = Timestamp.now();
     const saved: PhotoAsset = {
       ...asset,
@@ -271,8 +280,8 @@ export async function finalizePhotoAsset(
     };
     tx.set(ref, saved);
     if (expired && asset.state === "uploading") {
-      const user = quota(userSnap.data());
-      const project = quota(projectSnap.data());
+      const user = readPhotoQuota(userSnap.data());
+      const project = readPhotoQuota(projectSnap.data());
       if (user.pendingCount < 1 || project.pendingCount < 1)
         throw new HttpError(503, "photo_quota_corrupt");
       tx.set(refs.user, { ...user, pendingCount: user.pendingCount - 1 });
@@ -282,8 +291,8 @@ export async function finalizePhotoAsset(
       // It never becomes attachable, even if the old reservation was refunded.
       // This may temporarily exceed admission quotas if that refund was reused;
       // upload enablement requires a bounded in-flight lease and reconciler.
-      const user = quota(userSnap.data());
-      const project = quota(projectSnap.data());
+      const user = readPhotoQuota(userSnap.data());
+      const project = readPhotoQuota(projectSnap.data());
       tx.set(refs.user, { ...user, reservedBytes: user.reservedBytes + asset.reservedBytes });
       tx.set(refs.project, { ...project, reservedBytes: project.reservedBytes + asset.reservedBytes });
     }
@@ -300,7 +309,7 @@ export async function expireUnattachedPhotoAsset(
   now = Timestamp.now(),
 ): Promise<PhotoAsset> {
   const ref = photoAssetRef(db, uid, uploadId);
-  const refs = quotaRefs(db, uid);
+  const refs = photoQuotaRefs(db, uid);
   return db.runTransaction(async (tx) => {
     const [assetSnap, userSnap, projectSnap] = await Promise.all([
       tx.get(ref), tx.get(refs.user), tx.get(refs.project),
@@ -312,8 +321,8 @@ export async function expireUnattachedPhotoAsset(
     if (asset.state === "deleting" || asset.state === "deleted") return asset;
     if (asset.expiresAt.toMillis() > now.toMillis())
       throw new HttpError(409, "photo_upload_not_expired");
-    const user = quota(userSnap.data());
-    const project = quota(projectSnap.data());
+    const user = readPhotoQuota(userSnap.data());
+    const project = readPhotoQuota(projectSnap.data());
     if (user.pendingCount < 1 || project.pendingCount < 1)
       throw new HttpError(503, "photo_quota_corrupt");
     const saved: PhotoAsset = { ...asset, state: "deleting", updatedAt: now };
@@ -339,7 +348,7 @@ export async function recordPhotoAssetDeletion(
       !generationSchema.safeParse(confirmation.generation).success)
     throw new HttpError(400, "invalid_photo_generation");
   const ref = photoAssetRef(db, uid, uploadId);
-  const refs = quotaRefs(db, uid);
+  const refs = photoQuotaRefs(db, uid);
   return db.runTransaction(async (tx) => {
     const [assetSnap, userSnap, projectSnap] = await Promise.all([
       tx.get(ref), tx.get(refs.user), tx.get(refs.project),
@@ -359,8 +368,8 @@ export async function recordPhotoAssetDeletion(
       throw new HttpError(409, "photo_generation_conflict");
     if (confirmation.kind === "object_absent" && asset.generation !== null)
       throw new HttpError(409, "photo_generation_required");
-    const user = quota(userSnap.data());
-    const project = quota(projectSnap.data());
+    const user = readPhotoQuota(userSnap.data());
+    const project = readPhotoQuota(projectSnap.data());
     if (user.reservedBytes < asset.reservedBytes ||
         project.reservedBytes < asset.reservedBytes)
       throw new HttpError(503, "photo_quota_corrupt");
