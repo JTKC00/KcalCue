@@ -19,6 +19,7 @@ vi.mock("@/lib/server/meal-lookup-attempt", () => ({
 }));
 import { POST } from "./route";
 import { HttpError } from "@/lib/server/auth";
+import { claimMealLookupAttempt } from "@/lib/server/meal-lookup-attempt";
 
 function input() {
   return { ...newDraft(), mutationId: crypto.randomUUID(), items: createEditableFoodItems(demoFoodAnalysis.foods) };
@@ -82,12 +83,13 @@ describe("meal calorie correction commands", () => {
     expect(response.status).toBe(200);
     expect((await response.json()).record.calorieCorrection).toEqual(changed ? null : previous.calorieCorrection);
   });
-  it("returns the accepted correction unchanged for a repeated mutation even with different retry content", async () => {
+  it("rejects changed correction content under an acknowledged mutation ID", async () => {
     const previous = previousRecord();
     fixture.previous.mockResolvedValue({ deleted: false, record: previous });
+    vi.mocked(claimMealLookupAttempt).mockRejectedValueOnce(new HttpError(409, "conflict"));
     const response = await POST(request({ ...previous, version: 0, calorieCorrection: null }));
-    expect(response.status).toBe(200);
-    expect((await response.json()).record).toEqual(previous);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: { code: "conflict" } });
     expect(fixture.commit).not.toHaveBeenCalled();
   });
   it("rejects stale correction edits and authentication failures without writing", async () => {

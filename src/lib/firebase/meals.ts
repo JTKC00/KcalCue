@@ -108,6 +108,8 @@ export async function previousMeal(db: Firestore, uid: string, id: string) {
         record?: MealRecord;
         version: number;
         mutationId: string;
+        inputFingerprint?: string;
+        inputFingerprintVersion?: number;
       }
     | undefined;
 }
@@ -119,6 +121,7 @@ export async function commitMeal(
   record: Omit<MealRecord, "updatedAt">,
   expected: number,
   photoAction?: PhotoAction,
+  inputFingerprint?: string,
 ) {
   // Release gate: this accepts only a previously staged server-owned asset.
   // There is deliberately no upload route or storage writer in this slice;
@@ -196,6 +199,7 @@ export async function commitMeal(
           deleted: false,
           version: record.version,
           mutationId: record.mutationId,
+          ...(inputFingerprint ? { inputFingerprint, inputFingerprintVersion: 1 } : {}),
           record: saved,
         }),
       ),

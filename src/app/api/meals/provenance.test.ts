@@ -17,6 +17,7 @@ vi.mock("@/lib/server/meal-lookup-attempt", () => ({
   releaseMealLookupAttempt: vi.fn().mockResolvedValue(true),
 }));
 import { POST } from "./route";
+import { claimMealLookupAttempt } from "@/lib/server/meal-lookup-attempt";
 
 function input() {
   return { ...newDraft(), mode: "live" as const, mutationId: crypto.randomUUID(), analysis: demoFoodAnalysis,
@@ -68,9 +69,11 @@ describe("meal analysis provenance boundary", () => {
     expect(saved.calorieCorrection).toEqual({ kcal: 723, source: "user" });
   });
   it("returns the same provenance for an acknowledged retry without rewriting or refreshing its time", async () => {
-    const previous = { ...input(), version: 1, userId: "verified-user", updatedAt: "2026-09-26T10:01:00Z" };
+    const original = input();
+    const previous = { ...original, version: 1, userId: "verified-user", updatedAt: "2026-09-26T10:01:00Z" };
     fixture.previous.mockResolvedValue({ record: previous, deleted: false });
-    const response = await POST(request({ ...previous, version: 0, analysisProvenance: null }));
+    vi.mocked(claimMealLookupAttempt).mockResolvedValueOnce({ state: "committed", record: previous });
+    const response = await POST(request(original));
     expect((await response.json()).record).toEqual(previous);
     expect(fixture.commit).not.toHaveBeenCalled();
   });

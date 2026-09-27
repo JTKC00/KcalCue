@@ -70,14 +70,24 @@ export async function POST(request: Request) {
     const parsed = mealInputSchema.safeParse(json);
     if (!parsed.success) throw new HttpError(400, "invalid_request");
     const input = parsed.data;
+    const inputFingerprint = createHash("sha256")
+      .update(JSON.stringify(input)).digest("hex");
     const existing = await previousMeal(db, user.id, input.id);
     const previous = existing?.record;
     if (existing?.deleted) throw new HttpError(409, "conflict");
-    if (previous?.mutationId === input.mutationId)
+    if (previous?.mutationId === input.mutationId) {
+      // Validate the replay against the durable fingerprint before returning
+      // its old ACK; a changed meal or photo action must not appear saved.
+      const replay = await claimMealLookupAttempt(db, {
+        uid: user.id, mealId: input.id, mutationId: input.mutationId,
+        expectedVersion: input.version, fingerprint: inputFingerprint,
+      });
+      if (replay.state !== "committed") throw new HttpError(409, "conflict");
       return Response.json(
-        { record: previous },
+        { record: replay.record },
         { headers: { "Cache-Control": "no-store" } },
       );
+    }
     assertWritableMealSchema(previous);
     if ((previous?.version ?? 0) !== input.version)
       throw new HttpError(409, "conflict");
@@ -108,7 +118,7 @@ export async function POST(request: Request) {
       mealId: input.id,
       mutationId: input.mutationId,
       expectedVersion: input.version,
-      fingerprint: createHash("sha256").update(JSON.stringify(input)).digest("hex"),
+      fingerprint: inputFingerprint,
     });
     if (attempt.state === "committed")
       return Response.json(
@@ -165,7 +175,7 @@ export async function POST(request: Request) {
         userId: user.id,
         version: input.version + 1,
       };
-      const saved = await commitMeal(db, user.id, record, input.version, photoAction);
+      const saved = await commitMeal(db, user.id, record, input.version, photoAction, inputFingerprint);
       return Response.json(
         { record: saved },
         { headers: { "Cache-Control": "no-store" } },

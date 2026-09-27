@@ -24,6 +24,7 @@ vi.mock("@/lib/server/meal-lookup-attempt", () => ({
 }));
 import { assertWritableMealSchema } from "./meals";
 import { POST } from "@/app/api/meals/route";
+import { claimMealLookupAttempt } from "@/lib/server/meal-lookup-attempt";
 
 function input() {
   return {
@@ -86,6 +87,7 @@ describe("meal schema write boundary", () => {
     const body = input();
     const previous = { ...body, version: 1, schemaVersion: 5, createdAt: null, futureField: "retain" };
     fixture.previous.mockResolvedValue({ deleted: false, record: previous });
+    vi.mocked(claimMealLookupAttempt).mockResolvedValueOnce({ state: "committed", record: previous as unknown as MealRecord });
     const response = await POST(request(body));
     expect(response.status).toBe(200);
     expect((await response.json()).record).toEqual(previous);

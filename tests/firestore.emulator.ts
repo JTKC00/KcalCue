@@ -370,6 +370,22 @@ describe("meal USDA lookup attempt lease against real Firestore emulator", () =>
     });
   });
 
+  it("uses a legacy meal's surviving attempt fingerprint to reject changed ACK retries", async () => {
+    const committed = await seedLegacy();
+    await db.doc(`kcalcueUsers/${uid}/mealLookupAttempts/${committed.id}`).set({
+      mutationId: committed.mutationId,
+      expectedVersion: 0,
+      fingerprint,
+      token: crypto.randomUUID(),
+      leaseUntil: 0,
+      state: "spent",
+    });
+    expect(await claim(db, { mealId: committed.id, mutationId: committed.mutationId }))
+      .toEqual({ state: "committed", record: committed });
+    await expect(claim(db, { mealId: committed.id, mutationId: committed.mutationId,
+      fingerprint: "b".repeat(64) })).rejects.toMatchObject({ status: 409, code: "conflict" });
+  });
+
   it("isolates attempts by account and fails closed on malformed state", async () => {
     expect((await claim(db)).state).toBe("claimed");
     expect((await claim(db, { uid: "other-user" })).state).toBe("claimed");
@@ -493,6 +509,31 @@ async function seedLegacy(fields: Record<string, unknown> = {}) {
 }
 
 describe("Firebase meal API against real Firestore emulator", () => {
+  it("ACKs an exact meal retry but rejects changed content under its committed mutation ID", async () => {
+    const body = input();
+    const firstResponse = await POST(request(body));
+    expect(firstResponse.status).toBe(200);
+    const saved = (await firstResponse.json()).record;
+    const ref = mealCollection(db, uid).doc(body.id);
+    const before = await ref.get();
+    expect(before.data()?.inputFingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect(before.data()?.inputFingerprintVersion).toBe(1);
+
+    const retry = await POST(request(body));
+    expect(retry.status).toBe(200);
+    expect((await retry.json()).record).toEqual(saved);
+    expect((await ref.get()).updateTime!.isEqual(before.updateTime!)).toBe(true);
+
+    const changed = await POST(request({ ...body, time: "19:30" }));
+    expect(changed.status).toBe(409);
+    expect((await changed.json()).error.code).toBe("conflict");
+    const changedFood = await POST(request({ ...body, items: body.items.map((item, index) =>
+      index === 0 ? { ...item, displayName: `${item.displayName} 改` } : item) }));
+    expect(changedFood.status).toBe(409);
+    const changedPhotoAction = await POST(request({ ...body, photoAction: { kind: "remove" } }));
+    expect(changedPhotoAction.status).toBe(409);
+    expect((await ref.get()).updateTime!.isEqual(before.updateTime!)).toBe(true);
+  });
   it("persists client-reported provenance once across edits, retries, reads and copy-as-new", async () => {
     const body = { ...input(), mode: "live", analysis: demoFoodAnalysis,
       analysisProvenance: { ...provenance, source: "server-verified", verified: true } };

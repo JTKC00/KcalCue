@@ -82,8 +82,30 @@ export async function claimMealLookupAttempt(
     ]);
     const previous = mealSnapshot.data();
     if (previous?.deleted) throw new HttpError(409, "conflict");
-    if (previous?.mutationId === mutationId)
+    if (previous?.mutationId === mutationId) {
+      // New meal envelopes retain the exact parsed request fingerprint. An
+      // old client can otherwise reuse an ACKed key with changed fields and
+      // receive the previous record as a misleading successful save.
+      if (previous.inputFingerprint !== undefined ||
+        previous.inputFingerprintVersion !== undefined) {
+        if (previous.inputFingerprintVersion !== 1 ||
+          typeof previous.inputFingerprint !== "string" ||
+          !fingerprintPattern.test(previous.inputFingerprint))
+          throw new Error("Invalid committed meal fingerprint");
+        if (previous.inputFingerprint !== fingerprint)
+          throw new HttpError(409, "conflict");
+      } else {
+        // Legacy records predate the envelope field; use the durable lookup
+        // attempt marker when it still describes this mutation.
+        const marker: unknown = attemptSnapshot.data();
+        if (marker !== undefined && !validMarker(marker))
+          throw new Error("Invalid meal lookup attempt state");
+        if (marker && marker.mutationId === mutationId &&
+          (marker.fingerprint !== fingerprint || marker.expectedVersion !== expectedVersion))
+          throw new HttpError(409, "conflict");
+      }
       return { state: "committed", record: previous.record as MealRecord };
+    }
     assertWritableMealSchema(previous?.record);
     if ((previous?.version ?? 0) !== expectedVersion)
       throw new HttpError(409, "conflict");
