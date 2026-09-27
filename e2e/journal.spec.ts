@@ -13,6 +13,7 @@ function cloud() {
   const records = new Map<string, TestRecord>();
   const saves: TestRecord[] = [];
   let failSave = false;
+  let failMealRead = false;
   const offline = new WeakSet<BrowserContext>();
   async function install(context: BrowserContext) {
     const token = `${Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url")}.${Buffer.from(JSON.stringify({ sub: userId, user_id: userId, email: "tester@example.com", email_verified: true, iat: Math.floor(Date.now() / 1000), auth_time: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 3600, aud: "demo-kcalcue", iss: "https://securetoken.google.com/demo-kcalcue", firebase: { sign_in_provider: "password" } })).toString("base64url")}.test`;
@@ -82,6 +83,13 @@ function cloud() {
         return;
       }
       if (req.method() === "GET") {
+        if (failMealRead) {
+          await route.fulfill({
+            status: 503,
+            json: { error: { code: "service_unavailable" } },
+          });
+          return;
+        }
         await route.fulfill({ json: { records: [...records.values()] } });
         return;
       }
@@ -138,6 +146,7 @@ function cloud() {
     failNextSave: () => {
       failSave = true;
     },
+    failMealReads: (value: boolean) => { failMealRead = value; },
   };
 }
 
@@ -163,6 +172,24 @@ async function rice(page: Page) {
     .getByRole("combobox", { name: "食物名稱", exact: true })
     .fill("白飯");
 }
+
+test("failed first cloud read stays unknown until an empty meal list is confirmed", async ({ page, context }) => {
+  const backend = cloud();
+  backend.failMealReads(true);
+  await backend.install(context);
+  await page.goto("/");
+  await login(page);
+  await expect(page.getByRole("heading", { name: "尚未確認今日記錄" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "今日摘要" })).toHaveCount(0);
+  await page.getByRole("button", { name: "歷史", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "尚未確認歷史記錄" })).toBeVisible();
+  backend.failMealReads(false);
+  await page.reload();
+  await page.getByRole("button", { name: "今日", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "今日未有記錄" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "今日摘要" }))
+    .toContainText("今日餐數0餐");
+});
 
 test("whole-meal user calories survive reload without inventing nutrition, and can be cleared", async ({ page, context }) => {
   const backend = cloud();

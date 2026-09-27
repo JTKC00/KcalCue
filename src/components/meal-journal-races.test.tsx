@@ -161,7 +161,7 @@ it("reads a private photo only in History and removes its URL on account change"
   fireEvent.click(screen.getByRole("button", { name: "查看餐點附圖" }));
   expect(await screen.findByRole("img", { name: "餐點附圖" })).toHaveAttribute("src", "blob:account-a-photo");
   await signIn("b");
-  await screen.findByRole("heading", { name: "未有餐點記錄" });
+  await screen.findByRole("heading", { name: "尚未確認歷史記錄" });
   expect(revokeUrl).toHaveBeenCalledWith("blob:account-a-photo");
   expect(screen.queryByRole("img", { name: "餐點附圖" })).not.toBeInTheDocument();
 });
@@ -170,7 +170,7 @@ it("never renders, caches, or discards an old account's conflict under the next 
   const meal = record("a", "private-a");
   const write = await startConflictRecovery(meal);
   await signIn("b");
-  await screen.findByRole("heading", { name: "今日未有記錄" });
+  await screen.findByRole("heading", { name: "尚未確認今日記錄" });
   await act(async () => { write.resolve(); });
   await waitFor(() => expect(screen.getByRole("button", { name: "帳戶與安裝" })).toBeEnabled());
   expect(fixture.discard).not.toHaveBeenCalled();
@@ -183,7 +183,7 @@ it("rejects a conflict recovery continuation after A to B to A", async () => {
   const meal = record("a", "private-a");
   const write = await startConflictRecovery(meal);
   await signIn("b");
-  await screen.findByRole("heading", { name: "今日未有記錄" });
+  await screen.findByRole("heading", { name: "尚未確認今日記錄" });
   await signIn("a");
   await screen.findByRole("heading", { name: "private-a" });
   await act(async () => { write.resolve(); });
@@ -256,7 +256,7 @@ it("coalesces sync requests arriving during an active refresh into one follow-up
 it("does not clear or sign out B when A's logout preflight finishes after an account change", async () => {
   render(<MealJournal initialProviderMode="live" />);
   await signIn("a");
-  await screen.findByRole("heading", { name: "今日未有記錄" });
+  await screen.findByRole("heading", { name: "尚未確認今日記錄" });
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "帳戶與安裝" })); });
   const preflight = deferred<SyncState>();
   fixture.state.mockImplementationOnce(() => preflight.promise);

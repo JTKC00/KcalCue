@@ -10,6 +10,9 @@ const fixture = vi.hoisted(() => ({
   callback: null as null | ((user: { uid: string; email: string }) => void),
   list: vi.fn(),
   preparePhoto: vi.fn(),
+  sync: vi.fn(),
+  syncedAt: {} as Record<string, string | null>,
+  cachedSyncedAt: null as string | null,
   uid: "a",
 }));
 vi.mock("@/lib/firebase/client", () => ({
@@ -26,13 +29,15 @@ vi.mock("@/lib/meals/repository", () => ({
   RepositoryError: class extends Error {},
   MealRepository: class {
     list = fixture.list;
-    state = async (uid: string) => ({ remote: await fixture.list(uid), jobs: [], syncedAt: null });
-    sync = async () => {};
+    state = async (uid: string) => ({
+      remote: await fixture.list(uid), jobs: [], syncedAt: fixture.syncedAt[uid] ?? null,
+    });
+    sync = fixture.sync;
   },
 }));
 vi.mock("@/lib/meals/cache", () => ({
   localMeals: {
-    read: async () => ({ records: [], draft: null, syncedAt: null }),
+    read: async () => ({ records: [], draft: null, syncedAt: fixture.cachedSyncedAt }),
     write: async () => {},
     clear: async () => {},
   },
@@ -55,6 +60,9 @@ import { PhotoPreparationError } from "@/lib/meals/photo";
 beforeEach(() => {
   fixture.list.mockReset();
   fixture.preparePhoto.mockReset();
+  fixture.sync.mockReset();
+  fixture.syncedAt = {};
+  fixture.cachedSyncedAt = null;
   fixture.uid = "a";
   localStorage.clear();
   window.history.replaceState(null, "", "#today");
@@ -167,6 +175,7 @@ it("does not present manual food or missing legacy analysis as AI output", async
 });
 it("shows an explicit zero-meal and zero-kcal Today summary", async () => {
   fixture.list.mockResolvedValue([]);
+  fixture.syncedAt.a = "2026-09-27T12:00:00.000Z";
   render(<MealJournal initialProviderMode="demo" />);
   await act(async () => {
     fixture.callback!({ uid: "a", email: "a@example.com" });
@@ -176,7 +185,68 @@ it("shows an explicit zero-meal and zero-kcal Today summary", async () => {
   expect(summary).toHaveTextContent("卡路里0kcal");
 });
 
+it("does not present an unverified first cloud load as zero meals or empty history", async () => {
+  fixture.list.mockResolvedValue([]);
+  fixture.cachedSyncedAt = "2026-09-26T12:00:00.000Z";
+  render(<MealJournal initialProviderMode="demo" />);
+  await act(async () => fixture.callback!({ uid: "a", email: "a@example.com" }));
+  expect(await screen.findByRole("heading", { name: "尚未確認今日記錄" })).toBeVisible();
+  expect(screen.queryByLabelText("今日摘要")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "歷史" }));
+  expect(screen.getByRole("heading", { name: "尚未確認歷史記錄" })).toBeVisible();
+  expect(screen.queryByRole("heading", { name: "未有餐點記錄" })).not.toBeInTheDocument();
+});
+
+it("keeps the cloud list unverified after a failed first request, then shows zero after a successful empty read", async () => {
+  fixture.list.mockResolvedValue([]);
+  Object.defineProperty(navigator, "onLine", { value: true });
+  fixture.sync.mockRejectedValueOnce(new TypeError("network failed"));
+  render(<MealJournal initialProviderMode="demo" />);
+  await act(async () => fixture.callback!({ uid: "a", email: "a@example.com" }));
+  expect(await screen.findByRole("heading", { name: "尚未確認今日記錄" })).toBeVisible();
+  expect(screen.queryByLabelText("今日摘要")).not.toBeInTheDocument();
+  fixture.sync.mockImplementation(async (uid: string) => {
+    fixture.syncedAt[uid] = "2026-09-27T12:00:00.000Z";
+  });
+  act(() => window.dispatchEvent(new Event("kcalcue-sync")));
+  await waitFor(() => expect(screen.getByLabelText("今日摘要"))
+    .toHaveTextContent("今日餐數0餐"));
+  expect(screen.queryByRole("heading", { name: "尚未確認今日記錄" }))
+    .not.toBeInTheDocument();
+});
+
+it("does not reuse a previous account's confirmed empty state after switching accounts", async () => {
+  fixture.list.mockResolvedValue([]);
+  fixture.syncedAt.a = "2026-09-27T12:00:00.000Z";
+  render(<MealJournal initialProviderMode="demo" />);
+  await act(async () => fixture.callback!({ uid: "a", email: "a@example.com" }));
+  expect(await screen.findByLabelText("今日摘要")).toHaveTextContent("今日餐數0餐");
+  fixture.uid = "b";
+  await act(async () => fixture.callback!({ uid: "b", email: "b@example.com" }));
+  expect(await screen.findByRole("heading", { name: "尚未確認今日記錄" })).toBeVisible();
+  expect(screen.queryByLabelText("今日摘要")).not.toBeInTheDocument();
+});
+
+it("keeps local meals visible while making the missing cloud snapshot explicit", async () => {
+  const item = createEditableFoodItems([demoFoodAnalysis.foods[0]])[0];
+  fixture.list.mockResolvedValue([{
+    ...newDraft(), userId: "a", mode: "manual",
+    items: [{ ...item, displayName: "本機早餐" }],
+    calorieCorrection: { kcal: 400, source: "user" },
+    updatedAt: new Date().toISOString(), mutationId: crypto.randomUUID(),
+  } satisfies MealRecord]);
+  render(<MealJournal initialProviderMode="demo" />);
+  await act(async () => fixture.callback!({ uid: "a", email: "a@example.com" }));
+  expect(await screen.findByRole("heading", { name: "本機早餐" })).toBeVisible();
+  expect(screen.getByText("雲端記錄尚未確認；以下只顯示本機已知餐點。"))
+    .toBeVisible();
+  expect(screen.getByLabelText("今日摘要")).toHaveTextContent("今日餐數1餐");
+  expect(screen.queryByRole("heading", { name: "尚未確認今日記錄" }))
+    .not.toBeInTheDocument();
+});
+
 it("keeps Today meal count and kcal aligned as records change", async () => {
+  fixture.syncedAt.a = "2026-09-27T12:00:00.000Z";
   const item = createEditableFoodItems([demoFoodAnalysis.foods[0]])[0];
   const record = (kcal: number): MealRecord => ({
     ...newDraft(), id: crypto.randomUUID(), userId: "a", mode: "manual",

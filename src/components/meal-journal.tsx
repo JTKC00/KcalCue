@@ -262,14 +262,15 @@ export function MealJournal({
         await localMeals.clear("guest");
       }
       if (!isCurrentLoad()) return;
-      const [visibleRecords, syncState] =
-        id === "guest"
-          ? [[], { jobs: [] }]
-          : await Promise.all([repository.list(id), repository.state(id)]);
+      const syncState = id === "guest" ? null : await repository.state(id);
+      const visibleRecords = syncState ? visibleMeals(syncState) : [];
+      // The durable outbox proves whether this account ever received a cloud
+      // meal snapshot. The separate draft cache is not authority for that.
+      const knownSyncedAt = syncState ? syncState.syncedAt ?? null : local.syncedAt ?? null;
       // A later sign-in may finish while IndexedDB is reading the previous account.
       if (!isCurrentLoad()) return;
       loading = false;
-      current.current = { userId: id, ...local, records: visibleRecords };
+      current.current = { userId: id, ...local, records: visibleRecords, syncedAt: knownSyncedAt };
       cacheEnabled.current = true;
       setUserId(id);
       setEmail(address);
@@ -277,9 +278,9 @@ export function MealJournal({
       setDraft(local.draft);
       setInitialDraft(local.draft ?? undefined);
       setEditorKey((key) => key + 1);
-      setSyncedAt(local.syncedAt);
+      setSyncedAt(knownSyncedAt);
       setReady(true);
-      setPending(syncState.jobs);
+      setPending(syncState?.jobs ?? []);
       void refresh();
     }
     const auth = firebaseAuth();
@@ -815,6 +816,7 @@ export function MealJournal({
     )
     .sort((a, b) => `${b.date}${b.time}`.localeCompare(`${a.date}${a.time}`));
   const days = [...new Set(visible.map((record) => record.date))];
+  const cloudRecordsUnknown = userId !== "guest" && !syncedAt;
   const displayedNotice = syncNotice || (typeof notice === "string" ? notice : notice.message);
 
   return (
@@ -1175,7 +1177,12 @@ export function MealJournal({
               </button>
             </label>
           )}
-          {tab === "today" && !visible.length && (
+          {cloudRecordsUnknown && !!visible.length && (
+            <p className="journal-card" role="status">
+              雲端記錄尚未確認；以下只顯示本機已知餐點。
+            </p>
+          )}
+          {tab === "today" && !visible.length && !cloudRecordsUnknown && (
             <div className="day-summary journal-card" role="region" aria-label="今日摘要">
               <div><span>今日餐數</span><strong>0</strong><small>餐</small></div>
               <div><span>卡路里</span><strong>0</strong><small>kcal</small></div>
@@ -1183,13 +1190,19 @@ export function MealJournal({
           )}
           {!visible.length && (
             <section className="journal-card empty-journal">
-              <h2>{tab === "today" ? "今日未有記錄" : "未有餐點記錄"}</h2>
+              <h2>{cloudRecordsUnknown
+                ? tab === "today" ? "尚未確認今日記錄" : "尚未確認歷史記錄"
+                : tab === "today" ? "今日未有記錄" : "未有餐點記錄"}</h2>
               <p>
-                {tab === "today" &&
-                  records.some((record) => record.mode !== "demo" && record.date < today) &&
-                  "之前的餐點可在歷史記錄查看。"}
-                拍張相，或者手動記低你的一餐。
-                {!email && "登入後可以跨裝置同步。"}
+                {cloudRecordsUnknown
+                  ? "尚未成功讀取雲端餐點，不能確認是否沒有記錄。可先記低一餐，連線後再同步。"
+                  : <>
+                    {tab === "today" &&
+                      records.some((record) => record.mode !== "demo" && record.date < today) &&
+                      "之前的餐點可在歷史記錄查看。"}
+                    拍張相，或者手動記低你的一餐。
+                    {!email && "登入後可以跨裝置同步。"}
+                  </>}
               </p>
               <button
                 className="button button-secondary"
