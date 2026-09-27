@@ -20,6 +20,7 @@ import {
 import { elapsedMs, logSafeTiming } from "@/lib/server/timing";
 import { authenticated, apiError } from "@/lib/server/auth";
 import { acquireLiveAnalysis } from "@/lib/server/live-analysis-admission";
+import { reserveDailyLiveAnalysis } from "@/lib/server/durable-analysis-quota";
 import {
   readBoundedRequestBody,
   RequestBodyTooLargeError,
@@ -92,9 +93,11 @@ export async function POST(request: Request) {
     }
 
     let userId: string;
+    let userDb: Awaited<ReturnType<typeof authenticated>>["db"];
     try {
-      const { user } = await authenticated(request);
+      const { user, db } = await authenticated(request);
       userId = user.id;
+      userDb = db;
     } catch (error) {
       return apiError(error);
     }
@@ -128,6 +131,23 @@ export async function POST(request: Request) {
     }
 
     try {
+      let admission;
+      try {
+        admission = await reserveDailyLiveAnalysis(userDb, userId);
+      } catch (error) {
+        // If quota storage is unavailable, do not invoke a paid provider.
+        console.error("[kcalcue:analysis-quota]", {
+          errorClass: error instanceof Error ? error.name : "unknown",
+        });
+        return errorResponse("service_unavailable", 503);
+      }
+      if (!admission.allowed) {
+        const limited = rateLimitedJsonResponse(admission.retryAfterSeconds);
+        return NextResponse.json(limited.body, {
+          status: limited.status,
+          headers: limited.headers,
+        });
+      }
       visionStartedAt = performance.now();
       const analysis = await provider.analyzeImage(
         {

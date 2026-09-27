@@ -28,7 +28,7 @@ KcalCue 是一個 mobile-first Responsive Web App / PWA：使用者影低或選�
 - semantic HTML、keyboard focus、form labels、ARIA loading/error state 及 reduced-motion support
 - Web App Manifest、SVG／PNG icon、iOS `apple-touch-icon` 及版本化離線 service worker
 - GitHub Actions CI：lint、typecheck、tests、deterministic evaluation 及 production build
-- `/api/analyze` 及 `/api/nutrition/resolve` 的 in-process per-IP rate limit（公開部署時仍應由 gateway 再限一次）
+- `/api/analyze` 及 `/api/nutrition/resolve` 的 in-process per-IP rate limit；Live 圖片分析另有 Firestore 每 UTC 日原子額度（公開部署時仍應由 gateway 再限一次）
 
 ## 技術棧
 
@@ -213,7 +213,7 @@ V0.1 baseline 紀錄見 [GOAL_REPORT.md](./GOAL_REPORT.md)；HEIC／CI／evaluat
 正式公開前（hosting 由部署者設定；此 repo 不綁死單一平台）：
 
 1. 只在 server env 放入 `OPENAI_API_KEY`／可選 `NUTRITION_API_KEY`，不要寫進 client 或 git。
-2. 在 gateway／WAF 再加 rate limit。App 內 in-memory token bucket 只保護單一實例；serverless 多實例下會變弱。
+2. 在 gateway／WAF 再加 rate limit。App 內的短時間 token bucket 只保護單一實例；Live 圖片分析另以 Firestore transaction 限制已驗證帳戶每 UTC 日 50 次、整個 Firebase project 每 UTC 日 1,000 次。額度在付費 provider 前扣除；結果失敗或未知時不退還，Firestore 不可用時拒絕 Live 分析。
 3. 設定 Firebase Email Link／Google provider、授權網域、Admin 憑證及試用名單；在獨立專案部署 Firestore deny-all client rules，資料由 API 授權。
 4. 用真實裝置手測：Live JPEG、HEIC（若裝置支援）、取消分析、429。
 
@@ -223,7 +223,7 @@ V0.1 baseline 紀錄見 [GOAL_REPORT.md](./GOAL_REPORT.md)；HEIC／CI／evaluat
 - USDA 即時查詢是可選的 server-side fallback，對港式食物名稱的命中率有限；沒有可靠克重換算的非克單位不會自動納入總數。
 - OpenAI API 不直接接受 HEIC / HEIF；KcalCue 會在 server memory 以 `sharp` 轉成 JPEG。Safari 17 起由 WebKit 支援 HEIC 預覽，其他瀏覽器是否能直接顯示相片取決於其 image decoder；KcalCue 仍會在預覽失敗時保留分析入口。目標裝置的完整 browser matrix 仍需持續 QA。
 - 單張相片本身無法知道真實重量、隱藏材料、油份、糖份或完整烹調方法；產品刻意以範圍及 uncertainty 表達。
-- App 內 rate limit 是單實例記憶體 bucket，不是跨實例的 abuse-control 系統。
+- 短時間 rate limit 仍是單實例記憶體 bucket，其他 API 亦沒有跨實例額度。Live 每日額度的 Firestore counter 目前未設定 TTL 清理；日後公開擴大流量前需決定 retention／TTL policy。
 - 尚未在真正 KcalCue Firebase project、Email／Google OAuth、OpenAI key 或 iPhone／Android 實機完成驗收；自動化替身測試不代表這些項目已通過。
 - 離線讀寫由持久 outbox 提供，應用開啟或恢復連線後自動同步；關閉 App 時不保證背景同步，AI 分析需要連線。
 - 不提供醫療建議、個人減重目標、社交或付費功能。
