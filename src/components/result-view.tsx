@@ -4,9 +4,6 @@ import { useMemo } from "react";
 import { confidenceCopy, copy } from "@/content/zh-HK";
 import {
   collectUncertaintyReasons,
-  confidenceLevel,
-  mealConfidence,
-  recognitionConfidenceLevel,
 } from "@/lib/domain/confidence";
 import { mealShowsTotal } from "@/lib/nutrition/calculation";
 import type { NutritionConfidence } from "@/lib/nutrition/types";
@@ -63,8 +60,9 @@ function foodRecognition(
     item.identityLevel !== originalFood.identityLevel
   ) return { label: "已手動修正" };
 
-  const level = confidenceLevel(originalFood.recognitionConfidence);
-  return { label: `${copy.recognitionLabel}：${confidenceCopy[level]}`, level, originalFood };
+  // The model's self-reported score has not been calibrated against real photos.
+  // Keep it in the original analysis, but do not present it as accuracy proof.
+  return { label: `${copy.recognitionLabel}：請核對`, originalFood };
 }
 
 function displayRange(range: NutrientRange, increment = 1): string {
@@ -119,13 +117,9 @@ export function ResultView({
   );
   const recognitionSources = items.map(item => foodRecognition(item, originalFoods.get(item.id), mode));
   const aiFoods = recognitionSources.flatMap(source => source.originalFood ? [source.originalFood] : []);
-  const recognition = recognitionConfidenceLevel(aiFoods);
-  const visionConfidence = aiFoods.length > 0 ? mealConfidence(aiFoods) : null;
-  const recognitionLabel = aiFoods.length === 0
-    ? "食物來源"
-    : aiFoods.length === items.length ? copy.recognitionLabel : `${copy.recognitionLabel}（未修改項目）`;
+  const recognitionLabel = aiFoods.length === 0 ? "食物來源" : copy.recognitionLabel;
   const recognitionSummary = aiFoods.length > 0
-    ? `${confidenceCopy[recognition]}${aiFoods.length < items.length ? `（${aiFoods.length} / ${items.length} 項）` : ""}`
+    ? `請逐項核對${aiFoods.length < items.length ? `（${aiFoods.length} / ${items.length} 項為 AI 建議）` : ""}`
     : [...new Set(recognitionSources.map(source => source.label))].join("／") || "未有 AI 辨認資料";
   const nutritionConfidence = weakestNutritionConfidence(meal);
   const unknownPortion = items.some(item => item.portionMin === null || item.portionMax === null);
@@ -200,14 +194,10 @@ export function ResultView({
           ) : null}
 
           <section
-            className={`confidence-panel ${
-              visionConfidence === "low" || nutritionConfidence === "none"
-                ? "confidence-panel-low"
-                : ""
-            }`}
+            className={`confidence-panel ${nutritionConfidence === "none" ? "confidence-panel-low" : ""}`}
           >
             <div className="confidence-icon">
-              {visionConfidence === "low" || nutritionConfidence === "none" ? (
+              {aiFoods.length > 0 || nutritionConfidence === "none" ? (
                 <AlertIcon />
               ) : (
                 <CheckIcon />
@@ -224,7 +214,6 @@ export function ResultView({
                     ? confidenceCopy[nutritionConfidence]
                     : `${copy.nutritionIncomplete}（${meal.includedCount} / ${meal.totalCount}）`}
               </strong>
-              {visionConfidence === "low" ? <p>{copy.coarseEstimate}</p> : null}
             </div>
           </section>
 
@@ -307,10 +296,13 @@ export function ResultView({
             (analysis.visibleEvidence.length > 0 ||
               analysis.estimatedInformation.length > 0) ? (
               <details className="explain-details evidence-details">
-                <summary>{copy.evidenceTitle}</summary>
+                <summary>{mode === "demo" ? "示範資料說明" : copy.evidenceTitle}</summary>
+                <p>{mode === "demo"
+                  ? "以下是示範資料，並非所選相片的 AI 分析。"
+                  : "以下是原始 AI 分析，可能與你修正後的食物或份量不同。"}</p>
                 {analysis.visibleEvidence.length > 0 ? (
                   <div>
-                    <strong>相片可見</strong>
+                    <strong>{mode === "demo" ? "示範內容" : "AI 原判為相片可見"}</strong>
                     <ul>
                       {analysis.visibleEvidence.map((item) => (
                         <li key={item}>{item}</li>
@@ -320,7 +312,7 @@ export function ResultView({
                 ) : null}
                 {analysis.estimatedInformation.length > 0 ? (
                   <div>
-                    <strong>估算資料</strong>
+                    <strong>{mode === "demo" ? "示範估算" : "AI 原始估算"}</strong>
                     <ul>
                       {analysis.estimatedInformation.map((item) => (
                         <li key={item}>{item}</li>

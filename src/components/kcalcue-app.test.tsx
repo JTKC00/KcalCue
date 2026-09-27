@@ -95,7 +95,7 @@ describe("KcalCueApp analysis cancel", () => {
     await user.upload(document.querySelectorAll<HTMLInputElement>('input[type="file"]')[1], pngFile());
     await user.click(screen.getByRole("button", { name: /開始分析/ }));
     expect(await screen.findByRole("heading", { name: "暫未能計算" })).toBeInTheDocument();
-    expect(screen.getByText(/無法從相片判斷你吃了多少/)).toBeInTheDocument();
+    expect(screen.getByText(/請核對食物名稱；現有資料不足以判斷你吃了多少/)).toBeInTheDocument();
     expect(screen.getByLabelText("最少份量")).toHaveValue(null);
     expect(onDraftChange.mock.lastCall?.[0].items[0]).toMatchObject({ portionMin: null, portionMax: null });
     expect(fetchMock).toHaveBeenCalledTimes(1);

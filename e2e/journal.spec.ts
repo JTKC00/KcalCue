@@ -1059,7 +1059,8 @@ test("mobile real-photo flow preserves an unknown serving through save and reloa
   await page.getByRole("button", { name: "開始分析", exact: true }).click();
   await expect(page.getByRole("heading", { name: "暫未能計算" })).toBeVisible();
   await expect(page.getByRole("spinbutton", { name: "最少份量", exact: true })).toBeEmpty();
-  await expect(page.getByText(/無法從相片判斷你吃了多少/)).toBeVisible();
+  await expect(page.getByText(/請核對食物名稱；現有資料不足以判斷你吃了多少/)).toBeVisible();
+  await expect(page.getByText("AI 辨認：請核對")).toBeVisible();
   expect(nutritionRequests).toBe(0);
   await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
   await expect.poll(() => backend.records.size).toBe(1);

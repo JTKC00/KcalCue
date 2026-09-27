@@ -36,7 +36,7 @@ export const copy = {
   foodBreakdown: "食物明細",
   foodBreakdownBody: "修正名稱、份量或單位，總數會即時更新。",
   uncertaintyTitle: "主要不確定因素",
-  evidenceTitle: "相片分析依據",
+  evidenceTitle: "原始 AI 相片分析",
   localNutritionNotice: "營養數值來自有來源的參考資料，不是 AI 自行估算。",
   nutritionSourceTitle: "營養資料來源",
   partialNutrition: "此總數只包括有可靠營養資料的食物。",

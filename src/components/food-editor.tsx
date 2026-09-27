@@ -3,7 +3,6 @@
 import { useState } from "react";
 
 import { confidenceCopy, copy, unitCopy } from "@/content/zh-HK";
-import type { ConfidenceLevel } from "@/lib/domain/confidence";
 import {
   portionUnits,
   type PortionUnit,
@@ -14,7 +13,6 @@ import { TrashIcon } from "./icons";
 
 export interface RecognitionBadge {
   label: string;
-  level?: ConfidenceLevel;
 }
 
 interface FoodEditorProps {
@@ -100,7 +98,7 @@ export function FoodEditor({
 
       <div className="food-summary-line">
         <strong>{calorieRange(calculation)}</strong>
-        <span className={`confidence-badge${recognition.level ? ` confidence-${recognition.level}` : ""}`}>
+        <span className="confidence-badge">
           {recognition.label}
         </span>
         <span
@@ -165,7 +163,7 @@ export function FoodEditor({
       </div>
 
       {item.portionMin === null ? (
-        <p className="food-uncertainty" role="status">這項食物已辨認，但無法從相片判斷你吃了多少。可填寫份量；留空儲存時，本餐 kcal 會標示為未知。</p>
+        <p className="food-uncertainty" role="status">請核對食物名稱；現有資料不足以判斷你吃了多少。可填寫份量；留空儲存時，本餐 kcal 會標示為未知。</p>
       ) : null}
 
       {calculation.unavailableReason ? (

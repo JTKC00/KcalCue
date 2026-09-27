@@ -56,10 +56,10 @@ describe("recognition provenance in the meal editor", () => {
     render(<KcalCueApp initialProviderMode="live" initialDraft={analyzedDraft()} />);
     fireEvent.click(screen.getByRole("button", { name: /新增食物/ }));
     fireEvent.change(screen.getAllByLabelText("食物名稱")[1], { target: { value: "白飯" } });
-    expect(card(0).getByText("AI 辨認：高")).toBeInTheDocument();
+    expect(card(0).getByText("AI 辨認：請核對")).toBeInTheDocument();
     expect(card(1).getByText("手動輸入")).toBeInTheDocument();
     expect(card(1).queryByText(/AI 辨認/)).not.toBeInTheDocument();
-    expect(confidencePanel()).toHaveTextContent("AI 辨認（未修改項目）高（1 / 2 項）");
+    expect(confidencePanel()).toHaveTextContent("AI 辨認請逐項核對（1 / 2 項為 AI 建議）");
     expect(confidencePanel()).not.toHaveClass("confidence-panel-low");
     expect(screen.queryByText(copy.coarseEstimate)).not.toBeInTheDocument();
   });
@@ -71,6 +71,9 @@ describe("recognition provenance in the meal editor", () => {
     fireEvent.change(screen.getByLabelText("食物名稱"), { target: { value: "白飯" } });
     expect(card().getByText("已手動修正")).toBeInTheDocument();
     expect(screen.queryByText(/AI 辨認/)).not.toBeInTheDocument();
+    const evidence = screen.getByText("原始 AI 相片分析").closest("details")!;
+    expect(evidence).toHaveTextContent("以下是原始 AI 分析，可能與你修正後的食物或份量不同。");
+    expect(evidence).toHaveTextContent("AI 原判為相片可見相片中有香蕉。");
     const correction = changed.mock.lastCall![0];
     expect(correction.analysis).toEqual(draft.analysis);
     expect(correction.items[0].recognitionConfidence).toBe(0.95);
@@ -88,8 +91,8 @@ describe("recognition provenance in the meal editor", () => {
     fireEvent.blur(maximum);
     expect(maximum).toHaveValue(180);
     fireEvent.change(screen.getByLabelText("食物名稱"), { target: { value: "  香蕉  " } });
-    expect(card().getByText("AI 辨認：高")).toBeInTheDocument();
-    expect(confidencePanel()).toHaveTextContent("AI 辨認高");
+    expect(card().getByText("AI 辨認：請核對")).toBeInTheDocument();
+    expect(confidencePanel()).toHaveTextContent("AI 辨認請逐項核對");
     expect(card().queryByText("已手動修正")).not.toBeInTheDocument();
   });
 
@@ -105,14 +108,30 @@ describe("recognition provenance in the meal editor", () => {
     expect(card().getByText("示範資料")).toBeInTheDocument();
     expect(screen.queryByText(/AI 辨認/)).not.toBeInTheDocument();
     expect(confidencePanel()).toHaveTextContent("食物來源示範資料");
+    const evidence = screen.getByText("示範資料說明").closest("details")!;
+    expect(evidence).toHaveTextContent("以下是示範資料，並非所選相片的 AI 分析。");
+    expect(evidence).toHaveTextContent("示範內容");
+    expect(evidence).not.toHaveTextContent("AI 原判為相片可見");
   });
 
-  it("uses the immutable original score rather than an editable item score", () => {
+  it("does not imply a calibrated accuracy level from a model's low self-rating", () => {
     const draft = analyzedDraft();
     draft.analysis!.foods[0].recognitionConfidence = 0.3;
     render(<KcalCueApp initialProviderMode="live" initialDraft={draft} />);
-    expect(card().getByText("AI 辨認：低")).toBeInTheDocument();
-    expect(confidencePanel()).toHaveTextContent("AI 辨認低");
+    expect(card().getByText("AI 辨認：請核對")).toBeInTheDocument();
+    expect(confidencePanel()).toHaveTextContent("AI 辨認請逐項核對");
+    expect(card().queryByText(/AI 辨認：[高中低]/)).not.toBeInTheDocument();
+  });
+
+  it("does not call an unknown-portion AI food definitively recognized", () => {
+    const draft = analyzedDraft();
+    draft.analysis!.foods[0].portionMin = null;
+    draft.analysis!.foods[0].portionMax = null;
+    draft.items[0] = { ...draft.items[0], portionMin: null, portionMax: null };
+    render(<KcalCueApp initialProviderMode="live" initialDraft={draft} />);
+    expect(card().getByText("AI 辨認：請核對")).toBeInTheDocument();
+    expect(card().getByText(/請核對食物名稱；現有資料不足以判斷你吃了多少/)).toBeInTheDocument();
+    expect(card().queryByText(/這項食物已辨認/)).not.toBeInTheDocument();
   });
 
   it("does not keep an AI badge when the identity level changed without renaming", () => {
@@ -134,12 +153,12 @@ describe("recognition provenance in the meal editor", () => {
     draft.originalItems = structuredClone(draft.items);
     draft.items.reverse();
     render(<KcalCueApp initialProviderMode="live" initialDraft={draft} />);
-    expect(card(0).getByText("AI 辨認：低")).toBeInTheDocument();
-    expect(card(1).getByText("AI 辨認：高")).toBeInTheDocument();
+    expect(card(0).getByText("AI 辨認：請核對")).toBeInTheDocument();
+    expect(card(1).getByText("AI 辨認：請核對")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "刪除 白飯" }));
     expect(screen.getByLabelText("食物名稱")).toHaveValue("香蕉");
-    expect(card().getByText("AI 辨認：高")).toBeInTheDocument();
-    expect(confidencePanel()).toHaveTextContent("AI 辨認高");
+    expect(card().getByText("AI 辨認：請核對")).toBeInTheDocument();
+    expect(confidencePanel()).toHaveTextContent("AI 辨認請逐項核對");
   });
 
   it("does not treat originalItems as proof that added foods were recognized by AI", () => {
@@ -152,14 +171,14 @@ describe("recognition provenance in the meal editor", () => {
     expect(card(2).getByText("未有 AI 辨認資料")).toBeInTheDocument();
     expect(card(1).queryByText(/AI 辨認：/)).not.toBeInTheDocument();
     expect(card(2).queryByText(/AI 辨認：/)).not.toBeInTheDocument();
-    expect(confidencePanel()).toHaveTextContent("AI 辨認（未修改項目）高（1 / 3 項）");
+    expect(confidencePanel()).toHaveTextContent("AI 辨認請逐項核對（1 / 3 項為 AI 建議）");
   });
 
   it("keeps the original AI badge when only normalizedName uses a different language", () => {
     const draft = analyzedDraft();
     draft.items[0].normalizedName = "香蕉";
     render(<KcalCueApp initialProviderMode="live" initialDraft={draft} />);
-    expect(card().getByText("AI 辨認：高")).toBeInTheDocument();
+    expect(card().getByText("AI 辨認：請核對")).toBeInTheDocument();
     expect(card().queryByText("已手動修正")).not.toBeInTheDocument();
   });
 });
