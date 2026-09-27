@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { z } from "zod";
 import { authenticated, apiError, HttpError } from "@/lib/server/auth";
 import { mealInputSchema, type MealRecord } from "@/lib/meals/types";
 import { readAnalysisProvenance } from "@/lib/domain/analysis-provenance";
@@ -6,6 +7,7 @@ import { resolveCalorieCorrection } from "@/lib/meals/calories";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import {
   listMeals,
+  listMealPage,
   previousMeal,
   commitMeal,
   assertWritableMealSchema,
@@ -27,16 +29,47 @@ import {
 export async function GET(request: Request) {
   try {
     const { db, user } = await authenticated(request);
+    const params = new URL(request.url).searchParams;
+    const paged = params.get("paged") === "1";
+    const cursor = params.get("cursor");
+    const expectedRevision = params.get("revision");
+    if (paged && (
+      (cursor !== null && !z.uuid().safeParse(cursor).success) ||
+      (cursor !== null && (!expectedRevision || expectedRevision.length > 128)) ||
+      (cursor === null && expectedRevision !== null)
+    )) throw new HttpError(400, "invalid_request");
     const revision =
       (await db.doc(accountPath(user.id)).get()).data()?.revision ?? "empty";
+    if (paged && cursor !== null && revision === "empty")
+      throw new HttpError(409, "snapshot_changed");
+    if (paged && cursor !== null && expectedRevision !== revision)
+      throw new HttpError(409, "snapshot_changed");
     // An absent account revision cannot prove that the meal collection is empty
     // (for example after an import or metadata repair). Always read it in that case.
-    if (revision !== "empty" && new URL(request.url).searchParams.get("since") === revision)
+    if (cursor === null && revision !== "empty" && params.get("since") === revision)
       return Response.json(
         { revision },
         { headers: { "Cache-Control": "no-store" } },
       );
+    if (paged) {
+      // Legacy imports can have meals without an account revision. Their
+      // concurrent changes cannot be detected across page requests, so read
+      // one complete Firestore query snapshot until metadata is established.
+      const page = revision === "empty"
+        ? { records: await listMeals(db, user.id) }
+        : await listMealPage(db, user.id, cursor ?? undefined);
+      const afterRevision =
+        (await db.doc(accountPath(user.id)).get()).data()?.revision ?? "empty";
+      if (afterRevision !== revision) throw new HttpError(409, "snapshot_changed");
+      return Response.json(
+        { ...page, revision },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
     const records = await listMeals(db, user.id);
+    const afterRevision =
+      (await db.doc(accountPath(user.id)).get()).data()?.revision ?? "empty";
+    if (afterRevision !== revision) throw new HttpError(409, "snapshot_changed");
     return Response.json(
       { records, revision },
       { headers: { "Cache-Control": "no-store" } },

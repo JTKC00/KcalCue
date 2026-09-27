@@ -20,6 +20,26 @@ async function result(response: Response) {
     );
   return body;
 }
+const mealCursorPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MAX_MEAL_SYNC_PAGES = 1_000;
+type MealListPage = { records?: MealRecord[]; revision?: string; nextCursor?: string };
+function mealListPage(value: unknown): MealListPage {
+  if (!value || typeof value !== "object") throw new RepositoryError("invalid_response", 502);
+  const page = value as Record<string, unknown>;
+  if (page.revision !== undefined && typeof page.revision !== "string")
+    throw new RepositoryError("invalid_response", 502);
+  if (page.records !== undefined && (!Array.isArray(page.records) ||
+    !page.records.every((record) => record && typeof record === "object" && typeof record.id === "string")))
+    throw new RepositoryError("invalid_response", 502);
+  if (page.nextCursor !== undefined &&
+    (typeof page.nextCursor !== "string" || !mealCursorPattern.test(page.nextCursor) ||
+      !Array.isArray(page.records) || page.records.at(-1)?.id !== page.nextCursor ||
+      typeof page.revision !== "string"))
+    throw new RepositoryError("invalid_response", 502);
+  if (page.records === undefined && typeof page.revision !== "string")
+    throw new RepositoryError("invalid_response", 502);
+  return page as MealListPage;
+}
 function currentUser() {
   const user = firebaseAuth()?.currentUser;
   const uid = user?.uid;
@@ -195,17 +215,54 @@ export class MealRepository {
       }
       if (uid !== firebaseAuth()?.currentUser?.uid) return;
       const since = (await changeSyncState(uid)).revision;
-      const response = await result(
-        await authorizedFetch(
-          `/api/meals${since ? `?since=${encodeURIComponent(since)}` : ""}`,
-          { cache: "no-store" },
-          uid,
-        ),
-      );
+      const readSnapshot = async (): Promise<MealListPage | null> => {
+        if (uid !== firebaseAuth()?.currentUser?.uid || !navigator.onLine) return null;
+        const first = mealListPage(await result(await authorizedFetch(
+          `/api/meals?paged=1${since ? `&since=${encodeURIComponent(since)}` : ""}`,
+          { cache: "no-store" }, uid,
+        )));
+        let records = first.records;
+        let cursor = first.nextCursor;
+        if (cursor) {
+          const received = new Set(records!.map((record) => record.id));
+          const complete = [...records!];
+          for (let pageNumber = 1; cursor; pageNumber++) {
+            if (pageNumber >= MAX_MEAL_SYNC_PAGES)
+              throw new RepositoryError("invalid_response", 502);
+            if (uid !== firebaseAuth()?.currentUser?.uid || !navigator.onLine) return null;
+            const page = mealListPage(await result(await authorizedFetch(
+              `/api/meals?paged=1&cursor=${encodeURIComponent(cursor)}&revision=${encodeURIComponent(first.revision!)}`,
+              { cache: "no-store" }, uid,
+            )));
+            if (page.revision !== first.revision || !page.records ||
+              page.records.some((record) => received.has(record.id)) ||
+              page.nextCursor === cursor)
+              throw new RepositoryError("invalid_response", 502);
+            for (const record of page.records) received.add(record.id);
+            complete.push(...page.records);
+            cursor = page.nextCursor;
+          }
+          records = complete;
+        }
+        return { records, revision: first.revision };
+      };
+      let snapshot: MealListPage | null = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          snapshot = await readSnapshot();
+          break;
+        } catch (error) {
+          // A concurrent cloud write invalidates the page cursor. Restart the
+          // read once without replaying any already-acknowledged meal writes.
+          if (!(error instanceof RepositoryError && error.code === "snapshot_changed") || attempt === 1)
+            throw error;
+        }
+      }
+      if (!snapshot || uid !== firebaseAuth()?.currentUser?.uid) return;
       await changeSyncState(uid, (state) => ({
         ...state,
-        remote: response.records ?? state.remote,
-        revision: response.revision,
+        remote: snapshot.records ?? state.remote,
+        revision: snapshot.revision,
         syncedAt: new Date().toISOString(),
       }));
     });

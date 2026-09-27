@@ -10,6 +10,7 @@ vi.mock("@/lib/firebase/meals", async (original) => ({
   previousMeal: vi.fn(),
   commitMeal: vi.fn(),
   listMeals: vi.fn(),
+  listMealPage: vi.fn(),
 }));
 vi.mock("@/lib/server/env", () => ({ getNutritionApiKey: vi.fn(() => null) }));
 vi.mock("@/lib/server/durable-nutrition-quota", () => ({ reserveHourlyUsdaCall: vi.fn() }));
@@ -17,7 +18,7 @@ vi.mock("@/lib/server/meal-lookup-attempt", () => ({
   claimMealLookupAttempt: vi.fn(), releaseMealLookupAttempt: vi.fn(),
 }));
 
-import { commitMeal, listMeals, previousMeal } from "@/lib/firebase/meals";
+import { commitMeal, listMealPage, listMeals, previousMeal } from "@/lib/firebase/meals";
 import { getNutritionApiKey } from "@/lib/server/env";
 import { reserveHourlyUsdaCall } from "@/lib/server/durable-nutrition-quota";
 import { claimMealLookupAttempt, releaseMealLookupAttempt } from "@/lib/server/meal-lookup-attempt";
@@ -67,6 +68,7 @@ describe("GET /api/meals revision reads", () => {
   beforeEach(() => {
     authorize.mockReset();
     vi.mocked(listMeals).mockReset().mockResolvedValue([meal as unknown as MealRecord]);
+    vi.mocked(listMealPage).mockReset().mockResolvedValue({ records: [meal as unknown as MealRecord] });
   });
 
   it("returns existing meals when the account revision document is absent", async () => {
@@ -90,6 +92,71 @@ describe("GET /api/meals revision reads", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ revision: "rev-1" });
     expect(listMeals).not.toHaveBeenCalled();
+  });
+
+  it("rejects a legacy full read if its revision changes during the query", async () => {
+    const get = vi.fn()
+      .mockResolvedValueOnce({ data: () => ({ revision: "rev-1" }) })
+      .mockResolvedValueOnce({ data: () => ({ revision: "rev-2" }) });
+    authorize.mockResolvedValue({ db: { doc: () => ({ get }) }, user: { id: "qa-user" } });
+    const response = await GET(new Request("http://localhost/api/meals"));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: { code: "snapshot_changed" } });
+    expect(listMeals).toHaveBeenCalledOnce();
+  });
+
+  it("checks the account revision around a bounded page", async () => {
+    const get = vi.fn().mockResolvedValue({ data: () => ({ revision: "rev-1" }) });
+    authorize.mockResolvedValue({ db: { doc: () => ({ get }) }, user: { id: "qa-user" } });
+    vi.mocked(listMealPage).mockResolvedValue({ records: [meal as unknown as MealRecord], nextCursor: meal.id });
+
+    const response = await GET(new Request("http://localhost/api/meals?paged=1"));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ records: [meal], revision: "rev-1", nextCursor: meal.id });
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(listMealPage).toHaveBeenCalledWith(expect.anything(), "qa-user", undefined);
+    expect(listMeals).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "?paged=1&cursor=bad&revision=rev-1",
+    `?paged=1&cursor=${meal.id}`,
+    "?paged=1&revision=rev-1",
+  ])("rejects an invalid paged cursor request: %s", async (query) => {
+    authorize.mockResolvedValue({ db: {}, user: { id: "qa-user" } });
+    const response = await GET(new Request(`http://localhost/api/meals${query}`));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "invalid_request" } });
+    expect(listMealPage).not.toHaveBeenCalled();
+  });
+
+  it("rejects a revision change before a continuation read", async () => {
+    const get = vi.fn().mockResolvedValue({ data: () => ({ revision: "rev-2" }) });
+    authorize.mockResolvedValue({ db: { doc: () => ({ get }) }, user: { id: "qa-user" } });
+    const response = await GET(new Request(`http://localhost/api/meals?paged=1&cursor=${meal.id}&revision=rev-1`));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: { code: "snapshot_changed" } });
+    expect(listMealPage).not.toHaveBeenCalled();
+  });
+
+  it("rejects a revision change during the page query", async () => {
+    const get = vi.fn()
+      .mockResolvedValueOnce({ data: () => ({ revision: "rev-1" }) })
+      .mockResolvedValueOnce({ data: () => ({ revision: "rev-2" }) });
+    authorize.mockResolvedValue({ db: { doc: () => ({ get }) }, user: { id: "qa-user" } });
+    const response = await GET(new Request("http://localhost/api/meals?paged=1"));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: { code: "snapshot_changed" } });
+  });
+
+  it("reads a paged collection when the revision is empty even if since matches", async () => {
+    const get = vi.fn().mockResolvedValue({ data: () => undefined });
+    authorize.mockResolvedValue({ db: { doc: () => ({ get }) }, user: { id: "qa-user" } });
+    const response = await GET(new Request("http://localhost/api/meals?paged=1&since=empty"));
+    expect(await response.json()).toEqual({ records: [meal], revision: "empty" });
+    expect(listMeals).toHaveBeenCalledOnce();
+    expect(listMealPage).not.toHaveBeenCalled();
   });
 });
 

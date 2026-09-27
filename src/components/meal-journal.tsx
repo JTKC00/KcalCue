@@ -35,6 +35,7 @@ const messages: Record<string, string> = {
   login_required: "登入已過期，請重新登入。待同步修改仍保留，登入後自動重試。",
   conflict:
     "這餐已在另一個裝置修改或刪除。你的修改仍保留；可保留為新餐點草稿，或放棄待同步修改。",
+  snapshot_changed: "雲端餐點清單剛有更新，請再試同步；本機紀錄仍保留。",
   invalid_request: "請檢查食物名稱、份量及日期時間。每餐最多 12 項食物。",
   unsupported_schema: "這筆餐點的資料格式暫未支援，修改仍保留於本機。",
   photo_failed: "照片未能處理，可再試一次，或移除草稿圖片。",

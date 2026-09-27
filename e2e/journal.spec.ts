@@ -18,6 +18,8 @@ function cloud() {
   let committedSaveAckGate: Promise<void> | null = null;
   let releaseCommittedSaveAck: (() => void) | null = null;
   let failMealRead = false;
+  let mealPageSize: number | null = null;
+  const mealReadUrls: string[] = [];
   const offline = new WeakSet<BrowserContext>();
   async function install(context: BrowserContext) {
     const token = `${Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url")}.${Buffer.from(JSON.stringify({ sub: userId, user_id: userId, email: "tester@example.com", email_verified: true, iat: Math.floor(Date.now() / 1000), auth_time: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 3600, aud: "demo-kcalcue", iss: "https://securetoken.google.com/demo-kcalcue", firebase: { sign_in_provider: "password" } })).toString("base64url")}.test`;
@@ -87,11 +89,24 @@ function cloud() {
         return;
       }
       if (req.method() === "GET") {
+        mealReadUrls.push(req.url());
         if (failMealRead) {
           await route.fulfill({
             status: 503,
             json: { error: { code: "service_unavailable" } },
           });
+          return;
+        }
+        if (mealPageSize && url.searchParams.get("paged") === "1") {
+          const sorted = [...records.values()].sort((a, b) => a.id.localeCompare(b.id));
+          const cursor = url.searchParams.get("cursor");
+          const start = cursor ? sorted.findIndex((record) => record.id === cursor) + 1 : 0;
+          const page = sorted.slice(start, start + mealPageSize);
+          const nextCursor = page.length === mealPageSize ? page.at(-1)?.id : undefined;
+          await route.fulfill({ json: {
+            records: page, revision: "paged-test-revision",
+            ...(nextCursor ? { nextCursor } : {}),
+          } });
           return;
         }
         await route.fulfill({ json: { records: [...records.values()] } });
@@ -161,7 +176,9 @@ function cloud() {
   return {
     records,
     saves,
+    mealReadUrls,
     install,
+    setMealPageSize: (size: number) => { mealPageSize = size; },
     setOffline: async (context: BrowserContext, value: boolean) => {
       if (value) offline.add(context);
       else offline.delete(context);
@@ -202,6 +219,42 @@ async function rice(page: Page) {
     .getByRole("combobox", { name: "食物名稱", exact: true })
     .fill("白飯");
 }
+
+test("a fresh mobile session assembles every paged meal before showing Today and History", async ({ browser, page, context }) => {
+  const backend = cloud();
+  await backend.install(context);
+  await page.goto("/");
+  await login(page);
+  await rice(page);
+  await page.getByRole("button", { name: "自行填寫本餐卡路里", exact: true }).click();
+  await page.getByRole("spinbutton", { name: "手動卡路里（整餐 kcal）", exact: true }).fill("650");
+  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  await expect.poll(() => backend.records.size).toBe(1);
+  const first = [...backend.records.values()][0];
+  const secondId = crypto.randomUUID();
+  backend.records.set(secondId, {
+    ...first, id: secondId, mutationId: crypto.randomUUID(), mealType: "lunch",
+    calorieCorrection: { kcal: 500, source: "user" },
+    items: (first.items as Array<Record<string, unknown>>).map((item) => ({ ...item, id: crypto.randomUUID(), displayName: "第二餐" })),
+  });
+  backend.setMealPageSize(1);
+
+  const fresh = await browser.newContext({ viewport: { width: 375, height: 812 } });
+  try {
+    await backend.install(fresh);
+    const restored = await fresh.newPage();
+    await restored.goto("/");
+    await login(restored);
+    await expect(restored.locator('.day-summary[aria-label="今日摘要"]')).toContainText("今日餐數2餐");
+    await expect(restored.locator(".day-summary > div").filter({ hasText: "卡路里" }).locator("strong")).toHaveText("1150");
+    await restored.getByRole("button", { name: "歷史", exact: true }).click();
+    await expect(restored.locator(".meal-row")).toHaveCount(2);
+    expect(backend.mealReadUrls.some((url) => new URL(url).searchParams.has("cursor"))).toBe(true);
+    expect(await restored.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+  } finally {
+    await fresh.close();
+  }
+});
 
 test("failed first cloud read stays unknown until an empty meal list is confirmed", async ({ page, context }) => {
   const backend = cloud();

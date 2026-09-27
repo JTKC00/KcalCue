@@ -1,5 +1,5 @@
 import type { Firestore } from "firebase-admin/firestore";
-import { Timestamp } from "firebase-admin/firestore";
+import { FieldPath, Timestamp } from "firebase-admin/firestore";
 import { z } from "zod";
 import {
   CURRENT_MEAL_SCHEMA_VERSION, photoRefSchema,
@@ -99,6 +99,25 @@ export async function listMeals(
     .where("deleted", "==", false)
     .get();
   return snapshot.docs.map((doc) => doc.data().record as MealRecord);
+}
+// One indexed, deterministic query per paged sync read. A full final page may
+// require one empty continuation. Legacy and revisionless reads use listMeals.
+export const MEAL_SYNC_PAGE_SIZE = 100;
+export async function listMealPage(
+  db: Firestore,
+  uid: string,
+  cursor?: string,
+): Promise<{ records: MealRecord[]; nextCursor?: string }> {
+  let query = mealCollection(db, uid)
+    .where("deleted", "==", false)
+    .orderBy(FieldPath.documentId())
+    .limit(MEAL_SYNC_PAGE_SIZE);
+  if (cursor) query = query.startAfter(cursor);
+  const snapshot = await query.get();
+  const records = snapshot.docs.map((doc) => doc.data().record as MealRecord);
+  const nextCursor = snapshot.size === MEAL_SYNC_PAGE_SIZE
+    ? snapshot.docs.at(-1)?.id : undefined;
+  return { records, ...(nextCursor ? { nextCursor } : {}) };
 }
 export async function previousMeal(db: Firestore, uid: string, id: string) {
   const snapshot = await mealCollection(db, uid).doc(id).get();

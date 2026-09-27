@@ -400,6 +400,69 @@ describe("durable offline meal outbox", () => {
     expect(fixture.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
 
+  it("commits a paged cloud snapshot only after all pages share one revision", async () => {
+    const first = await repository.save(draft(), crypto.randomUUID());
+    const second = { ...first, id: crypto.randomUUID(), mutationId: crypto.randomUUID() };
+    await changeSyncState("a", (state) => ({ ...state, jobs: [], remote: [], revision: "old" }));
+    fixture.fetch.mockResolvedValueOnce(Response.json({ records: [first], revision: "next", nextCursor: first.id }))
+      .mockResolvedValueOnce(Response.json({ records: [second], revision: "next" }));
+
+    await repository.sync();
+
+    expect((await repository.state()).remote).toEqual([first, second]);
+    expect((await repository.state()).revision).toBe("next");
+    expect(fixture.fetch.mock.calls.map(([url]) => url)).toEqual([
+      "/api/meals?paged=1&since=old",
+      `/api/meals?paged=1&cursor=${first.id}&revision=next`,
+    ]);
+  });
+
+  it("restarts one changed page snapshot without replaying meal writes", async () => {
+    const old = await repository.save(draft(), crypto.randomUUID());
+    const next = { ...old, id: crypto.randomUUID(), mutationId: crypto.randomUUID() };
+    await changeSyncState("a", (state) => ({ ...state, jobs: [], remote: [old], revision: "old" }));
+    fixture.fetch.mockResolvedValueOnce(Response.json({ records: [next], revision: "first", nextCursor: next.id }))
+      .mockResolvedValueOnce(Response.json({ error: { code: "snapshot_changed" } }, { status: 409 }))
+      .mockResolvedValueOnce(Response.json({ records: [old, next], revision: "second" }));
+
+    await repository.sync();
+
+    expect((await repository.state()).remote).toEqual([old, next]);
+    expect((await repository.state()).revision).toBe("second");
+    expect(fixture.fetch.mock.calls).toHaveLength(3);
+    expect(fixture.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+  });
+
+  it("keeps the old cloud snapshot after a second changed page conflict", async () => {
+    const old = await repository.save(draft(), crypto.randomUUID());
+    const next = { ...old, id: crypto.randomUUID(), mutationId: crypto.randomUUID() };
+    const previous = await changeSyncState("a", (state) => ({
+      ...state, jobs: [], remote: [old], revision: "old", syncedAt: "2026-09-28T00:00:00.000Z",
+    }));
+    fixture.fetch.mockResolvedValueOnce(Response.json({ records: [next], revision: "new", nextCursor: next.id }))
+      .mockResolvedValueOnce(Response.json({ error: { code: "snapshot_changed" } }, { status: 409 }))
+      .mockResolvedValueOnce(Response.json({ records: [next], revision: "newer", nextCursor: next.id }))
+      .mockResolvedValueOnce(Response.json({ error: { code: "snapshot_changed" } }, { status: 409 }));
+
+    await expect(repository.sync()).rejects.toMatchObject({ code: "snapshot_changed", status: 409 });
+    expect(await repository.state()).toEqual(previous);
+    expect(fixture.fetch.mock.calls).toHaveLength(4);
+  });
+
+  it("does not commit partial pages after the signed-in account changes", async () => {
+    const first = await repository.save(draft(), crypto.randomUUID());
+    const previous = await changeSyncState("a", (state) => ({ ...state, jobs: [], remote: [], revision: "old" }));
+    fixture.fetch.mockImplementationOnce(async () => {
+      fixture.uid = "b";
+      return Response.json({ records: [first], revision: "next", nextCursor: first.id });
+    });
+
+    await repository.sync("a");
+
+    expect(await repository.state("a")).toEqual(previous);
+    expect(fixture.fetch).toHaveBeenCalledTimes(1);
+  });
+
   it("preserves manual calories offline through reload, lost acknowledgement and retry without leaking raw input", async () => {
     const mutationId = crypto.randomUUID();
     const before = { ...draft(), calorieCorrection: { kcal: 723, source: "user" as const }, calorieInput: "723" };

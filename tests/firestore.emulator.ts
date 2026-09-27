@@ -932,6 +932,69 @@ describe("Firebase meal API against real Firestore emulator", () => {
     ).json();
     expect(knownUnchanged).toEqual({ revision: changed.revision });
   });
+  it("reads more than two bounded meal pages in document ID order", async () => {
+    const ids = Array.from({ length: 205 }, (_, index) =>
+      `00000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`);
+    const batch = db.batch();
+    for (const id of ids) batch.set(mealCollection(db, uid).doc(id), {
+      deleted: false, record: { id },
+    });
+    batch.set(mealCollection(db, uid).doc("ffffffff-ffff-4fff-8fff-ffffffffffff"), {
+      deleted: true, record: { id: "deleted" },
+    });
+    batch.set(db.doc(accountPath(uid)), { revision: "page-revision" });
+    await batch.commit();
+
+    const first = await (await GET(new Request("http://localhost/api/meals?paged=1"))).json();
+    const second = await (await GET(new Request(
+      `http://localhost/api/meals?paged=1&cursor=${first.nextCursor}&revision=${first.revision}`,
+    ))).json();
+    const third = await (await GET(new Request(
+      `http://localhost/api/meals?paged=1&cursor=${second.nextCursor}&revision=${second.revision}`,
+    ))).json();
+    expect([first.records.length, second.records.length, third.records.length]).toEqual([100, 100, 5]);
+    expect(first.nextCursor).toBe(ids[99]);
+    expect(second.nextCursor).toBe(ids[199]);
+    expect(third).not.toHaveProperty("nextCursor");
+    expect([...first.records, ...second.records, ...third.records].map((record) => record.id)).toEqual(ids);
+    expect([first.revision, second.revision, third.revision]).toEqual([
+      "page-revision", "page-revision", "page-revision",
+    ]);
+  });
+
+  it("rejects a continuation after a meal mutation advances revision", async () => {
+    const batch = db.batch();
+    for (let index = 0; index < 101; index++) {
+      const id = `00000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`;
+      batch.set(mealCollection(db, uid).doc(id), { deleted: false, record: { id, version: 1 } });
+    }
+    batch.set(db.doc(accountPath(uid)), { revision: "before" });
+    await batch.commit();
+    const first = await (await GET(new Request("http://localhost/api/meals?paged=1"))).json();
+    expect(first.nextCursor).toBeDefined();
+    const edit = db.batch();
+    edit.update(mealCollection(db, uid).doc(first.records[0].id), { record: { id: first.records[0].id, version: 2 } });
+    edit.update(db.doc(accountPath(uid)), { revision: "after" });
+    await edit.commit();
+    const continuation = await GET(new Request(
+      `http://localhost/api/meals?paged=1&cursor=${first.nextCursor}&revision=${first.revision}`,
+    ));
+    expect(continuation.status).toBe(409);
+    expect(await continuation.json()).toEqual({ error: { code: "snapshot_changed" } });
+  });
+
+  it("reads imported meals with an absent revision in one consistent query snapshot", async () => {
+    const batch = db.batch();
+    for (let index = 0; index < 101; index++) {
+      const id = `00000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`;
+      batch.set(mealCollection(db, uid).doc(id), { deleted: false, record: { id } });
+    }
+    await batch.commit();
+    const first = await (await GET(new Request("http://localhost/api/meals?paged=1&since=empty"))).json();
+    expect(first.records).toHaveLength(101);
+    expect(first.revision).toBe("empty");
+    expect(first).not.toHaveProperty("nextCursor");
+  });
   it("denies direct Firestore reads and writes even to a signed-in client", async () => {
     const client = clientApp(
       { projectId: "demo-kcalcue", apiKey: "test" },
