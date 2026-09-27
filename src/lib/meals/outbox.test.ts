@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { Blob as NodeBlob } from "node:buffer";
 import "fake-indexeddb/auto";
 import { createEditableFoodItems } from "@/lib/domain/editable-meal";
 import { demoFoodAnalysis } from "@/lib/providers/food-vision/demo";
 import { dayNutrition, newDraft } from "./types";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { MealRepository } from "./repository";
-import { changeSyncState, clearSyncState } from "./outbox";
+import { changeSyncState, clearSyncState, markPhotoUploadStaged, readPhotoPayload } from "./outbox";
 import { dayCalories } from "./calories";
 import { provenance } from "@/test/provenance-fixture";
 
@@ -45,6 +46,83 @@ beforeEach(async () => {
   });
 });
 describe("durable offline meal outbox", () => {
+  it("keeps a queued mutation immutable when save is retried or reused", async () => {
+    const input = draft();
+    const mutationId = crypto.randomUUID();
+    const first = await repository.save(input, mutationId);
+    const retry = await repository.save(input, mutationId);
+    expect(retry).toEqual(first);
+    expect((await repository.state()).jobs).toHaveLength(1);
+    await expect(repository.save({ ...input, time: "19:30" }, mutationId))
+      .rejects.toMatchObject({ code: "conflict", status: 409 });
+    await expect(repository.save({ ...input, id: crypto.randomUUID() }, mutationId))
+      .rejects.toMatchObject({ code: "conflict", status: 409 });
+    expect((await repository.state()).jobs).toMatchObject([
+      { id: mutationId, record: { id: input.id, time: input.time } },
+    ]);
+  });
+  it("rejects a changed command under an already acknowledged mutation ID", async () => {
+    const mutationId = crypto.randomUUID();
+    const first = await repository.save(draft(), mutationId);
+    fixture.fetch.mockResolvedValueOnce(Response.json({ record: first }))
+      .mockResolvedValueOnce(Response.json({ records: [first] }));
+    await repository.sync();
+    expect((await repository.state()).jobs).toHaveLength(0);
+    await expect(repository.save({ ...first, time: "19:30" }, mutationId))
+      .rejects.toMatchObject({ code: "conflict", status: 409 });
+    expect((await repository.state()).jobs).toHaveLength(0);
+    expect((await repository.list())[0].time).toBe(first.time);
+  });
+  it("holds a photo meal until staged, then clears its Blob only with the meal ACK", async () => {
+    const photo = new NodeBlob(["private jpeg fixture"], { type: "image/jpeg" }) as Blob;
+    const mutationId = crypto.randomUUID();
+    const uploadId = crypto.randomUUID();
+    const first = await repository.saveWithPhoto({ ...draft(), photo }, mutationId, uploadId);
+    const other = await repository.save(draft(), crypto.randomUUID());
+    expect(await (await readPhotoPayload("a", uploadId))?.text()).toBe("private jpeg fixture");
+    expect((await repository.state()).jobs[0]).toMatchObject({
+      id: mutationId, photoUpload: { uploadId, status: "pending" },
+    });
+    fixture.fetch.mockResolvedValueOnce(Response.json({ record: other }))
+      .mockResolvedValueOnce(Response.json({ records: [other] }));
+    await repository.sync();
+    expect(fixture.fetch.mock.calls.filter(([, init]) => init?.method === "POST"))
+      .toHaveLength(1);
+    expect((await repository.state()).jobs[0].id).toBe(mutationId);
+    expect(await readPhotoPayload("a", uploadId)).not.toBeNull();
+
+    await markPhotoUploadStaged("a", uploadId);
+    fixture.fetch.mockResolvedValueOnce(Response.json({ record: first }))
+      .mockResolvedValueOnce(Response.json({ records: [first, other] }));
+    await new MealRepository().sync();
+    expect((await repository.state()).jobs).toHaveLength(0);
+    expect(await readPhotoPayload("a", uploadId)).toBeNull();
+    const command = fixture.fetch.mock.calls.filter(([, init]) => init?.method === "POST")
+      .map(([, init]) => JSON.parse(init.body)).find((item) => item.mutationId === mutationId);
+    expect(command).toMatchObject({
+      mutationId, photoAction: { kind: "attach", uploadId },
+    });
+    expect(command).not.toHaveProperty("photo");
+    expect(command).not.toHaveProperty("photoUpload");
+    const laterUploadId = crypto.randomUUID();
+    await expect(repository.saveWithPhoto({ ...first, time: "19:30", photo }, mutationId, laterUploadId))
+      .rejects.toThrow();
+    expect(await readPhotoPayload("a", laterUploadId)).toBeNull();
+  });
+  it("discards a photo job and Blob without affecting another account", async () => {
+    const photo = new NodeBlob(["private jpeg fixture"], { type: "image/jpeg" }) as Blob;
+    const meal = await repository.saveWithPhoto({ ...draft(), photo }, crypto.randomUUID(), crypto.randomUUID());
+    const uploadId = (await repository.state()).jobs[0].photoUpload!.uploadId;
+    fixture.uid = "b";
+    const other = await repository.saveWithPhoto({ ...draft(), photo }, crypto.randomUUID(), crypto.randomUUID());
+    const otherUploadId = (await repository.state("b")).jobs[0].photoUpload!.uploadId;
+    fixture.uid = "a";
+    await repository.discardPending(meal.id);
+    expect(await readPhotoPayload("a", uploadId)).toBeNull();
+    expect((await repository.state("a")).jobs).toHaveLength(0);
+    expect((await repository.state("b")).jobs).toMatchObject([{ record: { id: other.id } }]);
+    expect(await readPhotoPayload("b", otherUploadId)).not.toBeNull();
+  });
   it("keeps reading and writing queued meals after an additive IDB schema upgrade", async () => {
     const mutationId = crypto.randomUUID();
     const queued = await repository.save(draft(), mutationId);
