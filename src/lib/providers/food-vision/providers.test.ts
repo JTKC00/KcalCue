@@ -162,8 +162,9 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
 
   it.each(["actual-provider-reported-model", undefined])("reports execution metadata after validation with response model %s", async (model) => {
     const onMetadata = vi.fn();
+    const image = (await sharp({ create: { width: 1, height: 1, channels: 3, background: "white" } }).jpeg().toBuffer()).toString("base64");
     responsesCreateMock.mockResolvedValueOnce({ output_text: JSON.stringify(demoFoodAnalysis), model });
-    const analysis = await provider().analyzeImage({ data: "base64-data", mimeType: "image/jpeg" }, { onMetadata });
+    const analysis = await provider().analyzeImage({ data: image, mimeType: "image/jpeg" }, { onMetadata });
     expect(analysis).toEqual(demoFoodAnalysis);
     expect(analysis).not.toHaveProperty("analysisProvenance");
     expect(onMetadata).toHaveBeenCalledOnce();
@@ -174,8 +175,9 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
 
   it.each(["{bad-json", JSON.stringify({ foods: [] })])("does not emit metadata for invalid analysis %s", async (output_text) => {
     const onMetadata = vi.fn();
+    const image = (await sharp({ create: { width: 1, height: 1, channels: 3, background: "white" } }).jpeg().toBuffer()).toString("base64");
     responsesCreateMock.mockResolvedValueOnce({ output_text, model: "unvalidated" });
-    await expect(provider().analyzeImage({ data: "", mimeType: "image/jpeg" }, { onMetadata }))
+    await expect(provider().analyzeImage({ data: image, mimeType: "image/jpeg" }, { onMetadata }))
       .rejects.toMatchObject({ code: "invalid_response" });
     expect(onMetadata).not.toHaveBeenCalled();
   });
