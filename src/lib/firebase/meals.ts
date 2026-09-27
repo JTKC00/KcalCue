@@ -104,6 +104,9 @@ export async function deleteMeal(
     if (previous?.deleted && previous.mutationId === mutationId) return;
     if (previous?.deleted || (previous?.version ?? 0) !== expected)
       throw new HttpError(409, "conflict");
+    // A newer writer may attach resources that this version cannot clean up.
+    // Reject its record rather than tombstoning the meal without its lifecycle work.
+    assertWritableMealSchema(previous?.record);
     tx.set(ref, { deleted: true, version: expected + 1, mutationId });
     tx.set(db.doc(accountPath(uid)), { revision: crypto.randomUUID() });
   });

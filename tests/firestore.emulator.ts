@@ -299,20 +299,22 @@ describe("Firebase meal API against real Firestore emulator", () => {
       expect((await db.doc(accountPath(uid)).get()).data()?.revision).toBe(revision);
     }
   });
-  it("keeps versioned delete and tombstone semantics for future-schema records", async () => {
+  it("rejects deletion of a future-schema record before changing its revision or tombstone", async () => {
     const previous = await seedLegacy({ schemaVersion: CURRENT_MEAL_SCHEMA_VERSION + 1, futureField: "private" });
+    const ref = mealCollection(db, uid).doc(previous.id);
+    const before = await ref.get();
+    const revision = (await db.doc(accountPath(uid)).get()).data()?.revision;
     const mutationId = crypto.randomUUID();
     const url = `http://localhost/api/meals/${previous.id}?version=1&mutationId=${mutationId}`;
     const response = await DELETE(new Request(url, { method: "DELETE" }), {
       params: Promise.resolve({ id: previous.id }),
     });
-    expect(response.status).toBe(200);
-    expect((await mealCollection(db, uid).doc(previous.id).get()).data()).toEqual({
-      deleted: true, version: 2, mutationId,
-    });
-    const resurrect = await POST(request({ ...previous, mutationId: crypto.randomUUID() }));
-    expect(resurrect.status).toBe(409);
-    expect(await resurrect.json()).toMatchObject({ error: { code: "conflict" } });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: { code: "unsupported_schema" } });
+    const after = await ref.get();
+    expect(after.data()).toEqual(before.data());
+    expect(after.updateTime?.isEqual(before.updateTime!)).toBe(true);
+    expect((await db.doc(accountPath(uid)).get()).data()?.revision).toBe(revision);
   });
   it("persists and clears manual calories for unknown food without fabricating macros or changing original analysis", async () => {
     const body = { ...input(), analysis: demoFoodAnalysis, calorieCorrection: { kcal: 650, source: "ai" },
