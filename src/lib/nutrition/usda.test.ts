@@ -219,9 +219,12 @@ describe("USDA nutrition client", () => {
     let finishFetch!: (value: unknown) => void;
     const fetchMock = vi.fn(() => new Promise((resolve) => { finishFetch = resolve; }));
     vi.stubGlobal("fetch", fetchMock);
-    const client = new UsdaNutritionClient("test-only-key");
+    const reserve = vi.fn().mockResolvedValue(true);
+    const client = new UsdaNutritionClient("test-only-key", reserve);
     const first = client.resolve(food);
     const second = client.resolve({ ...food, portionMin: 200, portionMax: 220 });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    expect(reserve).toHaveBeenCalledOnce();
     expect(fetchMock).toHaveBeenCalledOnce();
     finishFetch({ ok: true, status: 200, json: async () => ({ foods: [] }) });
     const results = await Promise.all([first, second]);
@@ -229,6 +232,22 @@ describe("USDA nutrition client", () => {
     expect(results[0].matchType).toBe("unresolved");
     await client.resolve(food);
     expect(fetchMock).toHaveBeenCalledOnce();
+    expect(reserve).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    [false, "rate_limited"],
+    [new Error("quota storage unavailable"), "unavailable"],
+  ])("does not contact USDA when durable budget returns %s", async (admission, code) => {
+    const reserve = admission instanceof Error
+      ? vi.fn().mockRejectedValue(admission)
+      : vi.fn().mockResolvedValue(admission);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(new UsdaNutritionClient("test-only-key", reserve).resolve(food))
+      .rejects.toMatchObject({ code });
+    expect(reserve).toHaveBeenCalledOnce();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("retries USDA after a failed in-flight lookup", async () => {

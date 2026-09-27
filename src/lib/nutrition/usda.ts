@@ -294,7 +294,10 @@ export function clearUsdaCache(): void {
 }
 
 export class UsdaNutritionClient {
-  constructor(private readonly apiKey: string) {}
+  constructor(
+    private readonly apiKey: string,
+    private readonly reserveLookup?: () => Promise<boolean>,
+  ) {}
 
   async resolve(food: FoodEstimate): Promise<NutritionMatch> {
     const identity = canonicalizeFood(food);
@@ -344,6 +347,18 @@ export class UsdaNutritionClient {
     query: string,
   ): Promise<NutritionMatch> {
     try {
+      // Cache hits and coalesced in-flight lookups never reserve another call.
+      // A failed reservation must stop before the external USDA request.
+      if (this.reserveLookup) {
+        let allowed: boolean;
+        try {
+          allowed = await this.reserveLookup();
+        } catch {
+          throw new UsdaNutritionError("unavailable", "USDA lookup budget is unavailable.");
+        }
+        if (!allowed)
+          throw new UsdaNutritionError("rate_limited", "USDA lookup budget is exhausted.");
+      }
       const url = new URL(USDA_SEARCH_URL);
       url.searchParams.set("api_key", this.apiKey);
       url.searchParams.set("query", query);

@@ -5,6 +5,7 @@ import { isCompositeIdentity } from "@/lib/nutrition/canonical";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { UsdaNutritionClient, UsdaNutritionError } from "@/lib/nutrition/usda";
 import { getNutritionApiKey } from "@/lib/server/env";
+import { reserveHourlyUsdaCall } from "@/lib/server/durable-nutrition-quota";
 import {
   NUTRITION_RATE_LIMIT,
   clientIpFromHeaders,
@@ -53,11 +54,14 @@ export async function POST(request: Request) {
 
   const local = new LocalNutritionProvider();
   const apiKey = getNutritionApiKey();
-  const usda = apiKey ? new UsdaNutritionClient(apiKey) : null;
+  let remoteAccount: Awaited<ReturnType<typeof authenticated>> | null = null;
+  const usda = apiKey ? new UsdaNutritionClient(apiKey, async () => {
+    if (!remoteAccount) throw new Error("USDA lookup requires an authenticated account");
+    return (await reserveHourlyUsdaCall(remoteAccount.db, remoteAccount.user.id)).allowed;
+  }) : null;
   const matches: NutritionMatch[] = [];
   const warnings: Array<{ index: number; code: string }> = [];
   const startedAt = performance.now();
-  let remoteAuthorized = false;
 
   try {
     for (const [index, food] of parsed.data.foods.entries()) {
@@ -73,10 +77,9 @@ export async function POST(request: Request) {
 
       // Local reference/demo resolution remains public. A provider-backed
       // lookup requires the same verified trial account as Live analysis.
-      if (!remoteAuthorized) {
+      if (!remoteAccount) {
         try {
-          await authenticated(request);
-          remoteAuthorized = true;
+          remoteAccount = await authenticated(request);
         } catch (error) {
           return apiError(error);
         }

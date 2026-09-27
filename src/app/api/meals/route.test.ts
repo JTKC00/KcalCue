@@ -11,9 +11,13 @@ vi.mock("@/lib/firebase/meals", async (original) => ({
   commitMeal: vi.fn(),
   listMeals: vi.fn(),
 }));
-vi.mock("@/lib/server/env", () => ({ getNutritionApiKey: () => null }));
+vi.mock("@/lib/server/env", () => ({ getNutritionApiKey: vi.fn(() => null) }));
+vi.mock("@/lib/server/durable-nutrition-quota", () => ({ reserveHourlyUsdaCall: vi.fn() }));
 
 import { commitMeal, listMeals, previousMeal } from "@/lib/firebase/meals";
+import { getNutritionApiKey } from "@/lib/server/env";
+import { reserveHourlyUsdaCall } from "@/lib/server/durable-nutrition-quota";
+import { copy } from "@/content/zh-HK";
 import type { MealRecord } from "@/lib/meals/types";
 import { HttpError } from "@/lib/server/auth";
 import { GET, POST } from "./route";
@@ -86,6 +90,8 @@ describe("GET /api/meals revision reads", () => {
 describe("POST /api/meals bounded input", () => {
   beforeEach(() => {
     authorize.mockReset().mockResolvedValue({ db: {}, user: { id: "qa-user" } });
+    vi.mocked(getNutritionApiKey).mockReset().mockReturnValue(null);
+    vi.mocked(reserveHourlyUsdaCall).mockReset().mockResolvedValue({ allowed: true, retryAfterSeconds: 0 });
     vi.mocked(previousMeal).mockReset().mockResolvedValue(undefined);
     vi.mocked(commitMeal).mockReset().mockImplementation(async (_db, _userId, record) => ({
       ...record,
@@ -93,7 +99,7 @@ describe("POST /api/meals bounded input", () => {
     }));
   });
 
-  afterEach(() => { vi.restoreAllMocks(); });
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
   it("persists a valid meal with the existing ownership and version behavior", async () => {
     const response = await POST(jsonRequest(JSON.stringify(meal)));
@@ -106,6 +112,31 @@ describe("POST /api/meals bounded input", () => {
     });
     expect(commitMeal).toHaveBeenCalledOnce();
     expect(body.record.items[0].nutritionMatch.includedInTotal).toBe(true);
+  });
+
+  it.each([
+    { admission: { allowed: false, retryAfterSeconds: 30 }, label: "exhausted" },
+    { admission: new Error("quota storage unavailable"), label: "unavailable" },
+  ])("saves honest unresolved coverage when USDA budget is $label", async ({ admission }) => {
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    if (admission instanceof Error)
+      vi.mocked(reserveHourlyUsdaCall).mockRejectedValue(admission);
+    else
+      vi.mocked(reserveHourlyUsdaCall).mockResolvedValue(admission);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const liveMeal = { ...meal, mode: "live", items: [{
+      ...meal.items[0], id: "unknown", displayName: "mystery food", normalizedName: "mystery food",
+    }] };
+    const response = await POST(jsonRequest(JSON.stringify(liveMeal)));
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.record.items[0].nutritionMatch.includedInTotal).toBe(false);
+    expect(body.record.items[0].nutritionMatch.profile).toBeNull();
+    expect(body.record.items[0].nutritionMatch.reasons).toContain(copy.nutritionLookupFailed);
+    expect(commitMeal).toHaveBeenCalledOnce();
+    expect(reserveHourlyUsdaCall).toHaveBeenCalledOnce();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it.each([undefined, "8"])(

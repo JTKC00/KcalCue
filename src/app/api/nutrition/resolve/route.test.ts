@@ -9,11 +9,15 @@ vi.mock("@/lib/server/auth", async (original) => ({
   ...await original<typeof import("@/lib/server/auth")>(),
   authenticated: vi.fn(),
 }));
+vi.mock("@/lib/server/durable-nutrition-quota", () => ({
+  reserveHourlyUsdaCall: vi.fn(),
+}));
 
 import { getNutritionApiKey } from "@/lib/server/env";
 import { authenticated, HttpError } from "@/lib/server/auth";
 import { NUTRITION_RATE_LIMIT, clearRateLimitStore } from "@/lib/server/rate-limit";
 import { clearUsdaCache } from "@/lib/nutrition/usda";
+import { reserveHourlyUsdaCall } from "@/lib/server/durable-nutrition-quota";
 import { POST } from "./route";
 
 const banana = {
@@ -31,7 +35,11 @@ const banana = {
 describe("POST /api/nutrition/resolve", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(authenticated).mockResolvedValue({} as Awaited<ReturnType<typeof authenticated>>);
+    vi.mocked(authenticated).mockResolvedValue({
+      db: {} as Awaited<ReturnType<typeof authenticated>>["db"],
+      user: { id: "qa-user", email: "qa@example.test" },
+    } as Awaited<ReturnType<typeof authenticated>>);
+    vi.mocked(reserveHourlyUsdaCall).mockReset().mockResolvedValue({ allowed: true, retryAfterSeconds: 0 });
     vi.mocked(getNutritionApiKey).mockReturnValue(null);
     clearRateLimitStore();
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -139,6 +147,31 @@ describe("POST /api/nutrition/resolve", () => {
     expect(body.warnings).toEqual([{ index: 1, code: "rate_limited" }]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(authenticated).toHaveBeenCalledOnce();
+    expect(reserveHourlyUsdaCall).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    [{ allowed: false, retryAfterSeconds: 30 }, "rate_limited"],
+    [new Error("quota storage unavailable"), "unavailable"],
+  ])("preserves unresolved food without USDA fetch when durable budget is %s", async (admission, code) => {
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    if (admission instanceof Error)
+      vi.mocked(reserveHourlyUsdaCall).mockRejectedValue(admission);
+    else
+      vi.mocked(reserveHourlyUsdaCall).mockResolvedValue(admission);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await POST(new Request("http://localhost/api/nutrition/resolve", {
+      method: "POST",
+      body: JSON.stringify({ foods: [{ ...banana, displayName: "scallops", normalizedName: "scallops" }] }),
+    }));
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.matches[0].includedInTotal).toBe(false);
+    expect(body.warnings).toEqual([{ index: 0, code }]);
+    expect(authenticated).toHaveBeenCalledOnce();
+    expect(reserveHourlyUsdaCall).toHaveBeenCalledOnce();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it.each([

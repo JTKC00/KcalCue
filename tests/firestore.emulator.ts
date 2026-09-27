@@ -22,6 +22,7 @@ import { accountPath } from "@/lib/firebase/admin";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { provenance } from "@/test/provenance-fixture";
 import { reserveDailyLiveAnalysis } from "@/lib/server/durable-analysis-quota";
+import { reserveHourlyUsdaCall } from "@/lib/server/durable-nutrition-quota";
 
 const fixture = vi.hoisted(() => ({ auth: vi.fn() }));
 vi.mock("@/lib/server/auth", async (original) => ({
@@ -46,6 +47,7 @@ beforeEach(async () => {
   vi.restoreAllMocks();
   await db.recursiveDelete(db.collection("kcalcueUsers"));
   await db.recursiveDelete(db.collection("kcalcueAnalysisUsage"));
+  await db.recursiveDelete(db.collection("kcalcueUsdaUsage"));
   fixture.auth.mockReset().mockResolvedValue({ db, user: { id: uid } });
 });
 
@@ -96,6 +98,77 @@ describe("durable Live analysis quota against real Firestore emulator", () => {
     expect((await nextDayRef.get()).data()?.count).toBe(1);
     await nextDayRef.set({ count: "corrupt" });
     await expect(reserveDailyLiveAnalysis(db, "another-user", nextDay)).rejects.toThrow("Invalid analysis quota state");
+  });
+});
+
+describe("durable USDA hourly quota against real Firestore emulator", () => {
+  const beforeHour = Date.UTC(2026, 8, 27, 23, 59, 59);
+  const nextHour = Date.UTC(2026, 8, 28, 0, 0, 0);
+
+  it("admits only one competing call for the same user across server instances", async () => {
+    const secondApp = initializeApp({ projectId: "demo-kcalcue" }, "usda-quota-second-instance");
+    const secondDb = getFirestore(secondApp);
+    try {
+      const results = await Promise.all([
+        reserveHourlyUsdaCall(db, uid, beforeHour, { perUser: 1, project: 3 }),
+        reserveHourlyUsdaCall(secondDb, uid, beforeHour, { perUser: 1, project: 3 }),
+      ]);
+      expect(results.map((result) => result.allowed).sort()).toEqual([false, true]);
+      expect(results.find((result) => !result.allowed)?.retryAfterSeconds).toBe(1);
+      const hour = await db.collection("kcalcueUsdaUsage").doc("2026-09-27T23").get();
+      expect(hour.data()?.count).toBe(1);
+      const users = await hour.ref.collection("users").get();
+      expect(users.size).toBe(1);
+      expect(users.docs[0]?.data().count).toBe(1);
+      expect(users.docs[0]?.id).not.toBe(uid);
+    } finally {
+      await secondDb.terminate();
+      await deleteApp(secondApp);
+    }
+  });
+
+  it("enforces the shared project ceiling without writing rejected reservations", async () => {
+    const limits = { perUser: 2, project: 3 };
+    for (const user of ["a", "b", "c"]) {
+      expect((await reserveHourlyUsdaCall(db, user, beforeHour, limits)).allowed).toBe(true);
+    }
+    const rejected = await reserveHourlyUsdaCall(db, "d", beforeHour, limits);
+    expect(rejected).toEqual({ allowed: false, retryAfterSeconds: 1 });
+    const hour = await db.collection("kcalcueUsdaUsage").doc("2026-09-27T23").get();
+    expect(hour.data()?.count).toBe(3);
+    expect((await hour.ref.collection("users").get()).size).toBe(3);
+  });
+
+  it("admits a full twelve-food meal under simultaneous reservations", async () => {
+    const results = await Promise.all(Array.from({ length: 12 }, () =>
+      reserveHourlyUsdaCall(db, uid, beforeHour)));
+    expect(results.every((result) => result.allowed)).toBe(true);
+    const hour = await db.collection("kcalcueUsdaUsage").doc("2026-09-27T23").get();
+    expect(hour.data()?.count).toBe(12);
+    const user = await hour.ref.collection("users").get();
+    expect(user.docs[0]?.data().count).toBe(12);
+  });
+
+  it("starts a fresh UTC hour and fails closed on malformed stored counters or input", async () => {
+    const limits = { perUser: 1, project: 1 };
+    expect((await reserveHourlyUsdaCall(db, uid, beforeHour, limits)).allowed).toBe(true);
+    expect((await reserveHourlyUsdaCall(db, uid, beforeHour, limits)).allowed).toBe(false);
+    expect((await reserveHourlyUsdaCall(db, uid, nextHour, limits)).allowed).toBe(true);
+    const nextHourRef = db.collection("kcalcueUsdaUsage").doc("2026-09-28T00");
+    expect((await nextHourRef.get()).data()?.count).toBe(1);
+    await nextHourRef.set({ count: "corrupt" });
+    await expect(reserveHourlyUsdaCall(db, "another-user", nextHour)).rejects.toThrow("Invalid USDA quota state");
+    expect((await nextHourRef.get()).data()?.count).toBe("corrupt");
+    expect((await nextHourRef.collection("users").get()).size).toBe(1);
+    const previousHourRef = db.collection("kcalcueUsdaUsage").doc("2026-09-27T23");
+    const previousUser = (await previousHourRef.collection("users").get()).docs[0];
+    if (!previousUser) throw new Error("Expected the admitted user's quota document");
+    await previousUser.ref.set({ count: -1 });
+    await expect(reserveHourlyUsdaCall(db, uid, beforeHour, { perUser: 2, project: 2 })).rejects.toThrow("Invalid USDA quota state");
+    expect((await previousHourRef.get()).data()?.count).toBe(1);
+    await expect(reserveHourlyUsdaCall(db, " ", nextHour)).rejects.toThrow("Invalid USDA quota input");
+    await expect(reserveHourlyUsdaCall(db, uid, Number.MAX_SAFE_INTEGER)).rejects.toThrow("Invalid USDA quota input");
+    await expect(reserveHourlyUsdaCall(db, uid, nextHour, { perUser: 0, project: 1 })).rejects.toThrow("Invalid USDA quota input");
   });
 });
 afterAll(async () => {

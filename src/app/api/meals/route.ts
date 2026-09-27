@@ -14,6 +14,8 @@ import { createEditableFoodItems } from "@/lib/domain/editable-meal";
 import { canReuseNutritionMatchForNameEdit } from "@/lib/nutrition/client";
 import { UsdaNutritionClient } from "@/lib/nutrition/usda";
 import { getNutritionApiKey } from "@/lib/server/env";
+import { reserveHourlyUsdaCall } from "@/lib/server/durable-nutrition-quota";
+import { copy } from "@/content/zh-HK";
 import {
   readBoundedRequestBody,
   RequestBodyTooLargeError,
@@ -79,7 +81,8 @@ export async function POST(request: Request) {
     if (input.photoPath) throw new HttpError(400, "photos_not_stored");
     const local = new LocalNutritionProvider();
     const key = getNutritionApiKey();
-    const usda = key ? new UsdaNutritionClient(key) : null;
+    const usda = key ? new UsdaNutritionClient(key, async () =>
+      (await reserveHourlyUsdaCall(db, user.id)).allowed) : null;
     const items = await Promise.all(
       input.items.map(async (item) => {
         const old = previous?.items.find((food) => food.id === item.id);
@@ -93,7 +96,13 @@ export async function POST(request: Request) {
             const remote = await usda.resolve(item);
             if (remote.includedInTotal) match = remote;
           } catch {
-            /* Keep explicit unresolved coverage. */
+            // An unavailable provider or exhausted budget cannot create a
+            // trusted nutrition value. Save the meal with explicit uncertainty.
+            match = {
+              ...match,
+              reasons: [copy.nutritionLookupFailed,
+                ...match.reasons.filter((reason) => reason !== copy.nutritionLookupFailed)],
+            };
           }
         }
         return { ...item, nutritionMatch: match };
