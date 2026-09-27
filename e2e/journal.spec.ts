@@ -505,7 +505,7 @@ test("real photo preview with mocked analysis supports correction, reload, histo
   await expect(page.locator(".journal-notice")).not.toBeVisible();
   await page.reload();
   await expect(page.getByRole("heading", { name: "今日未有記錄", exact: true })).toBeVisible();
-  await expect(todayCalories).toHaveCount(0);
+  await expect(todayCalories).toHaveText("0");
   expect(errors).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
 });
