@@ -1,6 +1,6 @@
 # History 圖片：最小持久化合約與分片方案
 
-2026-09-27 完成（檔名沿用9月26日工作批次）；其後source-only分片已加入registry、meal transaction、authenticated private read route、History按需顯圖及generation字串精確JSON API object adapter（含不覆寫的建立原語）。**沒有對外上傳入口、實體cleanup及production驗收；沒有完整功能／production PASS聲明。** 未建立照片資源或更改雲端設定。
+2026-09-27 完成（檔名沿用9月26日工作批次）；其後source-only分片已加入registry、meal transaction、authenticated private read route、History按需顯圖、generation字串精確JSON API object adapter（含不覆寫的建立原語），以及獨立的持久縮圖編碼與2MiB輸出上限。**沒有對外上傳入口、實體cleanup及production驗收；沒有完整功能／production PASS聲明。** 未建立照片資源或更改雲端設定。
 
 ## 目標與既有基礎
 
