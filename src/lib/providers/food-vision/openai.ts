@@ -43,7 +43,30 @@ interface OpenAIImageInput {
   mimeType: OpenAIImageMimeType;
 }
 
-const MAX_INPUT_PIXELS = 40_000_000;
+const MAX_HEIC_INPUT_PIXELS = 40_000_000;
+const MAX_RASTER_PASSTHROUGH_PIXELS = 40_000_000;
+const MAX_RASTER_INPUT_PIXELS = 50_000_000;
+const MAX_RASTER_EDGE = 10_000;
+const PREPARE_TIMEOUT_SECONDS = 15;
+
+// Serializing native decodes bounds per-process peak memory when requests overlap.
+let imagePreparationTail: Promise<void> = Promise.resolve();
+
+async function prepareImageOneAtATime(
+  image: FoodImageInput,
+  signal?: AbortSignal,
+): Promise<OpenAIImageInput> {
+  const previous = imagePreparationTail;
+  let release!: () => void;
+  imagePreparationTail = new Promise<void>((resolve) => { release = resolve; });
+  try {
+    await previous;
+    signal?.throwIfAborted();
+    return await prepareOpenAIImage(image);
+  } finally {
+    release();
+  }
+}
 
 function mapOpenAIError(error: unknown): FoodVisionError {
   if (error instanceof FoodVisionError) return error;
@@ -160,16 +183,41 @@ async function prepareOpenAIImage(image: FoodImageInput): Promise<OpenAIImageInp
   const mimeType = image.mimeType;
   try {
     const input = sharp(Buffer.from(image.data, "base64"), {
-      limitInputPixels: MAX_INPUT_PIXELS,
-    });
+      limitInputPixels: mimeType === "image/heic" || mimeType === "image/heif"
+        ? MAX_HEIC_INPUT_PIXELS
+        : MAX_RASTER_INPUT_PIXELS,
+    }).timeout({ seconds: PREPARE_TIMEOUT_SECONDS });
     if (mimeType !== "image/heic" && mimeType !== "image/heif") {
-      // Inspect the header before forwarding the original compressed bytes.
       const metadata = await input.metadata();
       const expectedFormat = mimeType === "image/jpeg" ? "jpeg" : mimeType.slice(6);
       if (metadata.format !== expectedFormat) {
         throw new Error("Image format does not match its MIME type");
       }
-      return { data: image.data, mimeType };
+      if (!metadata.width || !metadata.height ||
+        metadata.width > MAX_RASTER_EDGE || metadata.height > MAX_RASTER_EDGE) {
+        throw new Error("Image dimensions exceed the supported limit");
+      }
+      const pixels = metadata.width * metadata.height;
+      if (pixels <= MAX_RASTER_PASSTHROUGH_PIXELS) {
+        // metadata() alone accepts some truncated files. Decode every pixel
+        // before the paid request while retaining normal uploads unchanged.
+        await input.stats();
+        return { data: image.data, mimeType };
+      }
+
+      // Modern phone photos can exceed 40 MP while remaining under 10 MiB.
+      // JPEG shrink-on-load limits native memory and AI input size.
+      const jpeg = await input
+        .rotate()
+        .resize(1600, 1600, {
+          fit: "inside",
+          withoutEnlargement: true,
+          fastShrinkOnLoad: true,
+        })
+        .flatten({ background: "#ffffff" })
+        .jpeg({ quality: 85 })
+        .toBuffer();
+      return { data: jpeg.toString("base64"), mimeType: "image/jpeg" };
     }
 
     const jpeg = await input
@@ -241,7 +289,7 @@ export class OpenAIFoodVisionProvider implements FoodVisionProvider {
 
     try {
       options?.signal?.throwIfAborted();
-      const preparedImage = await prepareOpenAIImage(image);
+      const preparedImage = await prepareImageOneAtATime(image, options?.signal);
       options?.signal?.throwIfAborted();
       stage = "openai_request";
       const response = await this.client.responses.create(
