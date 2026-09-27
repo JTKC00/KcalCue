@@ -831,3 +831,38 @@ test("analysis timeout leaves the photo available for a later retry", async ({ p
   expect(analyses).toBe(2);
   expect(backend.saves).toHaveLength(0);
 });
+
+test.describe("Today across local midnight", () => {
+  test.use({ timezoneId: "Asia/Hong_Kong" });
+
+  test("moves yesterday's offline meal out of Today without a reload", async ({ page, context }) => {
+    const backend = cloud();
+    await backend.install(context);
+    await page.goto("/");
+    await login(page);
+
+    const nearMidnight = new Date();
+    nearMidnight.setUTCHours(15, 59, 50, 0); // 23:59:50 in Hong Kong.
+    if (nearMidnight.getTime() <= Date.now()) nearMidnight.setUTCDate(nearMidnight.getUTCDate() + 1);
+    await page.clock.setFixedTime(nearMidnight);
+    await backend.setOffline(context, true);
+    await expect(page.getByText(/離線中/)).toBeVisible();
+    await rice(page);
+    await page.getByRole("button", { name: "自行填寫本餐卡路里", exact: true }).click();
+    await page.getByRole("spinbutton", { name: "手動卡路里（整餐 kcal）", exact: true }).fill("650");
+    await page.getByRole("button", { name: "離線儲存餐點", exact: true }).click();
+    const todayCalories = page.locator(".day-summary > div").filter({ hasText: "卡路里" }).locator("strong");
+    await expect(todayCalories).toHaveText("650");
+    await expect(page.getByRole("heading", { name: "白飯", exact: true })).toBeVisible();
+    await expect(page.getByText("1 項修改待同步", { exact: true })).toBeVisible();
+
+    await page.clock.setFixedTime(new Date(nearMidnight.getTime() + 20_000));
+    await expect(page.getByRole("heading", { name: "今日未有記錄", exact: true })).toBeVisible();
+    await expect(todayCalories).toHaveText("0");
+    await expect(page.getByText(/之前的餐點可在歷史記錄查看/)).toBeVisible();
+    await page.getByRole("button", { name: "歷史", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "白飯", exact: true })).toBeVisible();
+    await expect(page.locator(".meal-calories")).toHaveText("手動記錄：650 kcal");
+    expect(backend.records.size).toBe(0);
+  });
+});
