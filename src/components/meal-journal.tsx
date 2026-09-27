@@ -27,6 +27,7 @@ import { roundRange } from "@/lib/nutrition/calculation";
 import { KcalCueApp } from "./kcalcue-app";
 import { PwaControls } from "./pwa-controls";
 import { CalorieCorrectionInput } from "./calorie-correction-input";
+import { PrivateMealPhoto } from "./private-meal-photo";
 import { dayCalories, mealCalories, sameCalorieBasis } from "@/lib/meals/calories";
 
 const repository = new MealRepository();
@@ -113,6 +114,7 @@ export function MealJournal({
   const [account, setAccount] = useState(false);
   const [reauth, setReauth] = useState(false);
   const [userId, setUserId] = useState("guest");
+  const [authEpoch, setAuthEpoch] = useState(0);
   const [email, setEmail] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [online, setOnline] = useState(true);
@@ -287,6 +289,7 @@ export function MealJournal({
           // Invalidate old continuations immediately, before the next account's
           // IndexedDB load finishes (including an A -> B -> A transition).
           accountGeneration.current++;
+          setAuthEpoch((epoch) => epoch + 1);
           refreshGeneration.current++;
           if (!loading && user?.uid === current.current.userId) {
             setEmail(user.email);
@@ -1258,6 +1261,14 @@ export function MealJournal({
                             .join("、")}
                         </h3>
                         <p className="meal-calories">{mealCalorieLabel(record)}</p>
+                        {tab === "history" && userId !== "guest" && record.photoRef && (
+                          <PrivateMealPhoto
+                            key={`${userId}:${authEpoch}:${record.id}:${record.photoRef.attachmentId}:${record.photoRef.generation}`}
+                            mealId={record.id}
+                            photoRef={record.photoRef}
+                            expectedUid={userId}
+                          />
+                        )}
                         {tab === "history" && <OriginalAnalysisDetails record={record} />}
                         <div className="journal-actions">
                           <button

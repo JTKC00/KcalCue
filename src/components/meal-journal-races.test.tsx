@@ -23,12 +23,14 @@ const fixture = vi.hoisted(() => ({
   clear: vi.fn(),
   clearSync: vi.fn(),
   signOut: vi.fn(),
+  photoFetch: vi.fn(),
   draftChange: null as null | ((change: Pick<MealDraft, "items" | "analysis" | "analysisProvenance" | "mode">) => void),
 }));
 vi.mock("@/lib/firebase/client", () => ({
   cloudConfigured: () => true,
   hasEmailLink: () => false,
   signOut: fixture.signOut,
+  authorizedFetch: fixture.photoFetch,
   firebaseAuth: () => ({ currentUser: { uid: fixture.uid } }),
   onAuthStateChanged: (_auth: unknown, callback: typeof fixture.callback) => {
     fixture.callback = callback;
@@ -115,7 +117,7 @@ async function startConflictRecovery(meal: MealRecord) {
 beforeEach(() => {
   states.clear(); caches.clear(); fixture.uid = "a";
   vi.restoreAllMocks(); vi.unstubAllGlobals();
-  for (const mock of [fixture.list, fixture.state, fixture.sync, fixture.save, fixture.remove, fixture.discard, fixture.read, fixture.write, fixture.clear, fixture.clearSync, fixture.signOut]) mock.mockReset();
+  for (const mock of [fixture.list, fixture.state, fixture.sync, fixture.save, fixture.remove, fixture.discard, fixture.read, fixture.write, fixture.clear, fixture.clearSync, fixture.signOut, fixture.photoFetch]) mock.mockReset();
   fixture.list.mockImplementation(async (uid: string) => visibleMeals(structuredClone(states.get(uid) ?? emptySync())));
   fixture.state.mockImplementation(async (uid: string) => structuredClone(states.get(uid) ?? emptySync()));
   fixture.sync.mockResolvedValue(undefined);
@@ -131,6 +133,38 @@ beforeEach(() => {
   vi.spyOn(window, "confirm").mockReturnValue(true);
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+it("reads a private photo only in History and removes its URL on account change", async () => {
+  const meal = {
+    ...record("a", "photo-meal"),
+    photoRef: {
+      attachmentId: "461fe664-d9c7-4fc2-8ea3-c641954838c6",
+      generation: "1837167347458867",
+      contentType: "image/jpeg" as const,
+      width: 640, height: 480, byteSize: 3,
+    },
+  };
+  states.set("a", { ...emptySync(), remote: [meal] });
+  const createUrl = vi.fn().mockReturnValue("blob:account-a-photo");
+  const revokeUrl = vi.fn();
+  Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createUrl });
+  Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeUrl });
+  fixture.photoFetch.mockResolvedValue(new Response(new Blob([new Uint8Array([0xff, 0xd8, 0xff])]), {
+    headers: { "Content-Type": "image/jpeg" },
+  }));
+  render(<MealJournal initialProviderMode="live" />);
+  await signIn("a");
+  await screen.findByRole("heading", { name: "photo-meal" });
+  expect(fixture.photoFetch).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "歷史" }));
+  expect(fixture.photoFetch).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "查看餐點附圖" }));
+  expect(await screen.findByRole("img", { name: "餐點附圖" })).toHaveAttribute("src", "blob:account-a-photo");
+  await signIn("b");
+  await screen.findByRole("heading", { name: "未有餐點記錄" });
+  expect(revokeUrl).toHaveBeenCalledWith("blob:account-a-photo");
+  expect(screen.queryByRole("img", { name: "餐點附圖" })).not.toBeInTheDocument();
+});
 
 it("never renders, caches, or discards an old account's conflict under the next account", async () => {
   const meal = record("a", "private-a");

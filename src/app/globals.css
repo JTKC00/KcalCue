@@ -1814,6 +1814,13 @@ svg {
 .meal-row h3 { overflow-wrap: anywhere; margin: 8px 0 14px; }
 .meal-row .meal-calories { margin: 0 0 16px; font-weight: 700; color: #244d38; }
 .meal-row .meal-current-note { margin: 8px 0 0; }
+.meal-photo { width: min(100%, 240px); margin: 0 0 16px; }
+.meal-photo img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 12px; }
+.meal-photo figcaption, .meal-photo-status, .meal-photo-error { color: #5c6e60; font-size: .85rem; }
+.meal-photo figcaption { margin-top: 5px; }
+.meal-photo-status, .meal-photo-error { margin-bottom: 16px; }
+.meal-photo-error .button { margin-top: 8px; }
+.meal-photo-open { margin-bottom: 16px; }
 .meal-original-analysis { margin-bottom: 16px; border: 1px solid #dce2d7; border-radius: 10px; background: #f5f8f2; }
 .meal-original-analysis summary { min-height: 44px; padding: 11px 14px; color: #244d38; font-weight: 700; cursor: pointer; }
 .meal-original-analysis > div, .meal-original-analysis > p { padding: 0 14px 14px; }
