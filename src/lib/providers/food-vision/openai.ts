@@ -48,9 +48,36 @@ const MAX_RASTER_PASSTHROUGH_PIXELS = 40_000_000;
 const MAX_RASTER_INPUT_PIXELS = 50_000_000;
 const MAX_RASTER_EDGE = 10_000;
 const PREPARE_TIMEOUT_SECONDS = 15;
+const PREPARE_QUEUE_WAIT_MS = 60_000;
 
 // Serializing native decodes bounds per-process peak memory when requests overlap.
 let imagePreparationTail: Promise<void> = Promise.resolve();
+
+async function waitForPreparationTurn(
+  previous: Promise<void>,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (signal?.aborted) throw new DOMException("Image preparation cancelled.", "AbortError");
+
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const onAbort = () => rejectWait(new DOMException("Image preparation cancelled.", "AbortError"));
+  let rejectWait!: (error: DOMException) => void;
+  const interrupted = new Promise<never>((_, reject) => {
+    rejectWait = reject;
+    timer = setTimeout(
+      () => reject(new DOMException("Image preparation queue timed out.", "TimeoutError")),
+      PREPARE_QUEUE_WAIT_MS,
+    );
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    await Promise.race([previous, interrupted]);
+    if (signal?.aborted) throw new DOMException("Image preparation cancelled.", "AbortError");
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+    signal?.removeEventListener("abort", onAbort);
+  }
+}
 
 async function prepareImageOneAtATime(
   image: FoodImageInput,
@@ -60,11 +87,13 @@ async function prepareImageOneAtATime(
   let release!: () => void;
   imagePreparationTail = new Promise<void>((resolve) => { release = resolve; });
   try {
-    await previous;
+    await waitForPreparationTurn(previous, signal);
     signal?.throwIfAborted();
     return await prepareOpenAIImage(image);
   } finally {
-    release();
+    // An aborted waiter returns at once but keeps its place until the prior
+    // native operation completes. Releasing earlier would run decodes together.
+    void previous.then(release, release);
   }
 }
 
