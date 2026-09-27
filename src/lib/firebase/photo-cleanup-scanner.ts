@@ -2,7 +2,7 @@ import type { Firestore } from "firebase-admin/firestore";
 import { FieldPath, Timestamp } from "firebase-admin/firestore";
 import { HttpError } from "@/lib/server/auth";
 import type { ExactPhotoObjectStore } from "./photo-object-store";
-import { cleanupKnownPhotoGeneration, type PhotoCleanupResult } from "./photo-cleanup";
+import { reconcileUnknownPhotoGenerationAndCleanup, type PhotoCleanupResult } from "./photo-cleanup";
 
 const cursorPath = "kcalcuePhotoCleanup/current";
 const assetPath = /^kcalcueUsers\/([^/]+)\/photoAssets\/([0-9a-fA-F-]{36})$/;
@@ -28,7 +28,7 @@ export interface PhotoCleanupBatchResult {
 // later assets. The Firestore cursor is server-only and does not start a job.
 export async function runDeletingPhotoCleanupBatch(
   db: Firestore,
-  objects: Pick<ExactPhotoObjectStore, "deleteGeneration">,
+  objects: Pick<ExactPhotoObjectStore, "metadata" | "read" | "deleteGeneration">,
   maxItems = 5,
 ): Promise<PhotoCleanupBatchResult> {
   if (!Number.isInteger(maxItems) || maxItems < 1 || maxItems > 10)
@@ -62,7 +62,7 @@ export async function runDeletingPhotoCleanupBatch(
       continue;
     }
     try {
-      const result = await cleanupKnownPhotoGeneration(db, objects, match[1], match[2]);
+      const result = await reconcileUnknownPhotoGenerationAndCleanup(db, objects, match[1], match[2]);
       outcomes.push({ path: doc.ref.path, result });
     } catch (error) {
       outcomes.push({ path: doc.ref.path, result: "error",
