@@ -17,6 +17,7 @@ import { demoFoodAnalysis } from "@/lib/providers/food-vision/demo";
 import { createEditableFoodItems } from "@/lib/domain/editable-meal";
 import { newDraft } from "@/lib/meals/types";
 import { mealCollection } from "@/lib/firebase/meals";
+import { reserveDailyLiveAnalysis } from "@/lib/server/durable-analysis-quota";
 
 const fixture = vi.hoisted(() => ({ auth: vi.fn() }));
 vi.mock("@/lib/server/auth", async (original) => ({
@@ -39,7 +40,58 @@ const db = getFirestore(app);
 const uid = "test-user-a";
 beforeEach(async () => {
   await db.recursiveDelete(db.collection("kcalcueUsers"));
+  await db.recursiveDelete(db.collection("kcalcueAnalysisUsage"));
   fixture.auth.mockReset().mockResolvedValue({ db, user: { id: uid } });
+});
+
+describe("durable Live analysis quota against real Firestore emulator", () => {
+  const limits = { perUser: 2, project: 3 };
+  const beforeMidnight = Date.UTC(2026, 8, 27, 23, 59, 59);
+  const nextDay = Date.UTC(2026, 8, 28, 0, 0, 0);
+
+  it("atomically admits one competing attempt and persists across server instances", async () => {
+    const sameUser = await Promise.all([
+      reserveDailyLiveAnalysis(db, uid, beforeMidnight, { perUser: 1, project: 3 }),
+      reserveDailyLiveAnalysis(db, uid, beforeMidnight, { perUser: 1, project: 3 }),
+    ]);
+    expect(sameUser.map((result) => result.allowed).sort()).toEqual([false, true]);
+    expect(sameUser.find((result) => !result.allowed)?.retryAfterSeconds).toBe(1);
+
+    const secondApp = initializeApp({ projectId: "demo-kcalcue" }, "quota-second-instance");
+    const secondDb = getFirestore(secondApp);
+    try {
+      expect((await reserveDailyLiveAnalysis(secondDb, uid, beforeMidnight, { perUser: 1, project: 3 })).allowed).toBe(false);
+      expect((await reserveDailyLiveAnalysis(secondDb, "other-user", beforeMidnight, { perUser: 1, project: 3 })).allowed).toBe(true);
+    } finally {
+      await secondDb.terminate();
+      await deleteApp(secondApp);
+    }
+    const day = await db.collection("kcalcueAnalysisUsage").doc("2026-09-27").get();
+    expect(day.data()?.count).toBe(2);
+    const users = await day.ref.collection("users").get();
+    expect(users.size).toBe(2);
+    expect(users.docs.every((doc) => doc.id !== uid && doc.id !== "other-user")).toBe(true);
+  });
+
+  it("enforces a project-wide ceiling without writing rejected attempts", async () => {
+    for (const user of ["a", "b", "c"]) {
+      expect((await reserveDailyLiveAnalysis(db, user, beforeMidnight, limits)).allowed).toBe(true);
+    }
+    expect((await reserveDailyLiveAnalysis(db, "d", beforeMidnight, limits)).allowed).toBe(false);
+    const day = await db.collection("kcalcueAnalysisUsage").doc("2026-09-27").get();
+    expect(day.data()?.count).toBe(3);
+    expect((await day.ref.collection("users").get()).size).toBe(3);
+  });
+
+  it("starts a fresh UTC day and rejects malformed stored quota state", async () => {
+    expect((await reserveDailyLiveAnalysis(db, uid, beforeMidnight, { perUser: 1, project: 1 })).allowed).toBe(true);
+    expect((await reserveDailyLiveAnalysis(db, uid, beforeMidnight, { perUser: 1, project: 1 })).allowed).toBe(false);
+    expect((await reserveDailyLiveAnalysis(db, uid, nextDay, { perUser: 1, project: 1 })).allowed).toBe(true);
+    const nextDayRef = db.collection("kcalcueAnalysisUsage").doc("2026-09-28");
+    expect((await nextDayRef.get()).data()?.count).toBe(1);
+    await nextDayRef.set({ count: "corrupt" });
+    await expect(reserveDailyLiveAnalysis(db, "another-user", nextDay)).rejects.toThrow("Invalid analysis quota state");
+  });
 });
 afterAll(async () => {
   await db.terminate();

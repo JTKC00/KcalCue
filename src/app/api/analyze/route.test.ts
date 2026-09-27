@@ -13,6 +13,10 @@ vi.mock("@/lib/server/live-analysis-admission", async importOriginal => ({
   acquireLiveAnalysis: vi.fn(),
 }));
 
+vi.mock("@/lib/server/durable-analysis-quota", () => ({
+  reserveDailyLiveAnalysis: vi.fn(),
+}));
+
 vi.mock("@/lib/providers/food-vision/factory", () => ({
   createFoodVisionProvider: () => ({
     id: "openai",
@@ -32,6 +36,7 @@ import { FoodVisionError } from "@/lib/providers/food-vision/errors";
 import { demoFoodAnalysis } from "@/lib/providers/food-vision/demo";
 import { ANALYZE_RATE_LIMIT, clearRateLimitStore } from "@/lib/server/rate-limit";
 import { acquireLiveAnalysis, createLiveAnalysisAdmission } from "@/lib/server/live-analysis-admission";
+import { reserveDailyLiveAnalysis } from "@/lib/server/durable-analysis-quota";
 import { POST } from "./route";
 
 function imageRequest(
@@ -84,8 +89,9 @@ function distinctIpRequest(index: number) {
 describe("POST /api/analyze", () => {
   beforeEach(() => {
     analyzeImage.mockReset();
-    authorize.mockReset().mockResolvedValue({ user: { id: "test-user" } });
+    authorize.mockReset().mockResolvedValue({ db: { fixture: true }, user: { id: "test-user" } });
     vi.mocked(acquireLiveAnalysis).mockReset().mockImplementation(createLiveAnalysisAdmission());
+    vi.mocked(reserveDailyLiveAnalysis).mockReset().mockResolvedValue({ allowed: true, retryAfterSeconds: 0 });
     clearRateLimitStore();
     vi.spyOn(Date, "now").mockReturnValue(1_000_000);
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -113,6 +119,7 @@ describe("POST /api/analyze", () => {
     expect(analyzeImage).not.toHaveBeenCalled();
     expect(authorize).not.toHaveBeenCalled();
     expect(acquireLiveAnalysis).not.toHaveBeenCalled();
+    expect(reserveDailyLiveAnalysis).not.toHaveBeenCalled();
   });
 
   it("requires a verified account before live image analysis", async () => {
@@ -122,6 +129,7 @@ describe("POST /api/analyze", () => {
     expect(response.status).toBe(401);
     expect(analyzeImage).not.toHaveBeenCalled();
     expect(acquireLiveAnalysis).not.toHaveBeenCalled();
+    expect(reserveDailyLiveAnalysis).not.toHaveBeenCalled();
   });
 
   it("returns a missing-image error for live requests without a file", async () => {
@@ -139,6 +147,7 @@ describe("POST /api/analyze", () => {
     expect(body).toEqual({ error: { code: "missing_image" } });
     expect(analyzeImage).not.toHaveBeenCalled();
     expect(acquireLiveAnalysis).not.toHaveBeenCalled();
+    expect(reserveDailyLiveAnalysis).not.toHaveBeenCalled();
   });
 
   it("returns a validated live analysis", async () => {
@@ -150,6 +159,7 @@ describe("POST /api/analyze", () => {
     expect(response.status).toBe(200);
     expect(body.mode).toBe("live");
     expect(body.analysis.analysisStatus).toBe("success");
+    expect(reserveDailyLiveAnalysis).toHaveBeenCalledWith({ fixture: true }, "test-user");
     expect(analyzeImage).toHaveBeenCalledWith(
       {
         data: expect.any(String),
@@ -242,6 +252,33 @@ describe("POST /api/analyze", () => {
     expect(body).toEqual({ error: { code: "invalid_file" } });
     expect(analyzeImage).not.toHaveBeenCalled();
     expect(acquireLiveAnalysis).not.toHaveBeenCalled();
+    expect(reserveDailyLiveAnalysis).not.toHaveBeenCalled();
+  });
+
+  it("returns a UTC-day retry window before invoking the provider when daily quota is exhausted", async () => {
+    vi.mocked(reserveDailyLiveAnalysis).mockResolvedValueOnce({
+      allowed: false,
+      retryAfterSeconds: 3600,
+    });
+
+    const response = await POST(jpegRequest());
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBe("3600");
+    expect(await response.json()).toEqual({ error: { code: "rate_limited" } });
+    expect(analyzeImage).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when Firestore cannot reserve the paid provider attempt", async () => {
+    vi.mocked(reserveDailyLiveAnalysis).mockRejectedValueOnce(new Error("private firestore details"));
+    const logged = vi.spyOn(console, "error");
+
+    const response = await POST(jpegRequest());
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: { code: "service_unavailable" } });
+    expect(analyzeImage).not.toHaveBeenCalled();
+    expect(JSON.stringify(logged.mock.calls)).toContain("[kcalcue:analysis-quota]");
+    expect(JSON.stringify(logged.mock.calls)).not.toContain("private firestore details");
+    expect((await POST(jpegRequest())).status).toBe(200);
   });
 
   it("shares verified UID quota across different IPs and ignores untrusted user headers", async () => {
