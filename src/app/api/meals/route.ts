@@ -85,7 +85,7 @@ export async function POST(request: Request) {
     const local = new LocalNutritionProvider();
     const key = getNutritionApiKey();
     const usda = key ? new UsdaNutritionClient(key, async () =>
-      (await reserveHourlyUsdaCall(db, user.id)).allowed) : null;
+      (await reserveHourlyUsdaCall(db, user.id)).allowed, user.id) : null;
     const initialItems = input.items.map((item) => {
       const old = previous?.items.find((food) => food.id === item.id);
       const match =
