@@ -105,6 +105,10 @@ export const errorCopy: Record<string, { title: string; body: string }> = {
     title: "暫時太多分析要求",
     body: "請稍後再試，或先體驗示範餐。",
   },
+  analysis_outcome_unknown: {
+    title: "重複分析要求已攔截",
+    body: "同一分析要求可能仍在處理，或回覆未能送達。相片仍在本頁；再次按分析可能使用新的 AI 額度。",
+  },
   service_unavailable: {
     title: "AI 服務暫時有問題",
     body: "你嘅相片未有保存。請稍後重試或改用示範餐。",

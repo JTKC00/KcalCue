@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createHash } from "node:crypto";
 import type { AnalysisProvenanceMetadata } from "@/lib/domain/analysis-provenance";
 import { DemoFoodVisionProvider } from "@/lib/providers/food-vision/demo";
 import {
@@ -121,6 +122,17 @@ export async function POST(request: Request) {
 
     imageMimeType = detectedMimeType;
     imageByteSize = bytes.byteLength;
+    const attemptId = formData.get("attemptId");
+    if (attemptId !== null &&
+      (typeof attemptId !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(attemptId)))
+      return errorResponse("invalid_request", 400);
+    const attempt = attemptId === null ? undefined : {
+      id: attemptId.toLowerCase(),
+      // Salt the fingerprint by verified account so it cannot correlate photos
+      // across users; neither the photo nor AI output enters quota storage.
+      imageDigest: createHash("sha256").update(userId).update("\0").update(bytes).digest("hex"),
+    };
     const release = acquireLiveAnalysis(userId);
     if (!release) {
       const limited = rateLimitedJsonResponse();
@@ -133,7 +145,7 @@ export async function POST(request: Request) {
     try {
       let admission;
       try {
-        admission = await reserveDailyLiveAnalysis(userDb, userId);
+        admission = await reserveDailyLiveAnalysis(userDb, userId, undefined, undefined, attempt);
       } catch (error) {
         // If quota storage is unavailable, do not invoke a paid provider.
         console.error("[kcalcue:analysis-quota]", {
@@ -141,6 +153,9 @@ export async function POST(request: Request) {
         });
         return errorResponse("service_unavailable", 503);
       }
+      if (admission.duplicate)
+        return errorResponse(admission.duplicate === "same" ? "analysis_outcome_unknown" : "invalid_request",
+          admission.duplicate === "same" ? 409 : 400);
       if (!admission.allowed) {
         const limited = rateLimitedJsonResponse(admission.retryAfterSeconds);
         return NextResponse.json(limited.body, {

@@ -1,6 +1,7 @@
 import { beforeEach, afterAll, describe, expect, it, vi } from "vitest";
 import { initializeApp, deleteApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
+import type { Firestore, Transaction } from "firebase-admin/firestore";
 import {
   initializeApp as clientApp,
   deleteApp as deleteClient,
@@ -47,11 +48,30 @@ if (
 const app = initializeApp({ projectId: "demo-kcalcue" }, "emulator-test");
 const db = getFirestore(app);
 const uid = "test-user-a";
+function pauseFirstCommit(db: Firestore, gate: () => Promise<void>): Firestore {
+  let first = true;
+  return new Proxy(db, {
+    get(target, property) {
+      if (property === "runTransaction") return (update: (tx: Transaction) => Promise<unknown>) =>
+        target.runTransaction(async (transaction) => {
+          const result = await update(transaction);
+          if (first) {
+            first = false;
+            await gate();
+          }
+          return result;
+        });
+      const value: unknown = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  }) as Firestore;
+}
 beforeEach(async () => {
   vi.restoreAllMocks();
   await db.recursiveDelete(db.collection("kcalcueUsers"));
   await db.recursiveDelete(db.collection("kcalcueAnalysisUsage"));
   await db.recursiveDelete(db.collection("kcalcueUsdaUsage"));
+  await db.recursiveDelete(db.collection("kcalcueAnalysisAttemptLedger"));
   fixture.auth.mockReset().mockResolvedValue({ db, user: { id: uid } });
 });
 
@@ -102,6 +122,90 @@ describe("durable Live analysis quota against real Firestore emulator", () => {
     expect((await nextDayRef.get()).data()?.count).toBe(1);
     await nextDayRef.set({ count: "corrupt" });
     await expect(reserveDailyLiveAnalysis(db, "another-user", nextDay)).rejects.toThrow("Invalid analysis quota state");
+  });
+
+  it("deduplicates one attempt across instances and UTC midnight without another paid admission", async () => {
+    const attempt = {
+      id: "9cded041-a32e-4f85-8d88-ff4ec9913ac7",
+      imageDigest: "a".repeat(64),
+    };
+    const secondApp = initializeApp({ projectId: "demo-kcalcue" }, "attempt-second-instance");
+    const secondDb = getFirestore(secondApp);
+    try {
+      const admitted = await Promise.all([
+        reserveDailyLiveAnalysis(db, uid, beforeMidnight, limits, attempt),
+        reserveDailyLiveAnalysis(secondDb, uid, beforeMidnight, limits, attempt),
+      ]);
+      expect(admitted.map((result) => result.allowed).sort()).toEqual([false, true]);
+      expect(admitted.find((result) => !result.allowed)?.duplicate).toBe("same");
+      expect((await db.collection("kcalcueAnalysisUsage").doc("2026-09-27").get()).data()?.count).toBe(1);
+
+      const replay = await reserveDailyLiveAnalysis(secondDb, uid, nextDay, limits, attempt);
+      expect(replay).toMatchObject({ allowed: false, duplicate: "same" });
+      const wrongImage = await reserveDailyLiveAnalysis(db, uid, nextDay, limits, {
+        ...attempt, imageDigest: "b".repeat(64),
+      });
+      expect(wrongImage).toMatchObject({ allowed: false, duplicate: "mismatch" });
+      const caseChangedId = await reserveDailyLiveAnalysis(db, uid, nextDay, limits, {
+        ...attempt, id: attempt.id.toUpperCase(),
+      });
+      expect(caseChangedId).toMatchObject({ allowed: false, duplicate: "same" });
+      expect((await db.collection("kcalcueAnalysisUsage").doc("2026-09-28").get()).exists).toBe(false);
+    } finally {
+      await secondDb.terminate();
+      await deleteApp(secondApp);
+    }
+  });
+
+  it("atomically deduplicates concurrent requests on opposite sides of UTC midnight", async () => {
+    const attempt = {
+      id: "9cded041-a32e-4f85-8d88-ff4ec9913ac7",
+      imageDigest: "a".repeat(64),
+    };
+    const secondApp = initializeApp({ projectId: "demo-kcalcue" }, "attempt-midnight-instance");
+    const secondDb = getFirestore(secondApp);
+    try {
+      let waiting = 0;
+      let release!: () => void;
+      const bothRead = new Promise<void>((resolve) => { release = resolve; });
+      const gate = async () => {
+        if (++waiting === 2) release();
+        await bothRead;
+      };
+      const results = await Promise.all([
+        reserveDailyLiveAnalysis(pauseFirstCommit(db, gate), uid, beforeMidnight, limits, attempt),
+        reserveDailyLiveAnalysis(pauseFirstCommit(secondDb, gate), uid, nextDay, limits, attempt),
+      ]);
+      expect(results.map((result) => result.allowed).sort()).toEqual([false, true]);
+      expect(results.find((result) => !result.allowed)?.duplicate).toBe("same");
+      const days = await Promise.all(["2026-09-27", "2026-09-28"].map((day) =>
+        db.collection("kcalcueAnalysisUsage").doc(day).get()));
+      expect(days.reduce((sum, day) => sum + (day.data()?.count ?? 0), 0)).toBe(1);
+    } finally {
+      await secondDb.terminate();
+      await deleteApp(secondApp);
+    }
+  }, 15_000);
+
+  it("does not record an attempt rejected by the daily quota", async () => {
+    const first = { id: "9cded041-a32e-4f85-8d88-ff4ec9913ac7", imageDigest: "a".repeat(64) };
+    const rejected = { id: "9cded041-a32e-4f85-8d88-ff4ec9913ac8", imageDigest: "b".repeat(64) };
+    const one = { perUser: 1, project: 2 };
+    expect((await reserveDailyLiveAnalysis(db, uid, beforeMidnight, one, first)).allowed).toBe(true);
+    expect((await reserveDailyLiveAnalysis(db, uid, beforeMidnight, one, rejected)).allowed).toBe(false);
+    const ledger = (await db.collection("kcalcueAnalysisAttemptLedger").get()).docs[0];
+    expect(Object.keys(ledger.data().attempts)).toHaveLength(1);
+    expect((await reserveDailyLiveAnalysis(db, uid, nextDay, one, rejected)).allowed).toBe(true);
+  });
+
+  it("prunes expired fingerprints on the next successful admission", async () => {
+    const first = { id: "9cded041-a32e-4f85-8d88-ff4ec9913ac7", imageDigest: "a".repeat(64) };
+    const later = { id: "9cded041-a32e-4f85-8d88-ff4ec9913ac8", imageDigest: "b".repeat(64) };
+    expect((await reserveDailyLiveAnalysis(db, uid, beforeMidnight, limits, first)).allowed).toBe(true);
+    expect((await reserveDailyLiveAnalysis(db, uid, beforeMidnight + 48 * 60 * 60 * 1_000 + 1,
+      limits, later)).allowed).toBe(true);
+    const ledger = (await db.collection("kcalcueAnalysisAttemptLedger").get()).docs[0];
+    expect(Object.keys(ledger.data().attempts)).toHaveLength(1);
   });
 });
 
