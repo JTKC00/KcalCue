@@ -1008,7 +1008,7 @@ test("real photo preview with mocked analysis supports correction, reload, histo
   await page.getByRole("button", { name: "歷史", exact: true }).click();
   await expect(page.getByRole("heading", { name: "港式奶茶", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "查看／修正", exact: true }).click();
-  await expect(page.getByRole("note")).toContainText("按實際吃的內容逐項核對");
+  await expect(page.getByRole("note")).toContainText("共用餐點只記自己吃喝的部分，請逐項核對");
   await expect(page.getByRole("spinbutton", { name: "最少份量", exact: true })).toHaveValue("150");
   await page.getByRole("spinbutton", { name: "最多份量", exact: true }).fill("220");
   await page.getByRole("spinbutton", { name: "最多份量", exact: true }).press("Tab");

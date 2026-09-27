@@ -1196,7 +1196,7 @@ export function MealJournal({
               <div className="save-bar">
                 {draft.mode === "live" ? (
                   <p className="save-review-note" id="save-review-note" role="note">
-                    AI 可能認錯或漏掉食物、估錯份量；請按實際吃的內容逐項核對後再儲存。
+                    AI 可能認錯或漏掉食物、估錯份量；共用餐點只記自己吃喝的部分，請逐項核對後再儲存。
                   </p>
                 ) : null}
                 <button
