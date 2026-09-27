@@ -300,10 +300,19 @@ export function supportsUsdaPortionUnit(unit: FoodEstimate["unit"]): boolean {
 }
 
 export class UsdaNutritionClient {
+  private readonly pendingScope: string;
+
   constructor(
     private readonly apiKey: string,
     private readonly reserveLookup?: () => Promise<boolean>,
-  ) {}
+    accountScope?: string,
+  ) {
+    // A reservation belongs to one account. Never let another account join
+    // its in-flight promise, including a failed quota reservation.
+    this.pendingScope = accountScope
+      ? `account:${accountScope}`
+      : reserveLookup ? `client:${crypto.randomUUID()}` : "public";
+  }
 
   async resolve(food: FoodEstimate): Promise<NutritionMatch> {
     const identity = canonicalizeFood(food);
@@ -341,7 +350,8 @@ export class UsdaNutritionClient {
     if (cached && cached.expiresAt > Date.now()) return { ...cached.match, identity };
     if (cached) queryCache.delete(cacheKey);
 
-    let pending = pendingQueries.get(cacheKey);
+    const pendingKey = JSON.stringify([this.pendingScope, cacheKey]);
+    let pending = pendingQueries.get(pendingKey);
     if (!pending) {
       const generation = cacheGeneration;
       pending = this.lookup(food, identity, query)
@@ -350,9 +360,9 @@ export class UsdaNutritionClient {
           return match;
         })
         .finally(() => {
-          if (pendingQueries.get(cacheKey) === pending) pendingQueries.delete(cacheKey);
+          if (pendingQueries.get(pendingKey) === pending) pendingQueries.delete(pendingKey);
         });
-      pendingQueries.set(cacheKey, pending);
+      pendingQueries.set(pendingKey, pending);
     }
     return { ...(await pending), identity };
   }

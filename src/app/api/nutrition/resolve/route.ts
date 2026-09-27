@@ -55,28 +55,27 @@ export async function POST(request: Request) {
 
   const local = new LocalNutritionProvider();
   const apiKey = getNutritionApiKey();
-  let remoteAccount: Awaited<ReturnType<typeof authenticated>> | null = null;
-  const usda = apiKey ? new UsdaNutritionClient(apiKey, async () => {
-    if (!remoteAccount) throw new Error("USDA lookup requires an authenticated account");
-    return (await reserveHourlyUsdaCall(remoteAccount.db, remoteAccount.user.id)).allowed;
-  }) : null;
   const matches: NutritionMatch[] = parsed.data.foods.map((food) => local.resolve(food));
   const warnings: Array<{ index: number; code: string }> = [];
   const startedAt = performance.now();
 
   try {
-    const remoteIndexes = usda ? matches.flatMap((match, index) =>
+    const remoteIndexes = apiKey ? matches.flatMap((match, index) =>
       !match.includedInTotal &&
       supportsUsdaPortionUnit(parsed.data.foods[index].unit) &&
       !isCompositeIdentity(match.identity) ? [index] : []) : [];
-    if (usda && remoteIndexes.length > 0 && !request.signal.aborted) {
+    if (apiKey && remoteIndexes.length > 0 && !request.signal.aborted) {
       // Local reference/demo resolution remains public. A provider-backed
       // lookup requires the same verified trial account as Live analysis.
+      let remoteAccount: Awaited<ReturnType<typeof authenticated>>;
       try {
         remoteAccount = await authenticated(request);
       } catch (error) {
         return apiError(error);
       }
+      const usda = new UsdaNutritionClient(apiKey, async () =>
+        (await reserveHourlyUsdaCall(remoteAccount.db, remoteAccount.user.id)).allowed,
+      remoteAccount.user.id);
       let next = 0;
       const worker = async () => {
         while (next < remoteIndexes.length && !request.signal.aborted) {
@@ -102,14 +101,14 @@ export async function POST(request: Request) {
     warnings.sort((left, right) => left.index - right.index);
     const response = {
       matches,
-      provider: usda ? "usda-fdc" : "kcalcue-reference",
+      provider: apiKey ? "usda-fdc" : "kcalcue-reference",
       ...(warnings.length > 0 ? { warnings } : {}),
     };
     return NextResponse.json(response);
   } finally {
     logSafeTiming({
       operation: "nutrition-resolve",
-      provider: usda ? "usda-fdc" : "kcalcue-reference",
+      provider: apiKey ? "usda-fdc" : "kcalcue-reference",
       nutritionResolveMs: elapsedMs(startedAt),
       totalMs: elapsedMs(startedAt),
       resolvedCount: matches.length,

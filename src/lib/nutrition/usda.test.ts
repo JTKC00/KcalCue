@@ -219,6 +219,56 @@ describe("USDA nutrition client", () => {
     expect(reserve).toHaveBeenCalledOnce();
   });
 
+  it("does not inherit another account's failed reservation for an identical lookup", async () => {
+    const denied = vi.fn().mockResolvedValue(false);
+    const admitted = vi.fn().mockResolvedValue(true);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true, status: 200, json: async () => ({ foods: [] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = new UsdaNutritionClient("test-only-key", denied, "account-a").resolve(food);
+    const second = new UsdaNutritionClient("test-only-key", admitted, "account-b").resolve(food);
+    await expect(first).rejects.toMatchObject({ code: "rate_limited" });
+    await expect(second).resolves.toMatchObject({ matchType: "unresolved" });
+    expect(denied).toHaveBeenCalledOnce();
+    expect(admitted).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("does not bypass an exhausted account's budget through another account's pending lookup", async () => {
+    let finishFetch!: (value: unknown) => void;
+    const fetchMock = vi.fn(() => new Promise((resolve) => { finishFetch = resolve; }));
+    vi.stubGlobal("fetch", fetchMock);
+    const admitted = vi.fn().mockResolvedValue(true);
+    const denied = vi.fn().mockResolvedValue(false);
+
+    const first = new UsdaNutritionClient("test-only-key", admitted, "account-a").resolve(food);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    const second = new UsdaNutritionClient("test-only-key", denied, "account-b").resolve(food);
+    await expect(second).rejects.toMatchObject({ code: "rate_limited" });
+    expect(denied).toHaveBeenCalledOnce();
+    finishFetch({ ok: true, status: 200, json: async () => ({ foods: [] }) });
+    await expect(first).resolves.toMatchObject({ matchType: "unresolved" });
+    expect(admitted).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("coalesces requests from the same account across client instances", async () => {
+    let finishFetch!: (value: unknown) => void;
+    const fetchMock = vi.fn(() => new Promise((resolve) => { finishFetch = resolve; }));
+    vi.stubGlobal("fetch", fetchMock);
+    const reserve = vi.fn().mockResolvedValue(true);
+    const first = new UsdaNutritionClient("test-only-key", reserve, "account-a").resolve(food);
+    const second = new UsdaNutritionClient("test-only-key", reserve, "account-a")
+      .resolve({ ...food, portionMin: 140 });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    expect(reserve).toHaveBeenCalledOnce();
+    finishFetch({ ok: true, status: 200, json: async () => ({ foods: [] }) });
+    expect((await Promise.all([first, second])).map((match) => match.matchType))
+      .toEqual(["unresolved", "unresolved"]);
+  });
+
   it.each([
     [false, "rate_limited"],
     [new Error("quota storage unavailable"), "unavailable"],
