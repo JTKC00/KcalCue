@@ -124,7 +124,7 @@ Cleanup只delete該asset記錄的**確切generation**；precondition mismatch不
 - 不對同一object prefix套「24小時全刪」bucket lifecycle：staged後會attach並保持相同key，這樣會誤刪正常History圖。若未來拆staging/attached prefix則需copy/finalize另一套補償，**不放進第一版**。
 - attached物件保留到使用者detach/delete或明確account lifecycle；不暗中按短TTL刪正常歷史圖。既有帳戶刪除若尚無產品流程，須把對應object清理列release runbook，不能讓storage資料游離於資料擁有人生命週期。
 
-**實體清理需要可信的背景執行者。** Request-after-response、只有使用者再登入時順手清理或process內setTimeout都不能保證清理。Source-only per-asset原語已存在，但沒有collection-group index/scanner或等效背景執行者；`generation=null`亦不能靠一次404退quota，仍需晚到write對帳／封鎖。沒有已授權scheduler/執行環境前，不得宣稱有24h刪除SLA；新付費排程/worker資源須授權，且是啟用photo retention的release gate。時間目標建議每15分鐘有限批次、pending逾24h告警；這是待配置驗收的目標，不是目前承諾。
+**實體清理需要可信的背景執行者。** Request-after-response、只有使用者再登入時順手清理或process內setTimeout都不能保證清理。Source-only per-asset原語及**只掃`deleting`**的有界collection-group scanner已存在；scanner持久化游標、掃至尾端回繞，並逐筆從document path重驗owner。`docs/design/photo-assets-indexes.example.json`列出所需索引範本，**未接入firebase.json／未部署**；啟用前須核對既有雲端索引，再安全合併。尚無逾期`uploading/staged`掃描、可信排程／監測、`generation=null`晚到write對帳及404缺席證明，**不能稱實體cleanup已運作**。沒有已授權scheduler/執行環境前，不得宣稱有24h刪除SLA；新付費排程/worker資源須授權，且是啟用photo retention的release gate。時間目標建議每15分鐘有限批次、pending逾24h告警；這是待配置驗收的目標，不是目前承諾。
 
 ## 6. 離線、本機原子性與unknown outcome
 
