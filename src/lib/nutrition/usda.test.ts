@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { clearUsdaCache, UsdaNutritionClient, UsdaNutritionError } from "./usda";
+import { canonicalizeFood } from "./canonical";
 
 const food = {
   displayName: "banana",
@@ -17,6 +18,7 @@ const food = {
 describe("USDA nutrition client", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     clearUsdaCache();
   });
 
@@ -213,6 +215,86 @@ describe("USDA nutrition client", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  it("shares one in-flight USDA request between concurrent identical lookups", async () => {
+    let finishFetch!: (value: unknown) => void;
+    const fetchMock = vi.fn(() => new Promise((resolve) => { finishFetch = resolve; }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new UsdaNutritionClient("test-only-key");
+    const first = client.resolve(food);
+    const second = client.resolve({ ...food, portionMin: 200, portionMax: 220 });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    finishFetch({ ok: true, status: 200, json: async () => ({ foods: [] }) });
+    const results = await Promise.all([first, second]);
+    expect(results[0]).toEqual(results[1]);
+    expect(results[0].matchType).toBe("unresolved");
+    await client.resolve(food);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("retries USDA after a failed in-flight lookup", async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new DOMException("Timed out", "TimeoutError"))
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ foods: [] }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new UsdaNutritionClient("test-only-key");
+    await expect(client.resolve(food)).rejects.toMatchObject({ code: "timeout" });
+    expect((await client.resolve(food)).matchType).toBe("unresolved");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not let an old request refill or clear the cache after reset", async () => {
+    let finishOld!: (value: unknown) => void;
+    let finishNew!: (value: unknown) => void;
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => new Promise((resolve) => { finishOld = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { finishNew = resolve; }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new UsdaNutritionClient("test-only-key");
+    const oldRequest = client.resolve(food);
+    clearUsdaCache();
+    const newRequest = client.resolve(food);
+    finishOld({ ok: true, status: 200, json: async () => ({ foods: [{
+      fdcId: 1105314,
+      description: "Banana, raw",
+      foodNutrients: [
+        { nutrientName: "Energy", nutrientNumber: "208", value: 89, unitName: "kcal" },
+        { nutrientName: "Protein", nutrientNumber: "203", value: 1.1, unitName: "g" },
+        { nutrientName: "Carbohydrate", nutrientNumber: "205", value: 22.8, unitName: "g" },
+        { nutrientName: "Fat", nutrientNumber: "204", value: 0.3, unitName: "g" },
+      ],
+    }] }) });
+    expect((await oldRequest).profile?.source.sourceId).toBe("1105314");
+    const joinedNewRequest = client.resolve(food);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    finishNew({ ok: true, status: 200, json: async () => ({ foods: [] }) });
+    expect((await Promise.all([newRequest, joinedNewRequest])).map((match) => match.matchType))
+      .toEqual(["unresolved", "unresolved"]);
+    expect((await client.resolve(food)).matchType).toBe("unresolved");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("expires old USDA matches and evicts the oldest of 257 distinct foods", async () => {
+    let now = 1_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true, status: 200, json: async () => ({ foods: [] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new UsdaNutritionClient("test-only-key");
+    await client.resolve(food);
+    await client.resolve(food);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    now += 60 * 60 * 1_000;
+    await client.resolve(food);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    for (let index = 0; index < 256; index += 1) {
+      await client.resolve({ ...food, displayName: `food ${index}`, normalizedName: `food ${index}` });
+    }
+    await client.resolve(food);
+    expect(fetchMock).toHaveBeenCalledTimes(259);
+  });
+
   it("does not reuse a cached result for a different normalized food name", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -245,6 +327,21 @@ describe("USDA nutrition client", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(differentFood.profile).toBeNull();
     expect(differentFood.includedInTotal).toBe(false);
+  });
+
+  it("does not share a cache entry when the actual USDA query changes", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true, status: 200, json: async () => ({ foods: [] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new UsdaNutritionClient("test-only-key");
+    const other = { ...food, displayName: "yellow banana" };
+    expect(canonicalizeFood(other)).toEqual(canonicalizeFood(food));
+    await client.resolve(food);
+    await client.resolve(other);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const queries = fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get("query"));
+    expect(queries).toEqual(["banana", "banana yellow banana"]);
   });
 
   it("does not query USDA for a composite dish", async () => {

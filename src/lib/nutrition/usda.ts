@@ -258,8 +258,10 @@ function toPointProfile(food: UsdaFood): NutritionProfile | null {
 function nutritionCacheKey(
   food: FoodEstimate,
   identity: ReturnType<typeof canonicalizeFood>,
+  query: string,
 ): string {
   return [
+    query,
     normalizeFoodName(food.normalizedName || food.displayName),
     identity.canonicalName,
     identity.category,
@@ -269,10 +271,26 @@ function nutritionCacheKey(
   ].join("|");
 }
 
-const queryCache = new Map<string, NutritionMatch>();
+const USDA_CACHE_TTL_MS = 60 * 60 * 1_000;
+const USDA_CACHE_MAX_ENTRIES = 256;
+const queryCache = new Map<string, { match: NutritionMatch; expiresAt: number }>();
+const pendingQueries = new Map<string, Promise<NutritionMatch>>();
+let cacheGeneration = 0;
+
+function rememberMatch(key: string, match: NutritionMatch): void {
+  queryCache.delete(key);
+  queryCache.set(key, { match, expiresAt: Date.now() + USDA_CACHE_TTL_MS });
+  while (queryCache.size > USDA_CACHE_MAX_ENTRIES) {
+    const oldest = queryCache.keys().next().value;
+    if (oldest === undefined) break;
+    queryCache.delete(oldest);
+  }
+}
 
 export function clearUsdaCache(): void {
   queryCache.clear();
+  pendingQueries.clear();
+  cacheGeneration += 1;
 }
 
 export class UsdaNutritionClient {
@@ -299,10 +317,32 @@ export class UsdaNutritionClient {
         .map(normalizeFoodName)
         .filter(Boolean),
     )].join(" ");
-    const cacheKey = nutritionCacheKey(food, identity);
+    const cacheKey = nutritionCacheKey(food, identity, query);
     const cached = queryCache.get(cacheKey);
-    if (cached) return { ...cached, identity };
+    if (cached && cached.expiresAt > Date.now()) return { ...cached.match, identity };
+    if (cached) queryCache.delete(cacheKey);
 
+    let pending = pendingQueries.get(cacheKey);
+    if (!pending) {
+      const generation = cacheGeneration;
+      pending = this.lookup(food, identity, query)
+        .then((match) => {
+          if (generation === cacheGeneration) rememberMatch(cacheKey, match);
+          return match;
+        })
+        .finally(() => {
+          if (pendingQueries.get(cacheKey) === pending) pendingQueries.delete(cacheKey);
+        });
+      pendingQueries.set(cacheKey, pending);
+    }
+    return { ...(await pending), identity };
+  }
+
+  private async lookup(
+    food: FoodEstimate,
+    identity: ReturnType<typeof canonicalizeFood>,
+    query: string,
+  ): Promise<NutritionMatch> {
     try {
       const url = new URL(USDA_SEARCH_URL);
       url.searchParams.set("api_key", this.apiKey);
@@ -342,7 +382,6 @@ export class UsdaNutritionClient {
           identity,
           includedInTotal: false,
         };
-        queryCache.set(cacheKey, unresolved);
         return unresolved;
       }
 
@@ -360,7 +399,6 @@ export class UsdaNutritionClient {
         identity,
         includedInTotal,
       };
-      queryCache.set(cacheKey, match);
       return match;
     } catch (error) {
       if (error instanceof UsdaNutritionError) throw error;
