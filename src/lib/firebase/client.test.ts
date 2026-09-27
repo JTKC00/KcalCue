@@ -76,6 +76,12 @@ describe("Firebase login methods", () => {
     expect(mocks.send).toHaveBeenLastCalledWith(mocks.auth, "tester@example.com", {
       url: `${location.origin}/`, handleCodeInApp: true,
     });
+    vi.stubEnv("NEXT_PUBLIC_FIREBASE_PROJECT_ID", "gen-lang-client-0116641325");
+    vi.stubEnv("NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN", "gen-lang-client-0116641325.firebaseapp.com");
+    await sendEmailLink("tester@example.com");
+    expect(mocks.send).toHaveBeenLastCalledWith(mocks.auth, "tester@example.com", {
+      url: `${location.origin}/`, handleCodeInApp: true,
+    });
   });
   it("sends a same-origin Email link without placing the email in the callback URL", async () => {
     await sendEmailLink("tester@example.com");
