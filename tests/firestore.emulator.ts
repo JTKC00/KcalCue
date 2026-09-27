@@ -877,6 +877,16 @@ describe("Firebase meal API against real Firestore emulator", () => {
         .records,
     ).toEqual([]);
   });
+  it("rejects deletion of a missing meal without creating a tombstone or revision", async () => {
+    const id = crypto.randomUUID();
+    const url = `http://localhost/api/meals/${id}?version=0&mutationId=${crypto.randomUUID()}`;
+    const response = await DELETE(new Request(url, { method: "DELETE" }), {
+      params: Promise.resolve({ id }),
+    });
+    expect(response.status).toBe(409);
+    expect((await mealCollection(db, uid).doc(id).get()).exists).toBe(false);
+    expect((await db.doc(accountPath(uid)).get()).exists).toBe(false);
+  });
   it("isolates API reads and writes by verified UID even when meal IDs match", async () => {
     const body = input();
     await POST(request(body));

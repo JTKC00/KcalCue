@@ -223,6 +223,9 @@ export async function deleteMeal(
         return;
       throw new HttpError(409, "conflict");
     }
+    // A version-zero DELETE must not create a tombstone for an ID that was
+    // never saved. Only an existing meal can authorize persistent cleanup.
+    if (!previous) throw new HttpError(409, "conflict");
     if ((previous?.version ?? 0) !== expected)
       throw new HttpError(409, "conflict");
     // A newer writer may attach resources that this version cannot clean up.
