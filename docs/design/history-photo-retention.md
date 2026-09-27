@@ -91,6 +91,7 @@ Firestore與object storage不能做同一個transaction。meal引用與registry�
 - Encode後以「物件不存在才建立」generation precondition寫canonicalJPEG。**generation precondition exact SDK/API用法在實作時依安裝版本驗證**，本文件未呼叫雲端或外部文件，不提供未查證可直接執行的CLI。
 - 寫成功才以storage回覆generation/checksum更新staged；reservation→bytes accounting保持有上限，不在unknown狀態提前釋放額度。
 - Source-only `photo-object-store.create`使用multipart/related及`ifGenerationMatch=0`，帶入不可變key與input/JPEG checksum、尺寸metadata；它**不建立reservation，也不自動重試**，尚未有呼叫它的上傳route。成功回覆會按實際generation回讀JPEG並核對byteSize/SHA-256，因為自訂metadata的checksum只是上載時提供的字串；回覆遺失或不符一律當unknown，由後續recovery對同一key做metadata及實際bytes驗證。
+- Source-only `recoverReservedPhotoUpload`可用原UID／meal／upload reservation及同一輸入的canonical JPEG指紋核對metadata，再讀確切generation的bytes補記；若期間expiry或刪餐先勝，Firestore transaction只會得到`deleting`。已確認缺席並退quota的tombstone若後來看到同key新generation，也只會重新進入`deleting`及保留quota；沒有請求回來的晚到write仍需namespace對帳。404／逾時／不符維持unknown，不據此退款。此helper沒有公開route、狀態API或自動重傳，仍不可啟用上傳。
 - 若storage回覆逾時／中斷，不產生新uploadID重傳。先以同ID查serverstatus及同object key metadata，確定generation/checksum；存在且吻合則補finalize，確定不存在才以相同precondition重試；無法確定則保留pending。
 - 若發現object metadata不符reservation，fail closed、記非私人diagnostic，不能overwrite不明物件或把它attach。
 
