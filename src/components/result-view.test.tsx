@@ -29,6 +29,26 @@ function food(
 }
 
 describe("ResultView coverage copy", () => {
+  it("does not substitute reference calories for an invalid saved correction", () => {
+    const provider = new LocalNutritionProvider();
+    const foods = [food("白飯", "cooked white rice")];
+    const items = createEditableFoodItems(foods, foods.map((item) => provider.resolve(item)));
+    render(<ResultView analysis={null} items={items} mode="manual" calorieCorrection={{ kcal: 650, source: "ai" } as never} previewUrl={null} previewFailed={false} isHeic={false} onNameChange={noop} onPortionChange={noop} onUnitChange={noop} onPreset={noop} onDelete={noop} onAdd={noop} onReset={noop} />);
+    expect(screen.getByRole("heading", { name: "暫未能計算" })).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("已存的手動卡路里無效");
+    expect(screen.getByLabelText("主要營養素估算範圍")).toBeInTheDocument();
+  });
+
+  it.each([0, 650])("shows user kcal %s without inventing macros for an unknown food", (kcal) => {
+    const provider = new LocalNutritionProvider();
+    const foods = [food("自訂測試餐", "unknown custom meal", "dish")];
+    const items = createEditableFoodItems(foods, foods.map((item) => provider.resolve(item)));
+    render(<ResultView analysis={null} items={items} mode="manual" calorieCorrection={{ kcal, source: "user" }} previewUrl={null} previewFailed={false} isHeic={false} onNameChange={noop} onPortionChange={noop} onUnitChange={noop} onPreset={noop} onDelete={noop} onAdd={noop} onReset={noop} />);
+    expect(screen.getByRole("heading", { name: `手動記錄：${kcal} kcal` })).toBeInTheDocument();
+    expect(screen.queryByLabelText("主要營養素估算範圍")).not.toBeInTheDocument();
+    expect(screen.getByText("營養參考不足；手動卡路里不代表營養素已確認。")).toBeInTheDocument();
+  });
+
   it("keeps HEIC fallback actions on the result sidebar", () => {
     const provider = new LocalNutritionProvider();
     const foods = [food("白飯", "cooked white rice")];

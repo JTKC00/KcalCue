@@ -1,4 +1,5 @@
 import type { FoodAnalysis } from "@/lib/domain/food-analysis";
+import type { AnalysisProvenanceMetadata } from "@/lib/domain/analysis-provenance";
 
 export const supportedImageMimeTypes = [
   "image/jpeg",
@@ -117,6 +118,8 @@ export interface FoodImageInput {
 
 export interface FoodVisionAnalyzeOptions {
   signal?: AbortSignal;
+  /** Server-controlled hook, emitted only after analysis schema validation. */
+  onMetadata?: (metadata: AnalysisProvenanceMetadata) => void;
 }
 
 export interface FoodVisionProvider {

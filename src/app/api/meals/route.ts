@@ -1,7 +1,14 @@
 import { authenticated, apiError, HttpError } from "@/lib/server/auth";
 import { mealInputSchema, type MealRecord } from "@/lib/meals/types";
+import { readAnalysisProvenance } from "@/lib/domain/analysis-provenance";
+import { resolveCalorieCorrection } from "@/lib/meals/calories";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
-import { listMeals, previousMeal, commitMeal } from "@/lib/firebase/meals";
+import {
+  listMeals,
+  previousMeal,
+  commitMeal,
+  assertWritableMealSchema,
+} from "@/lib/firebase/meals";
 import { accountPath } from "@/lib/firebase/admin";
 import { createEditableFoodItems } from "@/lib/domain/editable-meal";
 import { canReuseNutritionMatchForNameEdit } from "@/lib/nutrition/client";
@@ -49,6 +56,7 @@ export async function POST(request: Request) {
         { record: previous },
         { headers: { "Cache-Control": "no-store" } },
       );
+    assertWritableMealSchema(previous);
     if ((previous?.version ?? 0) !== input.version)
       throw new HttpError(409, "conflict");
     if (input.photoPath) throw new HttpError(400, "photos_not_stored");
@@ -83,14 +91,17 @@ export async function POST(request: Request) {
             analysis.foods.map((food) => local.resolve(food)),
           )
         : items);
-    const record: MealRecord = {
+    const record: Omit<MealRecord, "updatedAt"> = {
       ...input,
+      calorieCorrection: resolveCalorieCorrection(input.calorieCorrection, input.items, previous),
       items,
       analysis,
+      analysisProvenance: previous
+        ? previous.analysisProvenance ?? null
+        : analysis ? readAnalysisProvenance(input.analysisProvenance, input.mode) : null,
       originalItems,
       userId: user.id,
       version: input.version + 1,
-      updatedAt: new Date().toISOString(),
     };
     const saved = await commitMeal(db, user.id, record, input.version);
     return Response.json(

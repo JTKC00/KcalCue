@@ -24,7 +24,7 @@ vi.mock("@/lib/meals/repository", () => ({
   RepositoryError: class extends Error {},
   MealRepository: class {
     list = fixture.list;
-    state = async () => ({ jobs: [], syncedAt: null });
+    state = async (uid: string) => ({ remote: await fixture.list(uid), jobs: [], syncedAt: null });
     sync = async () => {};
   },
 }));

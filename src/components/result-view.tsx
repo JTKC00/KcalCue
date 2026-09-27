@@ -20,11 +20,13 @@ import { NutritionService } from "@/lib/nutrition/service";
 import { AlertIcon, CheckIcon, PlusIcon, RefreshIcon, ShieldIcon } from "./icons";
 import { FoodEditor } from "./food-editor";
 import { ImagePreviewFallback } from "./image-preview-fallback";
+import { mealCalories, type MealCalorieCorrection } from "@/lib/meals/calories";
 
 interface ResultViewProps {
   analysis: FoodAnalysis | null;
   items: EditableFoodItem[];
   mode: "live" | "demo" | "manual";
+  calorieCorrection?: MealCalorieCorrection | null;
   previewUrl: string | null;
   previewFailed: boolean;
   isHeic: boolean;
@@ -71,6 +73,7 @@ export function ResultView({
   analysis,
   items,
   mode,
+  calorieCorrection,
   previewUrl,
   previewFailed,
   isHeic,
@@ -90,6 +93,8 @@ export function ResultView({
   const nutritionConfidence = weakestNutritionConfidence(meal);
   const showTotal = mealShowsTotal(meal.coverage);
   const calories = roundRange(meal.totals.calories, 5);
+  const finalCalories = mealCalories({ items, mode, calorieCorrection });
+  const manualCalories = finalCalories.source === "user" ? finalCalories.range : null;
   const midpoint = Math.round(meal.midpointCalories / 5) * 5;
   const uncertainties = analysis
     ? collectUncertaintyReasons({ ...analysis, foods: items })
@@ -99,8 +104,10 @@ export function ResultView({
     <main className="result-page" id="main-content">
       <section className="result-hero" aria-labelledby="result-title">
         <div className="result-hero-copy">
-          <p className="eyebrow">{copy.resultEyebrow}</p>
-          {showTotal ? (
+          <p className="eyebrow">{manualCalories ? "本餐卡路里" : copy.resultEyebrow}</p>
+          {manualCalories ? (
+            <h1 id="result-title">手動記錄：<span>{manualCalories.min}</span> kcal</h1>
+          ) : showTotal && !finalCalories.invalidCorrection ? (
             <h1 id="result-title">
               約 <span>{calories.min}–{calories.max}</span> kcal
             </h1>
@@ -109,7 +116,11 @@ export function ResultView({
               暫未能計算
             </h1>
           )}
-          {showTotal ? (
+          {manualCalories ? (
+            <p className="midpoint">{showTotal ? `參考估算：約 ${calories.min}–${calories.max} kcal` : "營養參考不足；手動卡路里不代表營養素已確認。"}</p>
+          ) : finalCalories.invalidCorrection ? (
+            <p className="midpoint" role="alert">已存的手動卡路里無效，請重新填寫或恢復參考估算。</p>
+          ) : showTotal ? (
             <p className="midpoint">中間估算：約 {midpoint} kcal</p>
           ) : null}
         </div>
@@ -176,7 +187,7 @@ export function ResultView({
           {meal.coverage === "partial" ? (
             <p className="coverage-notice" role="status">
               <AlertIcon />
-              {copy.partialNutrition} 此總數只包括 {meal.includedCount} / {meal.totalCount} 項有可靠營養資料的食物。
+              {copy.partialNutrition} 營養參考只包括 {meal.includedCount} / {meal.totalCount} 項有可靠營養資料的食物。
             </p>
           ) : null}
           {meal.coverage === "insufficient" ? (

@@ -75,8 +75,17 @@ import {
 } from "./openai";
 import { FOOD_VISION_SYSTEM_INSTRUCTION } from "./prompt";
 import { createFoodVisionProvider, getFoodVisionProviderMode } from "./factory";
+import { FOOD_VISION_ANALYSIS_VERSION, analysisProvenanceMetadataSchema } from "@/lib/domain/analysis-provenance";
 
 describe("DemoFoodVisionProvider", () => {
+  it("labels a validated fixture without claiming a model", async () => {
+    const onMetadata = vi.fn();
+    await new DemoFoodVisionProvider().analyzeImage({ data: "", mimeType: "image/jpeg" }, { onMetadata });
+    expect(onMetadata).toHaveBeenCalledOnce();
+    expect(onMetadata.mock.calls[0][0]).toMatchObject({ provider: "demo", requestedModel: null,
+      reportedModel: null, modelVersion: null, analysisVersion: FOOD_VISION_ANALYSIS_VERSION });
+    expect(analysisProvenanceMetadataSchema.safeParse(onMetadata.mock.calls[0][0]).success).toBe(true);
+  });
   it("returns a validated independent copy of the deterministic demo result", async () => {
     const provider = new DemoFoodVisionProvider();
     const first = await provider.analyzeImage({
@@ -111,6 +120,26 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
       model: "test-only-model",
     });
   }
+
+  it.each(["actual-provider-reported-model", undefined])("reports execution metadata after validation with response model %s", async (model) => {
+    const onMetadata = vi.fn();
+    responsesCreateMock.mockResolvedValueOnce({ output_text: JSON.stringify(demoFoodAnalysis), model });
+    const analysis = await provider().analyzeImage({ data: "base64-data", mimeType: "image/jpeg" }, { onMetadata });
+    expect(analysis).toEqual(demoFoodAnalysis);
+    expect(analysis).not.toHaveProperty("analysisProvenance");
+    expect(onMetadata).toHaveBeenCalledOnce();
+    expect(onMetadata.mock.calls[0][0]).toMatchObject({ provider: "openai", requestedModel: "test-only-model",
+      reportedModel: model ?? null, modelVersion: null, analysisVersion: FOOD_VISION_ANALYSIS_VERSION });
+    expect(analysisProvenanceMetadataSchema.safeParse(onMetadata.mock.calls[0][0]).success).toBe(true);
+  });
+
+  it.each(["{bad-json", JSON.stringify({ foods: [] })])("does not emit metadata for invalid analysis %s", async (output_text) => {
+    const onMetadata = vi.fn();
+    responsesCreateMock.mockResolvedValueOnce({ output_text, model: "unvalidated" });
+    await expect(provider().analyzeImage({ data: "", mimeType: "image/jpeg" }, { onMetadata }))
+      .rejects.toMatchObject({ code: "invalid_response" });
+    expect(onMetadata).not.toHaveBeenCalled();
+  });
 
   it("includes the dish-versus-ingredient contract in the vision instruction", () => {
     expect(FOOD_VISION_SYSTEM_INSTRUCTION).toContain('identityLevel "dish"');

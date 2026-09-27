@@ -1812,6 +1812,12 @@ svg {
 .meal-row { display: flex; gap: 20px; align-items: center; }
 .meal-row > div { min-width: 0; }
 .meal-row h3 { overflow-wrap: anywhere; margin: 8px 0 14px; }
+.meal-row .meal-calories { margin: 0 0 16px; font-weight: 700; color: #244d38; }
+.calorie-control { margin: 18px auto; width: min(100% - 32px, 1000px); }
+.calorie-control label { max-width: 360px; }
+.calorie-control input { width: 100%; }
+.calorie-control p { font-size: .9rem; }
+.calorie-control [role="alert"] { color: #973e27; }
 .meal-row p { font-size: .85rem; color: #5c6e60; margin: 0; }
 .meal-thumbnail { width: 96px; height: 96px; flex-shrink: 0; border-radius: 14px; object-fit: cover; }
 .photo-placeholder { background: #eaf0e6; display: grid; place-items: center; font-size: .75rem; color: #506653; }

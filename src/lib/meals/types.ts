@@ -5,8 +5,11 @@ import {
   type FoodAnalysis,
 } from "@/lib/domain/food-analysis";
 import type { EditableFoodItem } from "@/lib/domain/editable-meal";
+import { analysisProvenanceMetadataSchema, type AnalysisProvenance } from "@/lib/domain/analysis-provenance";
 import { NutritionService } from "@/lib/nutrition/service";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
+import { calorieCorrectionInputSchema, type MealCalorieCorrection } from "./calories";
+export type { MealCalorieCorrection } from "./calories";
 
 export const mealTypes = {
   breakfast: "早餐",
@@ -14,6 +17,7 @@ export const mealTypes = {
   dinner: "晚餐",
   snack: "小食",
 } as const;
+export const CURRENT_MEAL_SCHEMA_VERSION = 3;
 export interface MealDraft {
   id: string;
   date: string;
@@ -22,15 +26,20 @@ export interface MealDraft {
   mealType: keyof typeof mealTypes;
   mode: "live" | "manual" | "demo";
   analysis: FoodAnalysis | null;
+  analysisProvenance?: AnalysisProvenance | null;
   items: EditableFoodItem[];
   originalItems: EditableFoodItem[];
+  calorieCorrection?: MealCalorieCorrection | null;
+  calorieInput?: string;
   version: number;
+  readonly schemaVersion?: number;
+  readonly createdAt?: string | null;
   photoPath: string | null;
   photo?: Blob;
   removePhoto?: boolean;
   pendingMutation?: { id: string; fingerprint: string };
 }
-export interface MealRecord extends Omit<MealDraft, "photo" | "removePhoto"> {
+export interface MealRecord extends Omit<MealDraft, "photo" | "removePhoto" | "calorieInput"> {
   userId: string;
   updatedAt: string;
   mutationId: string;
@@ -48,8 +57,10 @@ export function newDraft(): MealDraft {
     mealType: "snack",
     mode: "manual",
     analysis: null,
+    analysisProvenance: null,
     items: [],
     originalItems: [],
+    calorieCorrection: null,
     version: 0,
     photoPath: null,
   };
@@ -74,6 +85,8 @@ export const mealInputSchema = z.object({
   mealType: z.enum(["breakfast", "lunch", "dinner", "snack"]),
   mode: z.enum(["live", "manual"]),
   analysis: foodAnalysisSchema.nullable(),
+  analysisProvenance: analysisProvenanceMetadataSchema.nullable().optional(),
+  calorieCorrection: calorieCorrectionInputSchema.nullable().optional(),
   items: z
     .array(
       foodEstimateSchema.safeExtend({

@@ -1,6 +1,8 @@
 import { authorizedFetch, firebaseAuth } from "@/lib/firebase/client";
 import { mealInputSchema, type MealDraft, type MealRecord } from "./types";
+import { readAnalysisProvenance } from "@/lib/domain/analysis-provenance";
 import { changeSyncState, visibleMeals, type PendingMeal } from "./outbox";
+import { resolveCalorieCorrection } from "./calories";
 export class RepositoryError extends Error {
   constructor(
     public code: string,
@@ -61,8 +63,24 @@ export class MealRepository {
       photoPath: null,
     });
     if (!parsed.success) throw new RepositoryError("invalid_request", 400);
+    const { calorieCorrection, ...input } = parsed.data;
     const record: MealRecord = {
-      ...parsed.data,
+      ...input,
+      analysisProvenance: input.analysis ? readAnalysisProvenance(input.analysisProvenance, input.mode) : null,
+      ...(calorieCorrection === undefined ? {} : {
+        calorieCorrection: resolveCalorieCorrection(calorieCorrection, input.items),
+      }),
+      // Read-only cloud metadata may travel with an existing draft. A new
+      // offline meal has no server creation time until its first acknowledgement.
+      ...(draft.version === 0 || draft.schemaVersion === undefined ? {} : { schemaVersion: draft.schemaVersion }),
+      ...(draft.version === 0 || draft.createdAt === undefined ? {} : { createdAt: draft.createdAt }),
+      // The API input schema deliberately strips client nutrition metadata.
+      // Preserve the already resolved match in the local outbox for offline
+      // totals; the server independently resolves/validates the eventual write.
+      items: parsed.data.items.map((item, index) => ({
+        ...item,
+        nutritionMatch: draft.items[index].nutritionMatch,
+      })),
       originalItems: draft.originalItems.length
         ? draft.originalItems
         : draft.items,
@@ -70,6 +88,7 @@ export class MealRepository {
       version: draft.version + 1,
       updatedAt: new Date().toISOString(),
     };
+    let visible = record;
     await navigator.locks.request(`kcalcue-account-${uid}`, async () => {
       if (currentUser() !== uid)
         throw new RepositoryError("login_required", 401);
@@ -83,11 +102,12 @@ export class MealRepository {
             record,
             expectedVersion: draft.version,
           });
+        visible = visibleMeals(state).find((meal) => meal.id === draft.id) ?? record;
         return state;
       });
     });
     signalChange(uid);
-    return record;
+    return visible;
   }
   async delete(record: MealRecord) {
     const uid = currentUser();
@@ -110,13 +130,17 @@ export class MealRepository {
     });
     signalChange(uid);
   }
-  async discardPending(mealId: string) {
-    const uid = currentUser();
+  async discardPending(mealId: string, uid = currentUser()) {
+    if (currentUser() !== uid) throw new RepositoryError("login_required", 401);
     await locked(uid, async () => {
-      await changeSyncState(uid, (state) => ({
-        ...state,
-        jobs: state.jobs.filter((job) => job.record.id !== mealId),
-      }));
+      await navigator.locks.request(`kcalcue-account-${uid}`, async () => {
+        if (currentUser() !== uid)
+          throw new RepositoryError("login_required", 401);
+        await changeSyncState(uid, (state) => ({
+          ...state,
+          jobs: state.jobs.filter((job) => job.record.id !== mealId),
+        }));
+      });
     });
     signalChange(uid);
   }
@@ -209,6 +233,9 @@ export class MealRepository {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               ...job.record,
+              calorieInput: undefined,
+              schemaVersion: undefined,
+              createdAt: undefined,
               version: job.expectedVersion,
               mutationId: job.id,
             }),

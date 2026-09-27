@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { AnalysisProvenanceMetadata } from "@/lib/domain/analysis-provenance";
 import { DemoFoodVisionProvider } from "@/lib/providers/food-vision/demo";
 import {
   extractOpenAIErrorDetails,
@@ -45,6 +46,8 @@ export async function POST(request: Request) {
   const startedAt = performance.now();
   let visionStartedAt: number | null = null;
   let visionMode: string | undefined;
+  let analysisProvenance: AnalysisProvenanceMetadata | null = null;
+  const onMetadata = (metadata: AnalysisProvenanceMetadata) => { analysisProvenance = metadata; };
 
   try {
     const ip = clientIpFromHeaders(request.headers);
@@ -79,9 +82,9 @@ export async function POST(request: Request) {
           data: "",
           mimeType: "image/jpeg",
         },
-        { signal: request.signal },
+        { signal: request.signal, onMetadata },
       );
-      return NextResponse.json({ analysis, mode: provider.mode });
+      return NextResponse.json({ analysis, analysisProvenance, mode: provider.mode });
     }
 
     const image = formData.get("image");
@@ -106,10 +109,10 @@ export async function POST(request: Request) {
         data: bytes.toString("base64"),
         mimeType: detectedMimeType,
       },
-      { signal: request.signal },
+      { signal: request.signal, onMetadata },
     );
 
-    return NextResponse.json({ analysis, mode: provider.mode });
+    return NextResponse.json({ analysis, analysisProvenance, mode: provider.mode });
   } catch (error) {
     if (error instanceof FoodVisionError) {
       if (!error.diagnostic) {

@@ -43,6 +43,7 @@ import {
 import { ResultView } from "./result-view";
 import { authorizedFetch } from "@/lib/firebase/client";
 import type { MealDraft } from "@/lib/meals/types";
+import { readAnalysisProvenance, type AnalysisProvenance } from "@/lib/domain/analysis-provenance";
 
 type AppStage = "input" | "analyzing" | "result" | "unable" | "error";
 type ProviderMode = FoodVisionProvider["mode"];
@@ -56,6 +57,7 @@ interface AppError {
 
 interface AnalyzeResponse {
   analysis?: unknown;
+  analysisProvenance?: unknown;
   mode?: unknown;
   error?: { code?: unknown };
 }
@@ -63,7 +65,8 @@ interface AnalyzeResponse {
 interface KcalCueAppProps {
   initialProviderMode: ProviderMode;
   initialDraft?: MealDraft;
-  onDraftChange?: (change: Pick<MealDraft, "items" | "analysis" | "mode">, file: File | null) => void;
+  calorieCorrection?: MealDraft["calorieCorrection"];
+  onDraftChange?: (change: Pick<MealDraft, "items" | "analysis" | "analysisProvenance" | "mode">, file: File | null) => void;
   onExit?: () => void;
   manual?: boolean;
   onPhotoSelected?: (file: File | null) => void;
@@ -349,12 +352,14 @@ function SiteFooter() {
   );
 }
 
-export function KcalCueApp({ initialProviderMode, initialDraft, onDraftChange, onExit, manual, onPhotoSelected }: KcalCueAppProps) {
+export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrection, onDraftChange, onExit, manual, onPhotoSelected }: KcalCueAppProps) {
   const [stage, setStage] = useState<AppStage>(initialDraft?.items.length || manual ? "result" : "input");
   const [file, setFile] = useState<File | null>(() => initialDraft?.photo && !initialDraft.items.length ? new File([initialDraft.photo], "餐點.jpg", { type: "image/jpeg" }) : null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewFailed, setPreviewFailed] = useState(false);
   const [analysis, setAnalysis] = useState<FoodAnalysis | null>(initialDraft?.analysis ?? null);
+  const [analysisProvenance, setAnalysisProvenance] = useState<AnalysisProvenance | null>(() =>
+    initialDraft?.analysis ? readAnalysisProvenance(initialDraft.analysisProvenance, initialDraft.mode) : null);
   const [items, setItems] = useState<EditableFoodItem[]>(initialDraft?.items.length ? initialDraft.items : manual ? [createManualItem()] : []);
   const [activeMode, setActiveMode] = useState<AppMode>(
     initialDraft?.items.length ? initialDraft.mode : manual ? "manual" : initialProviderMode,
@@ -365,8 +370,8 @@ export function KcalCueApp({ initialProviderMode, initialDraft, onDraftChange, o
   const analyzeAbortRef = useRef<AbortController | null>(null);
   const editAbortRef = useRef(new AbortController());
   useLayoutEffect(() => {
-    if (stage === "result") onDraftChange?.({ items, analysis, mode: activeMode }, file);
-  }, [stage, items, analysis, activeMode, file, onDraftChange]);
+    if (stage === "result") onDraftChange?.({ items, analysis, analysisProvenance, mode: activeMode }, file);
+  }, [stage, items, analysis, analysisProvenance, activeMode, file, onDraftChange]);
   useEffect(() => {
     if (!initialDraft?.photo) return;
     const url = URL.createObjectURL(initialDraft.photo);
@@ -405,6 +410,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, onDraftChange, o
     setAppError(null);
     setPreviewFailed(false);
     setAnalysis(null);
+    setAnalysisProvenance(null);
     setItems([]);
 
     if (!nextFile) {
@@ -504,6 +510,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, onDraftChange, o
       const responseMode = body.mode === "live" ? "live" : "demo";
       setActiveMode(responseMode);
       setAnalysis(parsed.data);
+      setAnalysisProvenance(readAnalysisProvenance(body.analysisProvenance, responseMode));
 
       if (parsed.data.analysisStatus === "unable_to_identify") {
         setItems([]);
@@ -563,6 +570,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, onDraftChange, o
     setPreviewUrl(null);
     setPreviewFailed(false);
     setAnalysis(null);
+    setAnalysisProvenance(null);
     setItems([]);
     setAppError(null);
     setActiveMode(initialProviderMode);
@@ -570,6 +578,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, onDraftChange, o
 
   const startManual = () => {
     setAnalysis(null);
+    setAnalysisProvenance(null);
     setItems([createManualItem()]);
     setActiveMode("manual");
     setStage("result");
@@ -749,6 +758,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, onDraftChange, o
           analysis={analysis}
           items={items}
           mode={activeMode}
+          calorieCorrection={calorieCorrection}
           previewUrl={previewUrl}
           previewFailed={previewFailed}
           isHeic={isHeicFile(file?.name ?? "", file?.type)}
