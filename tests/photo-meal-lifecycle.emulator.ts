@@ -206,11 +206,20 @@ describe("private meal photo transaction lifecycle", () => {
     const created = (await (await post(first)).json()).record as MealRecord;
     const a = await attachable(uid, first.id);
     const b = await attachable(uid, first.id);
-    const results = await Promise.all([a, b].map((uploadId) => post({
+    const attempts = [a, b].map((uploadId) => ({
       ...created, mutationId: crypto.randomUUID(), photoAction: { kind: "attach", uploadId },
-    })));
-    expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
-    const winner = (await results.find((r) => r.status === 200)!.json()).record as MealRecord;
+    }));
+    const results = await Promise.all(attempts.map((attempt) => post(attempt)));
+    const winnerIndex = results.findIndex((response) => response.status === 200);
+    expect(winnerIndex).not.toBe(-1);
+    const loserIndex = 1 - winnerIndex;
+    // The durable lookup claim may temporarily return 503 while the winner is
+    // still in flight. After it settles, the same loser mutation must conflict.
+    if (results[loserIndex].status === 503)
+      expect((await results[loserIndex].json()).error.code).toBe("operation_in_progress");
+    else expect(results[loserIndex].status).toBe(409);
+    expect((await post(attempts[loserIndex])).status).toBe(409);
+    const winner = (await results[winnerIndex].json()).record as MealRecord;
     expect((await photoAssetRef(db, uid, winner.photoRef!.attachmentId).get()).data()?.state).toBe("attached");
     const loser = winner.photoRef!.attachmentId === a ? b : a;
     expect((await photoAssetRef(db, uid, loser).get()).data()?.state).toBe("staged");
