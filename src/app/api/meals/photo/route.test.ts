@@ -107,6 +107,22 @@ describe("private photo preparation", () => {
     expect(response.headers.get("content-type")).toBe("image/jpeg");
   });
 
+  it("uses the same white background as client preparation for transparent images", async () => {
+    const source = await sharp({
+      create: { width: 16, height: 16, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
+    }).png().toBuffer();
+    const data = new FormData();
+    data.set("mealId", crypto.randomUUID());
+    data.set("image", new Blob([new Uint8Array(source)], { type: "image/png" }));
+    const response = await POST(new Request("http://localhost/api/meals/photo?prepare=1", {
+      method: "POST",
+      body: data,
+    }));
+    expect(response.status).toBe(200);
+    const pixel = await sharp(Buffer.from(await response.arrayBuffer())).raw().toBuffer();
+    expect([...pixel.subarray(0, 3)]).toEqual([255, 255, 255]);
+  });
+
   it("returns a controlled error for malformed multipart", async () => {
     const response = await POST(new Request("http://localhost/api/meals/photo", {
       method: "POST",
