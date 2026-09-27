@@ -174,7 +174,7 @@ Cleanup只delete該asset記錄的**確切generation**；precondition mismatch不
 
 1. **合約＋server primitive（預設disabled）：**typed asset/command/schema、fake object adapter、transaction reservation/attach/remove/cleanup狀態機、ownership與meaningful tests；普通meal與既有prepare route行為不变。不單獨啟用未有cleanup的upload endpoint。
 2. **可恢復 server lifecycle：**實際server-only object adapter、generation conditional operations、private read、upload/status、cleanup runner/reconciler及provider-specific本機測試；與step1整合emulator。沒有實際資源/config也可完成可審核source，cloud parity明列待驗。
-3. **Client vertical slice：**History按需private blob rendering已有source-only分片；仍需IDB payload store、outbox依赖／unknown recovery、opt-in、replace/remove、legacy/離線UX、Daily/provenance相容，以及獨立browser重做完整journey。同步更新條件式隱私文案與SETUP，不把預設disabled寫成已發布。
+3. **Client vertical slice：**History按需private blob rendering、IDB payload store與outbox依賴已有source-only分片；仍需upload/status恢復器、opt-in、replace/remove、legacy/離線UX、Daily/provenance相容，以及獨立browser重做完整journey。同步更新條件式隱私文案與SETUP，不把預設disabled寫成已發布。
 4. **授權release：**確認資源、quota、delete/retention/IAM與背景執行；exact-source CI/build/codec證據、rollback floor；QA帳戶真流程＋cleanup readback後才標功能production PASS。
 
 前三步可按實際diff大小再拆，但不能把「能upload」當成可發布feature而留下ownership、delete、unknown recovery待日後。也不為此加入大型admin、相簿、AI重分析、公開分享、billing或原圖永久保存。
