@@ -52,7 +52,7 @@ export function assertWritableMealSchema(
   if (record && "photoRef" in record) throw new HttpError(409, "unsupported_schema");
 }
 
-function checkedAsset(data: FirebaseFirestore.DocumentData | undefined,
+export function checkedAttachedPhotoAsset(data: FirebaseFirestore.DocumentData | undefined,
   uid: string, mealId: string, ref: PhotoRef): PhotoAsset {
   if (!data || data.ownerUid !== uid || data.mealId !== mealId ||
       data.uploadId !== ref.attachmentId ||
@@ -145,7 +145,7 @@ export async function commitMeal(
       quotas ? tx.get(quotas.project) : Promise.resolve(null),
     ]);
     const oldAsset = oldRef && oldSnap
-      ? checkedAsset(oldSnap.data(), uid, record.id, oldRef) : null;
+      ? checkedAttachedPhotoAsset(oldSnap.data(), uid, record.id, oldRef) : null;
     const staged = photoAction?.kind === "attach" && newSnap
       ? stagedPhoto(newSnap.data(), uid, record.id, photoAction.uploadId) : null;
     let nextPhotoRef: PhotoRef | null = oldRef;
@@ -228,7 +228,7 @@ export async function deleteMeal(
     const oldRef: PhotoRef | null = previous?.record?.photoRef ?? null;
     const oldAssetRef = oldRef ? photoAssetRef(db, uid, oldRef.attachmentId) : null;
     const oldSnap = oldAssetRef ? await tx.get(oldAssetRef) : null;
-    const oldAsset = oldRef && oldSnap ? checkedAsset(oldSnap.data(), uid, id, oldRef) : null;
+    const oldAsset = oldRef && oldSnap ? checkedAttachedPhotoAsset(oldSnap.data(), uid, id, oldRef) : null;
     if (oldAsset && oldAssetRef)
       tx.set(oldAssetRef, { ...oldAsset, state: "deleting", updatedAt: Timestamp.now() });
     tx.set(ref, { deleted: true, version: expected + 1, mutationId });

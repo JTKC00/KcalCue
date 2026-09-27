@@ -1,6 +1,6 @@
 # History 圖片：最小持久化合約與分片方案
 
-2026-09-27 完成（檔名沿用9月26日工作批次）；**設計文件，尚未實作，沒有功能／production PASS 聲明。** 未建立資源、修改產品、啟動服務、讀取 secrets 或存取雲端。此 PR 只交付設計文件；本機合約測試、adapter、UI 及雲端驗收皆尚未實作。
+2026-09-27 完成（檔名沿用9月26日工作批次）；其後source-only分片已加入registry、meal transaction和authenticated private read route，**上傳、實體cleanup、客戶端顯圖及production驗收仍未實作；沒有完整功能／production PASS聲明。** 未建立照片資源或更改雲端設定。
 
 ## 目標與既有基礎
 
@@ -46,7 +46,7 @@ photoAction?: { kind: "attach"; uploadId: string } | { kind: "remove" };
 // Server-owned meal value：由asset registry複製權威欄位。
 photoRef?: {
   attachmentId: string;
-  generation: string;       // object service實際回覆；opaque，不轉JS number
+  generation: string;       // object service實際回覆；持久資料保留opaque字串
   contentType: "image/jpeg";
   width: number;
   height: number;
@@ -65,12 +65,14 @@ photoRef?: {
 
 ## 3. 私人讀取路徑
 
-新增專用例如 `GET /api/meals/{mealId}/photo`：
+已加入source-only `GET /api/meals/{mealId}/photo`；沒有配置私人bucket時維持停用，雲端實測仍是release gate。此route：
 
 1. authenticated→verified UID scope→讀meal；已刪／無圖／不屬目前UID以不洩漏存在資訊的404返回。
 2. 核對meal引用與同UID registry的mealID、attachmentID、generation、state attached一致。
 3. 用**指定generation**取object，不能自動fallback最新generation。物件缺失顯示圖片暫不可用；餐點與kcal保持，不能清空其他資料或建立另一餐。
 4. 回 `image/jpeg`、`Cache-Control: private, no-store`、適當nosniff；不提供公開bucket URL、永久download token或長效signed URL，不redirect到公開第三方origin。
+
+目前安裝的Storage SDK會把指定generation轉成JavaScript Number，對0更會略去generation查詢；讀取route在0、超出safe integer或字串會被數值正規化時fail closed，不會悄悄取另一版本。若實際bucket回覆無法安全表示的generation，須先改用能精確傳遞字串的adapter再啟用照片功能。
 
 瀏覽器使用authorized fetch→Blob/object URL顯圖；account generation change／unmount／換圖立即取消請求、撤銷object URL並清掉舊帳戶state。SW繼續不攔截`/api/`，不把照片放公共shell cache。初版只保證已登入且連線可重新取cloud圖片；不悄悄新增永久離線history圖片cache。
 
