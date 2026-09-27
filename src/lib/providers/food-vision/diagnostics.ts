@@ -18,6 +18,19 @@ export interface FoodVisionDiagnostic {
   foodVisionMs?: number;
 }
 
+export interface FoodVisionUsage {
+  requestedModel: unknown;
+  reportedModel: unknown;
+  analysisVersion: string;
+  foodVisionMs: number;
+  usage: {
+    input_tokens?: unknown;
+    output_tokens?: unknown;
+    total_tokens?: unknown;
+    input_tokens_details?: { cached_tokens?: unknown } | null;
+  };
+}
+
 const REDACTED = "[redacted]";
 
 export function sanitizeDiagnosticMessage(message: string): string {
@@ -117,4 +130,37 @@ export function logFoodVisionDiagnostic(diagnostic: FoodVisionDiagnostic): void 
     safeFields.foodVisionMs = diagnostic.foodVisionMs;
   }
   console.error("[kcalcue:food-vision]", safeFields);
+}
+
+function safeUsageModel(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  // Log only known public families, not arbitrary provider/config strings or
+  // fine-tuned model IDs that may contain private account identifiers.
+  const match = /^(gpt-(?:5\.6-(?:luna|terra|sol)|6-(?:luna|sol|astra)))(?:-\d{4}-\d{2}-\d{2})?$/.exec(value);
+  return match?.[1] ?? null;
+}
+
+function safeTokenCount(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value : null;
+}
+
+/** Provider billing observability only; never log an image, food or user identifier. */
+export function logFoodVisionUsage(event: FoodVisionUsage): void {
+  try {
+    console.info("[kcalcue:food-vision-usage]", {
+      stage: "provider_response",
+      requestedModel: safeUsageModel(event.requestedModel),
+      reportedModel: safeUsageModel(event.reportedModel),
+      analysisVersion: event.analysisVersion,
+      inputTokens: safeTokenCount(event.usage.input_tokens),
+      cachedInputTokens: safeTokenCount(event.usage.input_tokens_details?.cached_tokens),
+      outputTokens: safeTokenCount(event.usage.output_tokens),
+      totalTokens: safeTokenCount(event.usage.total_tokens),
+      foodVisionMs: Number.isFinite(event.foodVisionMs)
+        ? Math.max(0, Math.round(event.foodVisionMs)) : null,
+    });
+  } catch {
+    // Telemetry must never turn a paid, successful analysis into a retry.
+  }
 }

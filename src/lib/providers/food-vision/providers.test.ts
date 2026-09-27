@@ -147,6 +147,7 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
   beforeEach(() => {
     responsesCreateMock.mockReset();
     vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -266,6 +267,66 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
     expect(responsesCreateMock).toHaveBeenCalledOnce();
   });
 
+  it("records provider token usage before rejecting a paid malformed response", async () => {
+    responsesCreateMock.mockResolvedValueOnce({
+      output_text: "{not-json",
+      model: "gpt-6-sol",
+      usage: {
+        input_tokens: 123,
+        input_tokens_details: { cached_tokens: 23 },
+        output_tokens: 45,
+        total_tokens: 168,
+      },
+    });
+
+    await expect(provider().analyzeImage({
+      data: rasterImages["image/jpeg"], mimeType: "image/jpeg",
+    })).rejects.toMatchObject({ code: "invalid_response" });
+
+    expect(console.info).toHaveBeenCalledExactlyOnceWith(
+      "[kcalcue:food-vision-usage]",
+      expect.objectContaining({
+        stage: "provider_response",
+        requestedModel: null,
+        reportedModel: "gpt-6-sol",
+        analysisVersion: FOOD_VISION_ANALYSIS_VERSION,
+        inputTokens: 123,
+        cachedInputTokens: 23,
+        outputTokens: 45,
+        totalTokens: 168,
+        foodVisionMs: expect.any(Number),
+      }),
+    );
+    expect(JSON.stringify(vi.mocked(console.info).mock.calls)).not.toContain(rasterImages["image/jpeg"]);
+  });
+
+  it("keeps a valid analysis when usage logging fails", async () => {
+    responsesCreateMock.mockResolvedValueOnce({
+      output_text: JSON.stringify(demoFoodAnalysis),
+      model: "gpt-6-sol",
+      usage: { input_tokens: 100, output_tokens: 20, total_tokens: 120 },
+    });
+    vi.spyOn(console, "info").mockImplementation(() => { throw new Error("log sink unavailable"); });
+    const onMetadata = vi.fn();
+    await expect(provider().analyzeImage({
+      data: rasterImages["image/jpeg"], mimeType: "image/jpeg",
+    }, { onMetadata })).resolves.toEqual(demoFoodAnalysis);
+    expect(responsesCreateMock).toHaveBeenCalledOnce();
+    expect(onMetadata).toHaveBeenCalledOnce();
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
+  it("keeps a valid analysis without inventing usage when the SDK omits it", async () => {
+    responsesCreateMock.mockResolvedValueOnce({
+      output_text: JSON.stringify(demoFoodAnalysis),
+      model: "gpt-6-sol",
+    });
+    await expect(provider().analyzeImage({
+      data: rasterImages["image/jpeg"], mimeType: "image/jpeg",
+    })).resolves.toEqual(demoFoodAnalysis);
+    expect(console.info).not.toHaveBeenCalled();
+  });
+
   it("rejects an empty model response", async () => {
     responsesCreateMock.mockResolvedValueOnce({ output_text: "" });
 
@@ -343,6 +404,7 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
         .rejects.toMatchObject({ name: "FoodVisionError" });
       expect(responsesCreateMock).toHaveBeenCalledOnce();
       expect(transport).toHaveBeenCalledOnce();
+      expect(console.info).not.toHaveBeenCalled();
     },
   );
 

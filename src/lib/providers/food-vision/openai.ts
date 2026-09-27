@@ -16,6 +16,7 @@ import {
   base64ByteLength,
   extractOpenAIErrorDetails,
   logFoodVisionDiagnostic,
+  logFoodVisionUsage,
   type FoodVisionDiagnostic,
   type FoodVisionFailureStage,
 } from "./diagnostics";
@@ -359,6 +360,17 @@ export class OpenAIFoodVisionProvider implements FoodVisionProvider {
           ]),
         },
       );
+
+      // A provider response may incur usage even if its JSON later fails validation.
+      if (response.usage) {
+        logFoodVisionUsage({
+          requestedModel: this.config.model,
+          reportedModel: response.model,
+          analysisVersion: FOOD_VISION_ANALYSIS_VERSION,
+          foodVisionMs: performance.now() - startedAt,
+          usage: response.usage,
+        });
+      }
 
       if (!response.output_text.trim()) {
         stage = "empty_response";
