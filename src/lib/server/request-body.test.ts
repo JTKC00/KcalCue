@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   readBoundedRequestBody,
   RequestBodyTooLargeError,
+  RequestBodyTimeoutError,
 } from "./request-body";
 
 function streamedRequest(chunks: Uint8Array[], headers?: HeadersInit) {
@@ -184,6 +185,40 @@ describe("readBoundedRequestBody", () => {
     } as RequestInit);
 
     await expect(readBoundedRequestBody(request, 5)).rejects.toBe(failure);
+    expect(request.body?.locked).toBe(false);
+  });
+
+  it("cancels a stalled stream when its total read deadline expires", async () => {
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({
+      pull: () => new Promise<void>(() => {}),
+      cancel,
+    }, { highWaterMark: 0 });
+    const request = new Request("http://localhost", {
+      method: "POST", body, duplex: "half",
+    } as RequestInit);
+
+    await expect(readBoundedRequestBody(request, 5, 10)).rejects.toBeInstanceOf(
+      RequestBodyTimeoutError,
+    );
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(request.body?.locked).toBe(false);
+  });
+
+  it("releases a stalled body when its request signal aborts", async () => {
+    const controller = new AbortController();
+    const cancel = vi.fn();
+    const pull = vi.fn(() => new Promise<void>(() => {}));
+    const body = new ReadableStream<Uint8Array>({ pull, cancel }, { highWaterMark: 0 });
+    const request = new Request("http://localhost", {
+      method: "POST", body, signal: controller.signal, duplex: "half",
+    } as RequestInit);
+    const reading = readBoundedRequestBody(request, 5, 1_000);
+    await vi.waitFor(() => expect(pull).toHaveBeenCalledOnce());
+    controller.abort(new DOMException("Request cancelled", "AbortError"));
+
+    await expect(reading).rejects.toMatchObject({ name: "AbortError" });
+    expect(cancel).toHaveBeenCalledOnce();
     expect(request.body?.locked).toBe(false);
   });
 

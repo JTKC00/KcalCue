@@ -25,6 +25,7 @@ import { reserveDailyLiveAnalysis } from "@/lib/server/durable-analysis-quota";
 import {
   readBoundedRequestBody,
   RequestBodyTooLargeError,
+  RequestBodyTimeoutError,
 } from "@/lib/server/request-body";
 
 export const runtime = "nodejs";
@@ -73,6 +74,8 @@ export async function POST(request: Request) {
     } catch (error) {
       return error instanceof RequestBodyTooLargeError
         ? errorResponse("file_too_large", 413)
+        : error instanceof RequestBodyTimeoutError
+          ? errorResponse("network_timeout", 408)
         : errorResponse("invalid_file", 400);
     }
     const forceDemo = formData.get("mode") === "demo";

@@ -33,3 +33,14 @@ it("keeps unknown server failures generic and retryable", async () => {
     new PhotoPreparationError("photo_failed"),
   );
 });
+
+it("preserves a preparation rate-limit response for a delayed retry notice", async () => {
+  authorizedFetch.mockResolvedValue(Response.json(
+    { error: { code: "rate_limited" } }, { status: 429, headers: { "Retry-After": "10" } },
+  ));
+  const file = new File(["phone photo"], "meal.jpg", { type: "image/jpeg" });
+
+  await expect(preparePhoto(file, crypto.randomUUID())).rejects.toEqual(
+    new PhotoPreparationError("photo_rate_limited"),
+  );
+});

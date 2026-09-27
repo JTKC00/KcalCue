@@ -1,7 +1,7 @@
 import { authorizedFetch } from "@/lib/firebase/client";
 
 export class PhotoPreparationError extends Error {
-  constructor(public readonly code: "image_dimensions_too_large" | "photo_failed") {
+  constructor(public readonly code: "image_dimensions_too_large" | "photo_rate_limited" | "photo_failed") {
     super(code);
   }
 }
@@ -48,6 +48,7 @@ export async function preparePhoto(
       const body = await response.json().catch(() => null);
       const code = body?.error?.code === "image_dimensions_too_large"
         ? "image_dimensions_too_large"
+        : response.status === 429 ? "photo_rate_limited"
         : "photo_failed";
       throw new PhotoPreparationError(code);
     }

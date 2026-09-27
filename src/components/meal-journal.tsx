@@ -53,8 +53,10 @@ function errorText(error: unknown) {
 type JournalNotice = string | { kind: "pending-sync"; message: string };
 const oversizedPhotoNotice = "圖片像素超過 4000 萬，此瀏覽器未能壓縮。請選較低解像度的照片，或移除圖片後手動記錄。";
 const retryablePhotoNotice = "照片壓縮未完成，原相只保留於本次頁面。可重試或移除草稿圖片。";
+const photoRateLimitNotice = "照片處理稍忙，請約 10 秒後重試。原相只保留於本次頁面。";
 function clearPhotoNotice(notice: JournalNotice): JournalNotice {
-  return notice === oversizedPhotoNotice || notice === retryablePhotoNotice ? "" : notice;
+  return notice === oversizedPhotoNotice || notice === retryablePhotoNotice ||
+    notice === photoRateLimitNotice ? "" : notice;
 }
 
 function mealCalorieLabel(record: MealRecord) {
@@ -537,8 +539,11 @@ export function MealJournal({
           if (generation === photoGeneration.current) {
             const tooLarge = error instanceof PhotoPreparationError &&
               error.code === "image_dimensions_too_large";
+            const rateLimited = error instanceof PhotoPreparationError &&
+              error.code === "photo_rate_limited";
             setPhotoFailure(tooLarge ? "too_large" : "retryable");
-            setNotice(tooLarge ? oversizedPhotoNotice : retryablePhotoNotice);
+            setNotice(tooLarge ? oversizedPhotoNotice :
+              rateLimited ? photoRateLimitNotice : retryablePhotoNotice);
           }
         })
         .finally(() => {

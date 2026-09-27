@@ -17,6 +17,7 @@ import { elapsedMs, logSafeTiming } from "@/lib/server/timing";
 import {
   readBoundedRequestBody,
   RequestBodyTooLargeError,
+  RequestBodyTimeoutError,
 } from "@/lib/server/request-body";
 import { z } from "zod";
 
@@ -43,8 +44,9 @@ export async function POST(request: Request) {
     body = JSON.parse(new TextDecoder().decode(bytes));
   } catch (error) {
     return NextResponse.json(
-      { error: { code: "invalid_request" } },
-      { status: error instanceof RequestBodyTooLargeError ? 413 : 400 },
+      { error: { code: error instanceof RequestBodyTimeoutError ? "network_timeout" : "invalid_request" } },
+      { status: error instanceof RequestBodyTooLargeError ? 413
+        : error instanceof RequestBodyTimeoutError ? 408 : 400 },
     );
   }
 
