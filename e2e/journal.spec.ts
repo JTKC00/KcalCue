@@ -616,3 +616,218 @@ test("real photo preview with mocked analysis supports correction, reload, histo
   expect(errors).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
 });
+
+test("AI failure keeps the selected photo and a double tap starts one new analysis", async ({ page, context }, testInfo) => {
+  const backend = cloud();
+  await backend.install(context);
+  let analyses = 0;
+  let releaseRetry!: () => void;
+  const retryGate = new Promise<void>((resolve) => { releaseRetry = resolve; });
+  await page.route("**/api/analyze", async (route) => {
+    analyses++;
+    if (analyses === 1) {
+      await route.fulfill({ status: 503, json: { error: { code: "service_unavailable" } } });
+      return;
+    }
+    await retryGate;
+    await route.fulfill({ json: { mode: "live", analysis: {
+      analysisStatus: "success",
+      foods: [{ displayName: "白飯", normalizedName: "cooked white rice",
+        identityLevel: "ingredient", portionMin: 100, portionMax: 150, unit: "g",
+        recognitionConfidence: 0.8, portionConfidence: 0.5, uncertaintyReasons: [] }],
+      uncertaintyReasons: [], visibleEvidence: ["白飯"],
+      estimatedInformation: ["份量"], unknownInformation: [],
+    } } });
+  });
+  await page.goto("/");
+  await login(page);
+  await page.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await page.locator('input[type="file"]').nth(1).setInputFiles(
+    path.join(testInfo.project.testDir, "fixtures/hk-milk-tea.jpg"),
+  );
+  await page.getByRole("button", { name: "開始分析", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "AI 服務暫時有問題" })).toBeVisible();
+  await expect(page.getByRole("img", { name: "未能完成分析的餐點相片" })).toBeVisible();
+  expect(analyses).toBe(1);
+  expect(backend.saves).toHaveLength(0);
+  const retry = page.getByRole("button", { name: "再試一次", exact: true });
+  await retry.scrollIntoViewIfNeeded();
+  const bounds = await retry.boundingBox();
+  expect(bounds).not.toBeNull();
+  // Mouse input sends two browser clicks even if React replaces the button
+  // after the first click; this verifies the user-visible double-tap outcome.
+  await page.mouse.dblclick(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2);
+  await expect(page.getByRole("heading", { name: "分析緊你嘅餐點…" })).toBeVisible();
+  await expect.poll(() => analyses).toBe(2);
+  releaseRetry();
+  await expect(page.getByText("AI 分析結果", { exact: true })).toBeVisible();
+  expect(analyses).toBe(2);
+  expect(backend.saves).toHaveLength(0);
+});
+
+test("refresh during an unfinished analysis restores the durable photo draft", async ({ page, context }, testInfo) => {
+  const backend = cloud();
+  await backend.install(context);
+  let analyses = 0;
+  let releaseFirst!: () => void;
+  const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  await page.route("**/api/analyze", async (route) => {
+    analyses++;
+    if (analyses === 1) {
+      await firstGate;
+      try { await route.fulfill({ status: 503, json: { error: { code: "service_unavailable" } } }); }
+      catch { /* Navigation cancelled the old request. */ }
+      return;
+    }
+    await route.fulfill({ json: { mode: "live", analysis: {
+      analysisStatus: "unable_to_identify", foods: [], uncertaintyReasons: [],
+      visibleEvidence: [], estimatedInformation: [], unknownInformation: ["食物"],
+    } } });
+  });
+  await page.goto("/");
+  await login(page);
+  await page.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await page.locator('input[type="file"]').nth(1).setInputFiles(
+    path.join(testInfo.project.testDir, "fixtures/hk-milk-tea.jpg"),
+  );
+  await page.getByRole("button", { name: "開始分析", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "分析緊你嘅餐點…" })).toBeVisible();
+  await expect.poll(() => analyses).toBe(1);
+  await expect.poll(() => page.evaluate(async (uid) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const open = indexedDB.open("kcalcue-private");
+      open.onsuccess = () => resolve(open.result);
+      open.onerror = () => reject(open.error);
+    });
+    try {
+      return await new Promise<number>((resolve, reject) => {
+        const tx = db.transaction("accounts", "readonly");
+        const get = tx.objectStore("accounts").get(uid);
+        tx.oncomplete = () => resolve(get.result?.draft?.photo?.size ?? 0);
+        tx.onerror = () => reject(tx.error);
+      });
+    } finally { db.close(); }
+  }, userId)).toBeGreaterThan(0);
+  await page.reload();
+  releaseFirst();
+  await expect(page.getByRole("heading", { name: "新餐點草稿", exact: true })).toBeVisible();
+  await expect(page.getByRole("img", { name: "已選擇的餐點相片預覽" })).toBeVisible();
+  await expect(page.getByText("AI 分析結果", { exact: true })).not.toBeVisible();
+  await page.getByRole("button", { name: "開始分析", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "無法可靠辨認" })).toBeVisible();
+  expect(analyses).toBe(2);
+  expect(backend.saves).toHaveLength(0);
+});
+
+test("entitlement denial retains a manual meal locally until an explicit sync retry", async ({ page, context }, testInfo) => {
+  const backend = cloud();
+  await backend.install(context);
+  let entitled = false;
+  await context.route("**/api/meals**", (route) => entitled
+    ? route.fallback()
+    : route.fulfill({ status: 403, json: { error: { code: "trial_access_required" } } }));
+  let analyses = 0;
+  await page.route("**/api/analyze", async (route) => {
+    analyses++;
+    await route.fulfill({ status: 403, json: { error: { code: "trial_access_required" } } });
+  });
+  await page.goto("/");
+  await login(page);
+  await page.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await page.locator('input[type="file"]').nth(1).setInputFiles(
+    path.join(testInfo.project.testDir, "fixtures/hk-milk-tea.jpg"),
+  );
+  await page.getByRole("button", { name: "開始分析", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "尚未開通試用權限" })).toBeVisible();
+  expect(analyses).toBe(1);
+  await page.getByRole("button", { name: "手動加入食物", exact: true }).click();
+  await page.getByRole("combobox", { name: "食物名稱", exact: true }).fill("白飯");
+  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "白飯", exact: true })).toBeVisible();
+  await expect(page.getByText(/白飯：這個 Email 尚未獲得試用權限/)).toBeVisible();
+  expect(backend.records.size).toBe(0);
+  expect(backend.saves).toHaveLength(0);
+  entitled = true;
+  await page.reload();
+  await expect(page.getByText(/1 項修改待同步/)).toBeVisible();
+  expect(backend.records.size).toBe(0);
+  await page.getByRole("button", { name: "重試同步", exact: true }).click();
+  await expect.poll(() => backend.records.size, { timeout: 12_000 }).toBe(1);
+  expect(backend.saves).toHaveLength(1);
+  expect(backend.saves[0]).toMatchObject({ mode: "manual", photoPath: null });
+  expect(analyses).toBe(1);
+});
+
+test("unreadable photo preparation can be retried or removed without blocking a manual meal", async ({ page, context }) => {
+  const backend = cloud();
+  await backend.install(context);
+  await page.addInitScript(() => {
+    const instrumented = window as Window & { __photoDecodeAttempts?: number };
+    instrumented.__photoDecodeAttempts = 0;
+    window.createImageBitmap = (async () => {
+      instrumented.__photoDecodeAttempts = (instrumented.__photoDecodeAttempts ?? 0) + 1;
+      throw new Error("synthetic decode failure");
+    }) as typeof createImageBitmap;
+  });
+  await page.goto("/");
+  await login(page);
+  await page.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await page.locator('input[type="file"]').nth(1).setInputFiles({
+    name: "unreadable.heic", mimeType: "image/heic", buffer: Buffer.from([1, 2, 3, 4]),
+  });
+  await expect(page.getByRole("button", { name: "重試照片處理", exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() =>
+    (window as Window & { __photoDecodeAttempts?: number }).__photoDecodeAttempts)).toBe(1);
+  await page.getByRole("button", { name: "重試照片處理", exact: true }).click();
+  await expect.poll(() => page.evaluate(() =>
+    (window as Window & { __photoDecodeAttempts?: number }).__photoDecodeAttempts)).toBe(2);
+  await expect(page.getByRole("button", { name: "重試照片處理", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "移除草稿圖片", exact: true }).click();
+  await expect(page.getByRole("button", { name: "移除草稿圖片", exact: true })).not.toBeVisible();
+  await expect(page.getByRole("button", { name: "重試照片處理", exact: true })).not.toBeVisible();
+  await page.getByRole("button", { name: "手動加入食物", exact: true }).click();
+  await page.getByRole("combobox", { name: "食物名稱", exact: true }).fill("白飯");
+  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  await expect.poll(() => backend.records.size).toBe(1);
+  expect(backend.saves).toHaveLength(1);
+  expect(backend.saves[0]).toMatchObject({ mode: "manual", photoPath: null });
+});
+
+test("analysis timeout leaves the photo available for a later retry", async ({ page, context }, testInfo) => {
+  const backend = cloud();
+  await backend.install(context);
+  let analyses = 0;
+  let releaseFirst!: () => void;
+  const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  await page.route("**/api/analyze", async (route) => {
+    analyses++;
+    if (analyses === 1) {
+      await firstGate;
+      try { await route.fulfill({ status: 503, json: { error: { code: "service_unavailable" } } }); }
+      catch { /* The timed-out request was cancelled. */ }
+      return;
+    }
+    await route.fulfill({ json: { mode: "live", analysis: {
+      analysisStatus: "unable_to_identify", foods: [], uncertaintyReasons: [],
+      visibleEvidence: [], estimatedInformation: [], unknownInformation: ["食物"],
+    } } });
+  });
+  await page.goto("/");
+  await login(page);
+  await page.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await page.locator('input[type="file"]').nth(1).setInputFiles(
+    path.join(testInfo.project.testDir, "fixtures/hk-milk-tea.jpg"),
+  );
+  await page.clock.install();
+  await page.getByRole("button", { name: "開始分析", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "分析緊你嘅餐點…" })).toBeVisible();
+  await expect.poll(() => analyses).toBe(1);
+  await page.clock.fastForward(90_001);
+  await expect(page.getByRole("heading", { name: "分析等候時間太長" })).toBeVisible();
+  await expect(page.getByRole("img", { name: "未能完成分析的餐點相片" })).toBeVisible();
+  releaseFirst();
+  await page.getByRole("button", { name: "再試一次", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "無法可靠辨認" })).toBeVisible();
+  expect(analyses).toBe(2);
+  expect(backend.saves).toHaveLength(0);
+});
