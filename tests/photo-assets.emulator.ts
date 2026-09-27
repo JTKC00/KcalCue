@@ -152,17 +152,17 @@ describe("private photo asset registry in Firestore emulator", () => {
     expect(late.state).toBe("deleting");
     expect(late.generation).toBe(stored.generation);
     await expect(recordPhotoAssetDeletion(db, owner, request.uploadId,
-      { kind: "deleted_generation", generation: "999" }))
+      { kind: "deleted_generation", bucketName: policy.bucketName, generation: "999" }))
       .rejects.toMatchObject({ status: 409, code: "photo_generation_conflict" });
     const deleted = await recordPhotoAssetDeletion(db, owner, request.uploadId,
-      { kind: "deleted_generation", generation: stored.generation });
+      { kind: "deleted_generation", bucketName: policy.bucketName, generation: stored.generation });
     expect(deleted.state).toBe("deleted");
     expect(deleted.jpegSha256).toBeNull();
     expect((await db.doc(`${accountPath(owner)}/photoQuota/current`).get()).data()).toEqual({
       pendingCount: 0, reservedBytes: 0,
     });
     expect(await recordPhotoAssetDeletion(db, owner, request.uploadId,
-      { kind: "deleted_generation", generation: stored.generation })).toEqual(deleted);
+      { kind: "deleted_generation", bucketName: policy.bucketName, generation: stored.generation })).toEqual(deleted);
     const beforeStaleReply = (await ref.get()).updateTime;
     expect(await finalizePhotoAsset(db, owner, request.uploadId, stored)).toEqual(deleted);
     expect((await ref.get()).updateTime?.isEqual(beforeStaleReply!)).toBe(true);
@@ -185,7 +185,8 @@ describe("private photo asset registry in Firestore emulator", () => {
     const ref = photoAssetRef(db, owner, request.uploadId);
     await ref.update({ expiresAt: Timestamp.fromMillis(Date.now() - 1000) });
     await expireUnattachedPhotoAsset(db, owner, request.uploadId);
-    await recordPhotoAssetDeletion(db, owner, request.uploadId, { kind: "object_absent" });
+    await recordPhotoAssetDeletion(db, owner, request.uploadId,
+      { kind: "object_absent", bucketName: policy.bucketName });
     const late = await finalizePhotoAsset(db, owner, request.uploadId, stored);
     expect(late.state).toBe("deleting");
     expect(late.generation).toBe(stored.generation);

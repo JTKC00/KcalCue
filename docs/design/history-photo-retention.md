@@ -111,7 +111,7 @@ DeleteMeal transaction保留目前version/mutation/tombstone防復活語意，�
 
 DELETE ACK表示餐點與圖片引用已不可再新讀，不表示storage實體位元已完成刪除。UI不用因此把餐點留在History；隱私文案需說明背景實體清理。資料刪除的資料庫transaction失敗時，不能先物理刪object。
 
-Cleanup只delete該asset記錄的**確切generation**；404可當該generation已不存在，precondition mismatch不得刪最新版或未知object。成功／confirmed absence後才release storage byte quota並標deleted。Retry重用同asset，不新增mealmutation、不復活引用。
+Cleanup只delete該asset記錄的**確切generation**；precondition mismatch不得刪最新版或未知object。現在的source-only `cleanupKnownPhotoGeneration` 只在精確DELETE成功後退還quota；404仍屬未知結果，因一次404也可能是bucket/IAM設定問題。日後必須有可審核的bucket身分與缺席證明，才可在已刪但HTTP回覆遺失的情況完成quota核銷。Retry重用同asset，不新增mealmutation、不復活引用。
 
 同mutation DELETE重試仍ACK；即使第一個HTTP回覆遺失，asset的deleting狀態已與tombstone原子存在。一般500/網絡錯誤採有限每輪重試及backoff，不因一輪失敗清掉durable work item。永久權限／配置錯誤保留工作並告警，不靜默成功或無界緊迴圈。
 
@@ -124,7 +124,7 @@ Cleanup只delete該asset記錄的**確切generation**；404可當該generation�
 - 不對同一object prefix套「24小時全刪」bucket lifecycle：staged後會attach並保持相同key，這樣會誤刪正常History圖。若未來拆staging/attached prefix則需copy/finalize另一套補償，**不放進第一版**。
 - attached物件保留到使用者detach/delete或明確account lifecycle；不暗中按短TTL刪正常歷史圖。既有帳戶刪除若尚無產品流程，須把對應object清理列release runbook，不能讓storage資料游離於資料擁有人生命週期。
 
-**實體清理需要可信的背景執行者。** Request-after-response、只有使用者再登入時順手清理或process內setTimeout都不能保證清理。Runner須能以collection-group index/scanner或等效機制找出deleting asset，按確切generation可重入清理；目前尚未實作。沒有已授權scheduler/執行環境前，不得宣稱有24h刪除SLA；新付費排程/worker資源須授權，且是啟用photo retention的release gate。時間目標建議每15分鐘有限批次、pending逾24h告警；這是待配置驗收的目標，不是目前承諾。
+**實體清理需要可信的背景執行者。** Request-after-response、只有使用者再登入時順手清理或process內setTimeout都不能保證清理。Source-only per-asset原語已存在，但沒有collection-group index/scanner或等效背景執行者；`generation=null`亦不能靠一次404退quota，仍需晚到write對帳／封鎖。沒有已授權scheduler/執行環境前，不得宣稱有24h刪除SLA；新付費排程/worker資源須授權，且是啟用photo retention的release gate。時間目標建議每15分鐘有限批次、pending逾24h告警；這是待配置驗收的目標，不是目前承諾。
 
 ## 6. 離線、本機原子性與unknown outcome
 

@@ -172,7 +172,7 @@ describe("private meal photo transaction lifecycle", () => {
     expect(removed.status).toBe(200);
     expect((await photoAssetRef(db, uid, uploadId).get()).data()?.state).toBe("deleting");
     await recordPhotoAssetDeletion(db, uid, uploadId, {
-      kind: "deleted_generation", generation: "9007199254740993",
+      kind: "deleted_generation", bucketName: policy.bucketName, generation: "9007199254740993",
     });
     expect((await photoAssetRef(db, uid, uploadId).get()).data()?.state).toBe("deleted");
     expect((await db.doc(`${accountPath(uid)}/photoQuota/current`).get()).data()).toEqual({

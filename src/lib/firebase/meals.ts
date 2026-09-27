@@ -10,16 +10,15 @@ import { HttpError } from "@/lib/server/auth";
 import {
   PHOTO_SCHEMA_VERSION, PHOTO_PIPELINE_VERSION,
   MAX_PHOTO_INPUT_BYTES, MAX_PHOTO_JPEG_BYTES,
-  isPersistablePhotoGeneration, photoAssetRef, photoObjectKey,
+  isPersistablePhotoGeneration, isValidPhotoBucketName, photoAssetRef, photoObjectKey,
   photoQuotaRefs, readPhotoQuota, type PhotoAsset,
 } from "./photo-assets";
 
 const createdAtSchema = z.iso.datetime();
 const sha256Pattern = /^[a-f0-9]{64}$/;
-const bucketNamePattern = /^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$/;
 
 function validAssetMetadata(data: FirebaseFirestore.DocumentData) {
-  return typeof data.bucketName === "string" && bucketNamePattern.test(data.bucketName) &&
+  return isValidPhotoBucketName(data.bucketName) &&
     data.pipelineVersion === PHOTO_PIPELINE_VERSION &&
     data.reservedBytes === MAX_PHOTO_JPEG_BYTES &&
     Number.isInteger(data.inputBytes) && data.inputBytes >= 1 &&

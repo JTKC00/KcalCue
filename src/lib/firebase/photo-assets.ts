@@ -22,6 +22,10 @@ const uidSchema = z.string().min(1).max(128).refine(
 const generationSchema = z.string().regex(/^[1-9][0-9]{0,31}$/);
 const bucketNameSchema = z.string().regex(/^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$/);
 
+export function isValidPhotoBucketName(value: unknown): value is string {
+  return bucketNameSchema.safeParse(value).success;
+}
+
 // Preserve the provider's canonical decimal generation as an opaque string.
 // The private read and delete adapter never converts it to a JS number.
 export function isPersistablePhotoGeneration(value: string): boolean {
@@ -152,7 +156,7 @@ export function readPhotoQuota(data: FirebaseFirestore.DocumentData | undefined)
 
 function storedAsset(data: FirebaseFirestore.DocumentData | undefined): PhotoAsset {
   if (!data || !["uploading", "staged", "attached", "deleting", "deleted"].includes(data.state) ||
-      !bucketNameSchema.safeParse(data.bucketName).success ||
+      !isValidPhotoBucketName(data.bucketName) ||
       !(data.expiresAt instanceof Timestamp) || !(data.createdAt instanceof Timestamp))
     throw new HttpError(503, "photo_registry_corrupt");
   return data as PhotoAsset;
@@ -348,9 +352,11 @@ export async function recordPhotoAssetDeletion(
   uid: string,
   uploadId: string,
   confirmation:
-    | { kind: "deleted_generation"; generation: string }
-    | { kind: "object_absent" },
+    | { kind: "deleted_generation"; bucketName: string; generation: string }
+    | { kind: "object_absent"; bucketName: string },
 ): Promise<PhotoAsset> {
+  if (!isValidPhotoBucketName(confirmation.bucketName))
+    throw new HttpError(400, "invalid_photo_bucket");
   if (confirmation.kind === "deleted_generation" &&
       !generationSchema.safeParse(confirmation.generation).success)
     throw new HttpError(400, "invalid_photo_generation");
@@ -363,6 +369,8 @@ export async function recordPhotoAssetDeletion(
     if (!assetSnap.exists) throw new HttpError(404, "photo_upload_not_found");
     const asset = storedAsset(assetSnap.data());
     if (asset.ownerUid !== uid) throw new HttpError(404, "photo_upload_not_found");
+    if (asset.bucketName !== confirmation.bucketName)
+      throw new HttpError(409, "photo_bucket_conflict");
     if (asset.state === "deleted") {
       if (confirmation.kind === "deleted_generation" &&
           asset.generation !== confirmation.generation)
