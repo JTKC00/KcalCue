@@ -163,4 +163,73 @@ describe("POST /api/nutrition/resolve", () => {
     expect(blocked.headers.get("Retry-After")).toBe("60");
     expect(body).toEqual({ error: { code: "rate_limited" } });
   });
+
+  it.each([undefined, "8"])(
+    "cancels oversized JSON without parsing or USDA calls with content-length %s",
+    async (contentLength) => {
+      vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      const cancel = vi.fn();
+      let pulls = 0;
+      const stream = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          pulls++;
+          controller.enqueue(new Uint8Array(pulls === 1 ? 1 : 150_000));
+        },
+        cancel,
+      }, { highWaterMark: 0 });
+      const headers = new Headers({ "content-type": "application/json" });
+      if (contentLength !== undefined) headers.set("content-length", contentLength);
+      const request = new Request("http://localhost/api/nutrition/resolve", {
+        method: "POST", headers, body: stream, duplex: "half",
+      } as RequestInit);
+      const parse = vi.spyOn(JSON, "parse");
+      const response = await POST(request);
+
+      expect(parse).not.toHaveBeenCalled();
+      parse.mockRestore();
+      expect(response.status).toBe(413);
+      expect(await response.json()).toEqual({ error: { code: "invalid_request" } });
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(pulls).toBe(2);
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("accepts valid nutrition JSON exactly at the byte cap", async () => {
+    const text = JSON.stringify({ foods: [banana] });
+    const body = text + " ".repeat(150_000 - new TextEncoder().encode(text).length);
+    const response = await POST(new Request("http://localhost/api/nutrition/resolve", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+    }));
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).matches[0].includedInTotal).toBe(true);
+  });
+
+  it("returns a controlled error for malformed JSON", async () => {
+    const response = await POST(new Request("http://localhost/api/nutrition/resolve", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: '{"private-input":',
+    }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "invalid_request" } });
+  });
+
+  it("returns a controlled error for an interrupted input stream", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) { controller.error(new Error("private transport details")); },
+    });
+    const response = await POST(new Request("http://localhost/api/nutrition/resolve", {
+      method: "POST", body: stream, duplex: "half",
+    } as RequestInit));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "invalid_request" } });
+  });
 });

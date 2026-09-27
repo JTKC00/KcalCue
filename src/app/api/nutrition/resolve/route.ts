@@ -12,6 +12,10 @@ import {
 } from "@/lib/server/rate-limit";
 import type { NutritionMatch } from "@/lib/nutrition/types";
 import { elapsedMs, logSafeTiming } from "@/lib/server/timing";
+import {
+  readBoundedRequestBody,
+  RequestBodyTooLargeError,
+} from "@/lib/server/request-body";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -32,9 +36,13 @@ export async function POST(request: Request) {
 
   let body: unknown;
   try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: { code: "invalid_request" } }, { status: 400 });
+    const bytes = await readBoundedRequestBody(request, 150_000);
+    body = JSON.parse(new TextDecoder().decode(bytes));
+  } catch (error) {
+    return NextResponse.json(
+      { error: { code: "invalid_request" } },
+      { status: error instanceof RequestBodyTooLargeError ? 413 : 400 },
+    );
   }
 
   const parsed = requestSchema.safeParse(body);

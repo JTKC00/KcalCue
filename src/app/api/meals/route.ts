@@ -14,6 +14,10 @@ import { createEditableFoodItems } from "@/lib/domain/editable-meal";
 import { canReuseNutritionMatchForNameEdit } from "@/lib/nutrition/client";
 import { UsdaNutritionClient } from "@/lib/nutrition/usda";
 import { getNutritionApiKey } from "@/lib/server/env";
+import {
+  readBoundedRequestBody,
+  RequestBodyTooLargeError,
+} from "@/lib/server/request-body";
 
 export async function GET(request: Request) {
   try {
@@ -37,7 +41,18 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const { db, user } = await authenticated(request);
-    const text = await request.text();
+    let text: string;
+    try {
+      // UTF-8 needs at most three bytes per UTF-16 code unit; keep the existing
+      // 150,000-character allowance, then enforce that limit after decoding.
+      const bytes = await readBoundedRequestBody(request, 450_000);
+      text = new TextDecoder().decode(bytes);
+    } catch (error) {
+      throw new HttpError(
+        error instanceof RequestBodyTooLargeError ? 413 : 400,
+        "invalid_request",
+      );
+    }
     if (text.length > 150_000) throw new HttpError(413, "invalid_request");
     let json;
     try {

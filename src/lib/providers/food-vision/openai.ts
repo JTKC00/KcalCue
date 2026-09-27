@@ -162,7 +162,8 @@ async function prepareOpenAIImage(image: FoodImageInput): Promise<OpenAIImageInp
   }
 
   try {
-    const jpeg = await sharp(Buffer.from(image.data, "base64"))
+    // Match the existing photo-preparation pixel bound before decoding HEIC/HEIF.
+    const jpeg = await sharp(Buffer.from(image.data, "base64"), { limitInputPixels: 40_000_000 })
       .rotate()
       .jpeg()
       .toBuffer();
@@ -263,7 +264,7 @@ export class OpenAIFoodVisionProvider implements FoodVisionProvider {
           store: false,
         },
         {
-          maxRetries: 2,
+          maxRetries: 0,
           timeout: OPENAI_HTTP_TIMEOUT_MS,
           signal: AbortSignal.any([
             AbortSignal.timeout(OPENAI_ABORT_TIMEOUT_MS),

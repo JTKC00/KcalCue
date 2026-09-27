@@ -19,6 +19,11 @@ import {
 } from "@/lib/server/rate-limit";
 import { elapsedMs, logSafeTiming } from "@/lib/server/timing";
 import { authenticated, apiError } from "@/lib/server/auth";
+import { acquireLiveAnalysis } from "@/lib/server/live-analysis-admission";
+import {
+  readBoundedRequestBody,
+  RequestBodyTooLargeError,
+} from "@/lib/server/request-body";
 
 export const runtime = "nodejs";
 
@@ -59,21 +64,20 @@ export async function POST(request: Request) {
       });
     }
 
-    const contentLength = Number(request.headers.get("content-length"));
-    if (Number.isFinite(contentLength) && contentLength > MAX_MULTIPART_BYTES) {
-      return errorResponse("file_too_large", 413);
+    let formData: FormData;
+    try {
+      const bytes = await readBoundedRequestBody(request, MAX_MULTIPART_BYTES);
+      formData = await new Response(bytes, { headers: request.headers }).formData();
+    } catch (error) {
+      return error instanceof RequestBodyTooLargeError
+        ? errorResponse("file_too_large", 413)
+        : errorResponse("invalid_file", 400);
     }
-
-    const formData = await request.formData();
     const forceDemo = formData.get("mode") === "demo";
     const provider = forceDemo
       ? new DemoFoodVisionProvider()
       : createFoodVisionProvider();
     visionMode = provider.mode;
-
-    if (provider.mode === "live") {
-      try { await authenticated(request); } catch (error) { return apiError(error); }
-    }
 
     if (provider.mode === "demo") {
       visionStartedAt = performance.now();
@@ -85,6 +89,14 @@ export async function POST(request: Request) {
         { signal: request.signal, onMetadata },
       );
       return NextResponse.json({ analysis, analysisProvenance, mode: provider.mode });
+    }
+
+    let userId: string;
+    try {
+      const { user } = await authenticated(request);
+      userId = user.id;
+    } catch (error) {
+      return apiError(error);
     }
 
     const image = formData.get("image");
@@ -103,16 +115,28 @@ export async function POST(request: Request) {
 
     imageMimeType = detectedMimeType;
     imageByteSize = bytes.byteLength;
-    visionStartedAt = performance.now();
-    const analysis = await provider.analyzeImage(
-      {
-        data: bytes.toString("base64"),
-        mimeType: detectedMimeType,
-      },
-      { signal: request.signal, onMetadata },
-    );
+    const release = acquireLiveAnalysis(userId);
+    if (!release) {
+      const limited = rateLimitedJsonResponse();
+      return NextResponse.json(limited.body, {
+        status: limited.status,
+        headers: limited.headers,
+      });
+    }
 
-    return NextResponse.json({ analysis, analysisProvenance, mode: provider.mode });
+    try {
+      visionStartedAt = performance.now();
+      const analysis = await provider.analyzeImage(
+        {
+          data: bytes.toString("base64"),
+          mimeType: detectedMimeType,
+        },
+        { signal: request.signal, onMetadata },
+      );
+      return NextResponse.json({ analysis, analysisProvenance, mode: provider.mode });
+    } finally {
+      release();
+    }
   } catch (error) {
     if (error instanceof FoodVisionError) {
       if (!error.diagnostic) {

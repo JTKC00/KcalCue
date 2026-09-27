@@ -2,14 +2,24 @@ import sharp from "sharp";
 import { z } from "zod";
 import { authenticated, apiError, HttpError } from "@/lib/server/auth";
 import { detectSupportedImageMimeType } from "@/lib/providers/food-vision/types";
+import {
+  readBoundedRequestBody,
+  RequestBodyTooLargeError,
+} from "@/lib/server/request-body";
 
 export const runtime = "nodejs";
 export async function POST(request: Request) {
   try {
     await authenticated(request);
-    if (Number(request.headers.get("content-length")) > 11 * 1024 * 1024)
-      throw new HttpError(413, "file_too_large");
-    const data = await request.formData();
+    let data: FormData;
+    try {
+      const bytes = await readBoundedRequestBody(request, 11 * 1024 * 1024);
+      data = await new Response(bytes, { headers: request.headers }).formData();
+    } catch (error) {
+      throw error instanceof RequestBodyTooLargeError
+        ? new HttpError(413, "file_too_large")
+        : new HttpError(400, "invalid_request");
+    }
     const id = z.uuid().safeParse(data.get("mealId"));
     const file = data.get("image");
     if (!id.success || !(file instanceof File) || !file.size)
