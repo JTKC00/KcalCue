@@ -101,8 +101,16 @@ export async function deleteMeal(
   const ref = mealCollection(db, uid).doc(id);
   await db.runTransaction(async (tx) => {
     const previous = (await tx.get(ref)).data();
-    if (previous?.deleted && previous.mutationId === mutationId) return;
-    if (previous?.deleted || (previous?.version ?? 0) !== expected)
+    if (previous?.deleted) {
+      // Another tab may have deleted the same version with a different
+      // mutation ID. The requested end state is already durable; acknowledge
+      // it without advancing the account revision again. Keep older versions
+      // conflicting so a stale delete cannot bypass an intervening edit.
+      if (previous.mutationId === mutationId || previous.version === expected + 1)
+        return;
+      throw new HttpError(409, "conflict");
+    }
+    if ((previous?.version ?? 0) !== expected)
       throw new HttpError(409, "conflict");
     // A newer writer may attach resources that this version cannot clean up.
     // Reject its record rather than tombstoning the meal without its lifecycle work.
