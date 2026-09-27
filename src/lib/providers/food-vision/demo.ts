@@ -1,4 +1,4 @@
-import { foodAnalysisSchema, type FoodAnalysis } from "@/lib/domain/food-analysis";
+import { foodAnalysisSchema, foodEstimateSchema, type FoodAnalysis, type FoodEstimate } from "@/lib/domain/food-analysis";
 import { FOOD_VISION_ANALYSIS_VERSION } from "@/lib/domain/analysis-provenance";
 import type {
   FoodImageInput,
@@ -6,7 +6,7 @@ import type {
   FoodVisionProvider,
 } from "./types";
 
-export const demoFoodAnalysis: FoodAnalysis = foodAnalysisSchema.parse({
+const parsedDemoFoodAnalysis = foodAnalysisSchema.parse({
   analysisStatus: "success",
   foods: [
     {
@@ -69,6 +69,13 @@ export const demoFoodAnalysis: FoodAnalysis = foodAnalysisSchema.parse({
   estimatedInformation: ["各食物份量以常見餐碟比例建立示範範圍。"],
   unknownInformation: ["實際用油、醬汁配方及被遮蓋部分均不知道。"],
 });
+
+// The bundled demo has intentionally known numeric portions; preserve that
+// narrower type for numeric nutrition fixtures and callers.
+export const demoFoodAnalysis: FoodAnalysis & { foods: FoodEstimate[] } = {
+  ...parsedDemoFoodAnalysis,
+  foods: parsedDemoFoodAnalysis.foods.map(food => foodEstimateSchema.parse(food)),
+};
 
 export class DemoFoodVisionProvider implements FoodVisionProvider {
   readonly id = "demo";

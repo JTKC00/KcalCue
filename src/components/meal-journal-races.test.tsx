@@ -456,9 +456,9 @@ it("replaces an unsaved analysis baseline only when a new analysis arrives", asy
   await waitFor(() => expect(caches.get("a")?.draft?.analysisProvenance).toEqual(nextProvenance));
   expect(caches.get("a")?.draft?.originalItems).toEqual(nextItems);
   expect(caches.get("a")?.draft?.calorieCorrection).toBeNull();
-  await act(async () => { fixture.draftChange!({ items: nextItems.map((item) => ({ ...item, portionMin: item.portionMin + 1 })),
+  await act(async () => { fixture.draftChange!({ items: nextItems.map((item) => ({ ...item, portionMin: item.portionMin! + 1 })),
     analysis: nextAnalysis, analysisProvenance: nextProvenance, mode: "live" }); });
-  await waitFor(() => expect(caches.get("a")?.draft?.items[0].portionMin).toBe(nextItems[0].portionMin + 1));
+  await waitFor(() => expect(caches.get("a")?.draft?.items[0].portionMin).toBe(nextItems[0].portionMin! + 1));
   expect(caches.get("a")?.draft?.originalItems).toEqual(nextItems);
   expect(caches.get("a")?.draft?.analysisProvenance).toEqual(nextProvenance);
 });

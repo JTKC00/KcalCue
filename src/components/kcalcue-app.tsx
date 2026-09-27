@@ -8,6 +8,7 @@ import {
   applyPortionPreset,
   convertPortionUnit,
   createEditableFoodItems,
+  hasKnownPortion,
   renameFoodItem,
   type EditableFoodItem,
   type PortionPreset,
@@ -531,12 +532,12 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
         setStage("unable");
       } else {
         const localMatches = parsed.data.foods.map((food) =>
-          nutritionProvider.resolve(food),
+          hasKnownPortion(food) ? nutritionProvider.resolve(food) : null,
         );
         const initialItems = createEditableFoodItems(parsed.data.foods, localMatches);
         setItems(initialItems);
         setStage("result");
-        if (responseMode === "live" && localMatches.some((match) => !match.includedInTotal)) {
+        if (responseMode === "live" && localMatches.some((match) => match && !match.includedInTotal)) {
           setNutritionPending(true);
           const unchangedFood = (item: EditableFoodItem, index: number) => {
             const original = initialItems[index];
@@ -571,12 +572,22 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
             },
             NUTRITION_ENRICH_TIMEOUT_MS,
           );
-          void enrichUnresolvedMatches(parsed.data.foods, localMatches, nutritionSignal)
+          const knownFoods = parsed.data.foods.flatMap((food, index) =>
+            hasKnownPortion(food) && localMatches[index]
+              ? [{ index, food, match: localMatches[index]! }] : [],
+          );
+          void enrichUnresolvedMatches(
+            knownFoods.map(entry => entry.food),
+            knownFoods.map(entry => entry.match),
+            nutritionSignal,
+          )
             .then((matches) => {
               if (nutritionSignal.aborted) return;
               setItems((current) => current.map((item, index) => {
-                if (!unchangedFood(item, index) || matches[index] === localMatches[index]) return item;
-                return { ...item, nutritionMatch: matches[index] };
+                const knownIndex = knownFoods.findIndex(entry => entry.index === index);
+                if (knownIndex < 0 || !unchangedFood(item, index) ||
+                    matches[knownIndex] === localMatches[index]) return item;
+                return { ...item, nutritionMatch: matches[knownIndex] };
               }));
             })
             .catch(() => {})
@@ -650,27 +661,30 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
     setItems((current) => current.map((item) => (item.id === id ? update(item) : item)));
   };
 
-  const handleNameChange = (id: string, name: string) => {
-    const previousTimer = nameEditTimers.current.get(id);
-    if (previousTimer !== undefined) {
-      window.clearTimeout(previousTimer);
+  const invalidateNameLookup = (id: string) => {
+    const timer = nameEditTimers.current.get(id);
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
       nameEditTimers.current.delete(id);
     }
-
-    const currentItem = items.find((item) => item.id === id);
-    if (!currentItem) return;
-
     const revision = (nameEditRevisions.current.get(id) ?? 0) + 1;
     nameEditRevisions.current.set(id, revision);
+    return revision;
+  };
+
+  const handleNameChange = (id: string, name: string) => {
+    const revision = invalidateNameLookup(id);
+    const currentItem = items.find((item) => item.id === id);
+    if (!currentItem) return;
     const nextFood = renameFoodItem(currentItem, name, originalFoods.get(id) ?? initialDraft?.originalItems.find(food => food.id === id));
-    const cachedMatch = canReuseNutritionMatchForNameEdit(
+    const cachedMatch = hasKnownPortion(currentItem) && hasKnownPortion(nextFood) && canReuseNutritionMatchForNameEdit(
       currentItem,
       nextFood,
       currentItem.nutritionMatch,
     )
       ? currentItem.nutritionMatch
       : null;
-    const localMatch = name.trim() ? nutritionProvider.resolve(nextFood) : null;
+    const localMatch = name.trim() && hasKnownPortion(nextFood) ? nutritionProvider.resolve(nextFood) : null;
     const match = cachedMatch ?? localMatch;
 
     updateItem(id, () => ({
@@ -683,7 +697,8 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
       activeMode !== "live" ||
       !localMatch ||
       localMatch.includedInTotal ||
-      cachedMatch
+      cachedMatch ||
+      !hasKnownPortion(nextFood)
     ) {
       return;
     }
@@ -711,32 +726,45 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
   const handlePortionChange = (
     id: string,
     field: "portionMin" | "portionMax",
-    value: number,
+    value: number | null,
   ) => {
-    if (!Number.isFinite(value) || value <= 0) return;
+    if (value !== null && (!Number.isFinite(value) || value <= 0)) return;
+    invalidateNameLookup(id);
     updateItem(id, (item) => {
+      if (value === null) return {
+        ...item, portionMin: null, portionMax: null,
+        originalPortionMin: null, originalPortionMax: null,
+        nutritionMatch: null,
+      };
       if (field === "portionMin") {
-        const portionMax = Math.max(value, item.portionMax);
+        const portionMax = Math.max(value, item.portionMax ?? value);
         return {
           ...item,
           portionMin: value,
           portionMax,
           originalPortionMin: value,
           originalPortionMax: portionMax,
+          nutritionMatch: item.nutritionMatch ?? nutritionProvider.resolve({
+            ...item, portionMin: value, portionMax,
+          }),
         };
       }
-      const portionMin = Math.min(value, item.portionMin);
+      const portionMin = Math.min(value, item.portionMin ?? value);
       return {
         ...item,
         portionMin,
         portionMax: value,
         originalPortionMin: portionMin,
         originalPortionMax: value,
+        nutritionMatch: item.nutritionMatch ?? nutritionProvider.resolve({
+          ...item, portionMin, portionMax: value,
+        }),
       };
     });
   };
 
   const handleUnitChange = (id: string, unit: PortionUnit) => {
+    invalidateNameLookup(id);
     updateItem(id, (item) => {
       const profile =
         item.nutritionMatch?.profile ??
@@ -747,6 +775,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
   };
 
   const handlePreset = (id: string, preset: PortionPreset) => {
+    invalidateNameLookup(id);
     updateItem(id, (item) => applyPortionPreset(item, preset));
   };
 

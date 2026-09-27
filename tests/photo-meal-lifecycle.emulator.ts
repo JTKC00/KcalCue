@@ -4,8 +4,9 @@ import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { accountPath } from "@/lib/firebase/admin";
 import { demoFoodAnalysis } from "@/lib/providers/food-vision/demo";
 import { createEditableFoodItems } from "@/lib/domain/editable-meal";
-import { newDraft, type MealRecord } from "@/lib/meals/types";
+import { CURRENT_MEAL_SCHEMA_VERSION, newDraft, type MealRecord } from "@/lib/meals/types";
 import { mealCollection } from "@/lib/firebase/meals";
+import { attachedPhotoForOwner } from "@/lib/firebase/photo-read";
 import {
   MAX_PHOTO_JPEG_BYTES, finalizePhotoAsset, photoAssetRef, recordPhotoAssetDeletion,
   reservePhotoAsset, type PhotoQuotaPolicy,
@@ -65,29 +66,35 @@ afterAll(async () => {
 });
 
 describe("private meal photo transaction lifecycle", () => {
-  it("attaches, preserves on an old-client edit, replaces, removes and keeps schema 4 sticky", async () => {
+  it("attaches, preserves on an old-client edit, replaces, removes and keeps schema 5 sticky", async () => {
     const uid = `owner-${crypto.randomUUID()}`;
     asUid(uid);
     const first = body();
     const created = (await (await post(first)).json()).record as MealRecord;
-    expect(created.schemaVersion).toBe(3);
-    expect(created).not.toHaveProperty("photoRef");
+    expect(created.schemaVersion).toBe(CURRENT_MEAL_SCHEMA_VERSION);
+    expect(created.photoRef).toBeNull();
     const uploadId = await attachable(uid, first.id);
     const attach = { ...created, mutationId: crypto.randomUUID(),
       photoAction: { kind: "attach", uploadId },
       photoRef: { attachmentId: "client-forgery", generation: "9" } };
     const attached = (await (await post(attach)).json()).record as MealRecord;
-    expect(attached.schemaVersion).toBe(4);
+    expect(attached.schemaVersion).toBe(CURRENT_MEAL_SCHEMA_VERSION);
     expect(attached.photoRef).toMatchObject({ attachmentId: uploadId, contentType: "image/jpeg", width: 1200 });
     expect((await photoAssetRef(db, uid, uploadId).get()).data()?.state).toBe("attached");
     expect((await db.doc(`${accountPath(uid)}/photoQuota/current`).get()).data()?.pendingCount).toBe(0);
     const beforeRetry = await mealCollection(db, uid).doc(first.id).get();
     expect((await (await post(attach)).json()).record).toEqual(attached);
     expect((await mealCollection(db, uid).doc(first.id).get()).updateTime?.isEqual(beforeRetry.updateTime!)).toBe(true);
-    const oldClientEdit = { ...attached, mutationId: crypto.randomUUID(), time: "20:00" };
+    // Simulate a real version-4 photo record written before nullable portions
+    // existed. Its exact asset must remain readable and survive an edit.
+    await mealCollection(db, uid).doc(first.id).update({ "record.schemaVersion": 4 });
+    expect((await attachedPhotoForOwner(db, uid, first.id)).ref).toEqual(attached.photoRef);
+    const oldClientEdit = { ...attached, schemaVersion: 4, mutationId: crypto.randomUUID(), time: "20:00" };
     delete (oldClientEdit as { photoRef?: unknown }).photoRef;
     const preserved = (await (await post(oldClientEdit)).json()).record as MealRecord;
+    expect(preserved.schemaVersion).toBe(CURRENT_MEAL_SCHEMA_VERSION);
     expect(preserved.photoRef).toEqual(attached.photoRef);
+    expect((await attachedPhotoForOwner(db, uid, first.id)).ref).toEqual(attached.photoRef);
     const secondId = await attachable(uid, first.id);
     const replaced = (await (await post({ ...preserved, mutationId: crypto.randomUUID(),
       photoAction: { kind: "attach", uploadId: secondId } })).json()).record as MealRecord;
@@ -97,7 +104,7 @@ describe("private meal photo transaction lifecycle", () => {
     const removed = (await (await post({ ...replaced, mutationId: crypto.randomUUID(),
       photoAction: { kind: "remove" } })).json()).record as MealRecord;
     expect(removed.photoRef).toBeNull();
-    expect(removed.schemaVersion).toBe(4);
+    expect(removed.schemaVersion).toBe(CURRENT_MEAL_SCHEMA_VERSION);
     expect((await photoAssetRef(db, uid, secondId).get()).data()?.state).toBe("deleting");
     const reloaded = (await (await GET(new Request("http://localhost/api/meals"))).json()).records;
     expect(reloaded).toEqual([removed]);
@@ -238,7 +245,7 @@ describe("private meal photo transaction lifecycle", () => {
     const loser = winner.photoRef!.attachmentId === a ? b : a;
     expect((await photoAssetRef(db, uid, loser).get()).data()?.state).toBe("staged");
     const ref = mealCollection(db, uid).doc(first.id);
-    await ref.update({ "record.schemaVersion": 5 });
+    await ref.update({ "record.schemaVersion": CURRENT_MEAL_SCHEMA_VERSION + 1 });
     const response = await deleteRequest(first.id, winner.version, crypto.randomUUID());
     expect(response.status).toBe(409);
     expect((await photoAssetRef(db, uid, winner.photoRef!.attachmentId).get()).data()?.state).toBe("attached");

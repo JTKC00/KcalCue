@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { copy } from "@/content/zh-HK";
 import { createEditableFoodItems } from "@/lib/domain/editable-meal";
-import type { FoodAnalysis } from "@/lib/domain/food-analysis";
+import { foodEstimateSchema, type FoodAnalysis } from "@/lib/domain/food-analysis";
 import { newDraft, type MealDraft } from "@/lib/meals/types";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { KcalCueApp } from "./kcalcue-app";
@@ -22,7 +22,7 @@ function analyzedDraft(): MealDraft {
     estimatedInformation: [], unknownInformation: [],
   };
   const provider = new LocalNutritionProvider();
-  const items = createEditableFoodItems(analysis.foods, analysis.foods.map(food => provider.resolve(food)));
+  const items = createEditableFoodItems(analysis.foods, analysis.foods.map(food => provider.resolve(foodEstimateSchema.parse(food))));
   return { ...newDraft(), mode: "live", analysis, items, originalItems: structuredClone(items) };
 }
 
@@ -130,7 +130,7 @@ describe("recognition provenance in the meal editor", () => {
       recognitionConfidence: 0.3,
     });
     const provider = new LocalNutritionProvider();
-    draft.items = createEditableFoodItems(draft.analysis!.foods, draft.analysis!.foods.map(food => provider.resolve(food)));
+    draft.items = createEditableFoodItems(draft.analysis!.foods, draft.analysis!.foods.map(food => provider.resolve(foodEstimateSchema.parse(food))));
     draft.originalItems = structuredClone(draft.items);
     draft.items.reverse();
     render(<KcalCueApp initialProviderMode="live" initialDraft={draft} />);

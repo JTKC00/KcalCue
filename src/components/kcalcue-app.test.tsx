@@ -83,6 +83,29 @@ describe("KcalCueApp analysis cancel", () => {
     expect(screen.getByText("示範結果")).toBeInTheDocument();
   });
 
+  it("keeps an unknown personal portion blank until the user enters their own amount", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async () => Response.json({ mode: "live", analysis: {
+      ...demoFoodAnalysis,
+      foods: [{ ...demoFoodAnalysis.foods[0], portionMin: null, portionMax: null }],
+    } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const onDraftChange = vi.fn();
+    render(<KcalCueApp initialProviderMode="live" onDraftChange={onDraftChange} />);
+    await user.upload(document.querySelectorAll<HTMLInputElement>('input[type="file"]')[1], pngFile());
+    await user.click(screen.getByRole("button", { name: /開始分析/ }));
+    expect(await screen.findByRole("heading", { name: "暫未能計算" })).toBeInTheDocument();
+    expect(screen.getByText(/無法從相片判斷你吃了多少/)).toBeInTheDocument();
+    expect(screen.getByLabelText("最少份量")).toHaveValue(null);
+    expect(onDraftChange.mock.lastCall?.[0].items[0]).toMatchObject({ portionMin: null, portionMax: null });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await user.type(screen.getByLabelText("最少份量"), "100");
+    await user.tab();
+    expect(await screen.findByRole("heading", { name: /約 .*kcal/ })).toBeInTheDocument();
+    expect(onDraftChange.mock.lastCall?.[0].items[0]).toMatchObject({ portionMin: 100, portionMax: 100 });
+  });
+
   it("does not show a late nutrition response after the user starts another meal", async () => {
     const user = userEvent.setup();
     let completeNutrition: (response: Response) => void = () => {};

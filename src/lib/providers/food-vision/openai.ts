@@ -197,13 +197,13 @@ function mapOpenAIError(error: unknown): FoodVisionError {
   });
 }
 
-function stripNulls(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(stripNulls);
+function stripOptionalNulls(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripOptionalNulls);
   if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value)
-        .filter(([, nested]) => nested !== null)
-        .map(([key, nested]) => [key, stripNulls(nested)]),
+        .filter(([key, nested]) => nested !== null || key === "portionMin" || key === "portionMax")
+        .map(([key, nested]) => [key, stripOptionalNulls(nested)]),
     );
   }
   return value;
@@ -368,7 +368,7 @@ export class OpenAIFoodVisionProvider implements FoodVisionProvider {
       let parsed: unknown;
       try {
         stage = "parse_json";
-        parsed = stripNulls(JSON.parse(response.output_text));
+        parsed = stripOptionalNulls(JSON.parse(response.output_text));
       } catch (error) {
         throw new FoodVisionError(
           "invalid_response",

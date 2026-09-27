@@ -2,7 +2,7 @@ import { z } from "zod";
 
 // Application pipeline contract, not a provider model or SDK version.
 // Bump when the prompt, analysis schema or image/response processing changes.
-export const FOOD_VISION_ANALYSIS_VERSION = "food-vision-v1";
+export const FOOD_VISION_ANALYSIS_VERSION = "food-vision-v2";
 
 const modelNameSchema = z.string().min(1).max(200).refine((value) => value.trim().length > 0);
 export const analysisProvenanceMetadataSchema = z.object({

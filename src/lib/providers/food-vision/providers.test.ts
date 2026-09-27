@@ -173,6 +173,39 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
     expect(analysisProvenanceMetadataSchema.safeParse(onMetadata.mock.calls[0][0]).success).toBe(true);
   });
 
+  it("preserves an unknown personal portion while stripping only nullable optional fields", async () => {
+    const original = demoFoodAnalysis.foods[0];
+    const output = {
+      ...demoFoodAnalysis,
+      foods: [{
+        ...original,
+        portionMin: null,
+        portionMax: null,
+        preparationMethod: null,
+        visibleIngredients: null,
+        notes: null,
+      }],
+    };
+    responsesCreateMock.mockResolvedValueOnce({ output_text: JSON.stringify(output) });
+    const analysis = await provider().analyzeImage({ data: rasterImages["image/jpeg"], mimeType: "image/jpeg" });
+    expect(analysis.foods).toHaveLength(1);
+    expect(analysis.foods[0]).toMatchObject({ portionMin: null, portionMax: null });
+    expect(analysis.foods[0]).not.toHaveProperty("preparationMethod");
+    expect(analysis.foods[0]).not.toHaveProperty("visibleIngredients");
+    expect(analysis.foods[0]).not.toHaveProperty("notes");
+  });
+
+  it("rejects a model response that makes only one portion bound unknown", async () => {
+    responsesCreateMock.mockResolvedValueOnce({
+      output_text: JSON.stringify({
+        ...demoFoodAnalysis,
+        foods: [{ ...demoFoodAnalysis.foods[0], portionMin: null }],
+      }),
+    });
+    await expect(provider().analyzeImage({ data: rasterImages["image/jpeg"], mimeType: "image/jpeg" }))
+      .rejects.toMatchObject({ code: "invalid_response" });
+  });
+
   it.each(["{bad-json", JSON.stringify({ foods: [] })])("does not emit metadata for invalid analysis %s", async (output_text) => {
     const onMetadata = vi.fn();
     const image = (await sharp({ create: { width: 1, height: 1, channels: 3, background: "white" } }).jpeg().toBuffer()).toString("base64");
@@ -192,6 +225,8 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
       "visibleIngredients must never become separate food entries",
     );
     expect(FOOD_VISION_SYSTEM_INSTRUCTION).toContain("Milk tea is a beverage dish");
+    expect(FOOD_VISION_SYSTEM_INSTRUCTION).toContain("set both portionMin and portionMax to null");
+    expect(FOOD_VISION_SYSTEM_INSTRUCTION).toContain("return numeric portionMin and portionMax instead");
   });
 
   it("maps malformed JSON to an invalid_response error without a network call", async () => {

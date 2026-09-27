@@ -1,7 +1,7 @@
 import { z } from "zod";
 import {
   foodAnalysisSchema,
-  foodEstimateSchema,
+  observedFoodSchema,
   type FoodAnalysis,
 } from "@/lib/domain/food-analysis";
 import type { EditableFoodItem } from "@/lib/domain/editable-meal";
@@ -17,7 +17,9 @@ export const mealTypes = {
   dinner: "晚餐",
   snack: "小食",
 } as const;
-export const CURRENT_MEAL_SCHEMA_VERSION = 3;
+// Version 5 permits an explicitly unknown personal portion. Older writers
+// reject this version, preventing them from erasing that distinction.
+export const CURRENT_MEAL_SCHEMA_VERSION = 5;
 export const photoRefSchema = z.strictObject({
   attachmentId: z.uuid(),
   generation: z.string().regex(/^[1-9][0-9]{0,31}$/),
@@ -104,10 +106,17 @@ export const mealInputSchema = z.object({
   calorieCorrection: calorieCorrectionInputSchema.nullable().optional(),
   items: z
     .array(
-      foodEstimateSchema.safeExtend({
+      observedFoodSchema.safeExtend({
         id: z.string().min(1).max(180),
-        originalPortionMin: z.number().positive().max(5000),
-        originalPortionMax: z.number().positive().max(5000),
+        originalPortionMin: z.number().positive().max(5000).nullable(),
+        originalPortionMax: z.number().positive().max(5000).nullable(),
+      }).refine(item => (item.originalPortionMin === null) === (item.originalPortionMax === null), {
+        message: "original portions must both be null or both be numbers",
+        path: ["originalPortionMax"],
+      }).refine(item => item.originalPortionMin === null || item.originalPortionMax === null ||
+        item.originalPortionMax >= item.originalPortionMin, {
+        message: "originalPortionMax must be greater than or equal to originalPortionMin",
+        path: ["originalPortionMax"],
       }),
     )
     .min(1)

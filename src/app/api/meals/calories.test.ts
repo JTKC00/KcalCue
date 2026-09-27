@@ -77,7 +77,7 @@ describe("meal calorie correction commands", () => {
     fixture.previous.mockResolvedValue({ deleted: false, record: previous });
     const response = await POST(request({ ...previous, mutationId: crypto.randomUUID(), time: "22:00",
       calorieCorrection: undefined, items: previous.items.map((food) => ({ ...food,
-        normalizedName: "asynchronous catalog name", portionMin: changed ? food.portionMin + 0.1 : food.portionMin,
+        normalizedName: "asynchronous catalog name", portionMin: changed ? food.portionMin! + 0.1 : food.portionMin,
       })) }));
     expect(response.status).toBe(200);
     expect((await response.json()).record.calorieCorrection).toEqual(changed ? null : previous.calorieCorrection);

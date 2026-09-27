@@ -1033,6 +1033,48 @@ test("real photo preview with mocked analysis supports correction, reload, histo
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
 });
 
+test("mobile real-photo flow preserves an unknown serving through save and reload", async ({ page, context }, testInfo) => {
+  const backend = cloud();
+  await backend.install(context);
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  let nutritionRequests = 0;
+  await page.route("**/api/nutrition/resolve", route => {
+    nutritionRequests++;
+    return route.fulfill({ json: { matches: [] } });
+  });
+  await page.route("**/api/analyze", route => route.fulfill({ json: { mode: "live", analysis: {
+    analysisStatus: "success",
+    foods: [{ displayName: "港式奶茶", normalizedName: "hong kong milk tea", identityLevel: "dish",
+      portionMin: null, portionMax: null, unit: "ml",
+      recognitionConfidence: 0.8, portionConfidence: 0.1,
+      uncertaintyReasons: ["共用飲品的個人飲用份量未知。"] }],
+    uncertaintyReasons: [], visibleEvidence: ["杯中的飲品"], estimatedInformation: [],
+    unknownInformation: ["個人飲用份量"],
+  } } }));
+  await page.goto("/");
+  await login(page);
+  await page.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await page.locator('input[type="file"]').nth(1).setInputFiles(path.join(testInfo.project.testDir, "fixtures/hk-milk-tea.jpg"));
+  await page.getByRole("button", { name: "開始分析", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "暫未能計算" })).toBeVisible();
+  await expect(page.getByRole("spinbutton", { name: "最少份量", exact: true })).toBeEmpty();
+  await expect(page.getByText(/無法從相片判斷你吃了多少/)).toBeVisible();
+  expect(nutritionRequests).toBe(0);
+  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  await expect.poll(() => backend.records.size).toBe(1);
+  expect([...backend.records.values()][0].items).toMatchObject([{ portionMin: null, portionMax: null }]);
+  await expect(page.locator(".day-summary")).toContainText("未知");
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "港式奶茶", exact: true })).toBeVisible();
+  await expect(page.locator(".day-summary")).toContainText("未知");
+  await page.getByRole("button", { name: "歷史", exact: true }).click();
+  await page.getByRole("button", { name: "查看／修正", exact: true }).click();
+  await expect(page.getByRole("spinbutton", { name: "最少份量", exact: true })).toBeEmpty();
+  expect(errors).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+});
+
 test("a slow nutrition lookup keeps the completed AI result editable without another AI call", async ({ page, context }, testInfo) => {
   const backend = cloud();
   await backend.install(context);

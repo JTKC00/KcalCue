@@ -1,4 +1,4 @@
-import type { FoodEstimate } from "@/lib/domain/food-analysis";
+import type { ObservedFood } from "@/lib/domain/food-analysis";
 import type {
   MealCoverage,
   NutrientRange,
@@ -18,7 +18,7 @@ export interface NutritionRanges {
 }
 
 export interface CalculatedFood {
-  food: FoodEstimate;
+  food: ObservedFood;
   profile: NutritionProfile | null;
   match: NutritionMatch | null;
   ranges: NutritionRanges | null;
@@ -43,10 +43,11 @@ const emptyRanges = (): NutritionRanges => ({
 });
 
 export function portionRangeToGrams(
-  food: Pick<FoodEstimate, "portionMin" | "portionMax" | "unit">,
+  food: Pick<ObservedFood, "portionMin" | "portionMax" | "unit">,
   profile: NutritionProfile,
 ): NutrientRange | null {
   const gramsPerUnit = profile.gramsPerUnit[food.unit];
+  if (food.portionMin === null || food.portionMax === null) return null;
   if (!gramsPerUnit || !Number.isFinite(gramsPerUnit)) return null;
 
   return {
@@ -92,9 +93,15 @@ export function mealShowsTotal(coverage: MealCoverage): boolean {
 }
 
 export function calculateFoodNutrition(
-  food: FoodEstimate,
+  food: ObservedFood,
   match: NutritionMatch | null,
 ): CalculatedFood {
+  if (food.portionMin === null || food.portionMax === null) {
+    return {
+      food, profile: null, match: null, ranges: null, includedInTotal: false,
+      unavailableReason: "這項食物的個人食用份量未知；填入份量後才可估算 kcal。",
+    };
+  }
   const profile = match?.profile ?? null;
   if (!profile || !match?.includedInTotal) {
     return {

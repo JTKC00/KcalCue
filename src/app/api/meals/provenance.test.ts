@@ -41,7 +41,7 @@ describe("meal analysis provenance boundary", () => {
     expect(saved.analysis).toEqual(demoFoodAnalysis);
     expect(saved.userId).toBe("verified-user");
     expect(saved).not.toHaveProperty("createdAt");
-    expect(saved.schemaVersion).toBe(3);
+    expect(saved.schemaVersion).toBe(CURRENT_MEAL_SCHEMA_VERSION);
   });
   it.each([undefined, null])("preserves unknown provenance for a legacy first save (%s)", async (analysisProvenance) => {
     const response = await POST(request({ ...input(), analysisProvenance }));

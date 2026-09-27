@@ -74,6 +74,10 @@ export function mealCalories(meal: CalorieMeal): MealCalorieSummary {
       source: "user", coverage: "complete", invalidCorrection: false,
     };
   }
+  // A known subtotal is not a whole-meal estimate when any person's serving
+  // is unknown, even if reference coverage would otherwise clear the threshold.
+  if (meal.items.some(item => item.portionMin === null || item.portionMax === null))
+    return { ...unknown, coverage: "insufficient" };
   const reference = new NutritionService(new LocalNutritionProvider()).calculateMeal(meal.items);
   const range = reference.totals.calories;
   if (!reference.includedCount || !Number.isFinite(range.min) || !Number.isFinite(range.max)) return unknown;

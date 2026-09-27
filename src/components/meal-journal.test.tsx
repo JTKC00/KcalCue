@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createEditableFoodItems } from "@/lib/domain/editable-meal";
+import { foodEstimateSchema } from "@/lib/domain/food-analysis";
 import { demoFoodAnalysis } from "@/lib/providers/food-vision/demo";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { newDraft, type MealRecord } from "@/lib/meals/types";
@@ -306,7 +307,7 @@ it("groups Today meals by breakfast, lunch, dinner and snack without changing th
 
 it("labels an insufficient meal unknown and excludes its partial kcal from Today", async () => {
   const known = createEditableFoodItems([demoFoodAnalysis.foods[0]])[0];
-  const match = new LocalNutritionProvider().resolve(known);
+  const match = new LocalNutritionProvider().resolve(foodEstimateSchema.parse(known));
   const unknown = {
     ...known, id: "unresolved", displayName: "未知食物", normalizedName: "unknown food",
     nutritionMatch: { ...match, profile: null, includedInTotal: false },

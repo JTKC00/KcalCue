@@ -83,7 +83,9 @@ function OriginalAnalysisDetails({ record }: { record: MealRecord }) {
             <ul>
               {analysis.foods.map((food, index) => (
                 <li key={index}>
-                  {food.displayName}：約 {food.portionMin}–{food.portionMax} {unitCopy[food.unit]}
+                  {food.displayName}：{food.portionMin === null || food.portionMax === null
+                    ? "個人食用份量未知"
+                    : `約 ${food.portionMin}–${food.portionMax} ${unitCopy[food.unit]}`}
                 </li>
               ))}
             </ul>

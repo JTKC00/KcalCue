@@ -10,7 +10,7 @@ import {
 } from "@/lib/domain/confidence";
 import { mealShowsTotal } from "@/lib/nutrition/calculation";
 import type { NutritionConfidence } from "@/lib/nutrition/types";
-import type { FoodAnalysis, FoodEstimate, PortionUnit } from "@/lib/domain/food-analysis";
+import type { FoodAnalysis, ObservedFood, PortionUnit } from "@/lib/domain/food-analysis";
 import { createEditableFoodItems, type EditableFoodItem, type PortionPreset } from "@/lib/domain/editable-meal";
 import { normalizeFoodName } from "@/lib/nutrition/canonical";
 import {
@@ -37,7 +37,7 @@ interface ResultViewProps {
   onPortionChange: (
     id: string,
     field: "portionMin" | "portionMax",
-    value: number,
+    value: number | null,
   ) => void;
   onUnitChange: (id: string, unit: PortionUnit) => void;
   onPreset: (id: string, preset: PortionPreset) => void;
@@ -47,12 +47,12 @@ interface ResultViewProps {
 }
 
 interface FoodRecognition extends RecognitionBadge {
-  originalFood?: FoodEstimate;
+  originalFood?: ObservedFood;
 }
 
 function foodRecognition(
   item: EditableFoodItem,
-  originalFood: FoodEstimate | undefined,
+  originalFood: ObservedFood | undefined,
   mode: ResultViewProps["mode"],
 ): FoodRecognition {
   if (mode === "manual" || item.id.startsWith("manual-")) return { label: "手動輸入" };
@@ -128,7 +128,8 @@ export function ResultView({
     ? `${confidenceCopy[recognition]}${aiFoods.length < items.length ? `（${aiFoods.length} / ${items.length} 項）` : ""}`
     : [...new Set(recognitionSources.map(source => source.label))].join("／") || "未有 AI 辨認資料";
   const nutritionConfidence = weakestNutritionConfidence(meal);
-  const showTotal = mealShowsTotal(meal.coverage);
+  const unknownPortion = items.some(item => item.portionMin === null || item.portionMax === null);
+  const showTotal = !unknownPortion && mealShowsTotal(meal.coverage);
   const calories = roundRange(meal.totals.calories, 5);
   const finalCalories = mealCalories({ items, mode, calorieCorrection });
   const manualCalories = finalCalories.source === "user" ? finalCalories.range : null;

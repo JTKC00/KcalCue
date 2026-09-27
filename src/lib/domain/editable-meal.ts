@@ -1,21 +1,25 @@
-import type { FoodEstimate, PortionUnit } from "./food-analysis";
+import type { FoodEstimate, ObservedFood, PortionUnit } from "./food-analysis";
 import type { NutritionMatch, NutritionProfile } from "@/lib/nutrition/types";
 import { normalizeFoodName } from "@/lib/nutrition/canonical";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 
 export type PortionPreset = "small" | "regular" | "large";
 
-export interface EditableFoodItem extends FoodEstimate {
+export interface EditableFoodItem extends ObservedFood {
   id: string;
-  originalPortionMin: number;
-  originalPortionMax: number;
+  originalPortionMin: number | null;
+  originalPortionMax: number | null;
   nutritionMatch?: NutritionMatch | null;
+}
+
+export function hasKnownPortion<T extends ObservedFood>(food: T): food is T & FoodEstimate {
+  return food.portionMin !== null && food.portionMax !== null;
 }
 
 export function renameFoodItem(
   food: EditableFoodItem,
   name: string,
-  originalFood: FoodEstimate = food,
+  originalFood: ObservedFood = food,
 ): EditableFoodItem {
   if (normalizeFoodName(food.displayName) === normalizeFoodName(name)) {
     return { ...food, displayName: name };
@@ -46,7 +50,7 @@ function roundPortion(value: number, unit: PortionUnit): number {
 }
 
 export function createEditableFoodItems(
-  foods: FoodEstimate[],
+  foods: ObservedFood[],
   matches: Array<NutritionMatch | null | undefined> = [],
 ): EditableFoodItem[] {
   return foods.map((food, index) => ({
@@ -69,6 +73,10 @@ export function applyPortionPreset(
   };
   const [minFactor, maxFactor] = factors[preset];
 
+  // An unknown personal serving has no baseline from which a preset can be
+  // calculated. Keep it unknown until the user supplies an amount.
+  if (food.originalPortionMin === null || food.originalPortionMax === null) return food;
+
   return {
     ...food,
     portionMin: roundPortion(food.originalPortionMin * minFactor, food.unit),
@@ -86,6 +94,7 @@ export function convertPortionUnit(
   const currentFactor = profile?.gramsPerUnit[food.unit];
   const nextFactor = profile?.gramsPerUnit[nextUnit];
   if (!currentFactor || !nextFactor) {
+    if (food.portionMin === null || food.portionMax === null) return { ...food, unit: nextUnit };
     return {
       ...food,
       unit: nextUnit,
@@ -95,6 +104,8 @@ export function convertPortionUnit(
       originalPortionMax: nextUnit === "g" || nextUnit === "ml" ? 150 : 2,
     };
   }
+
+  if (food.portionMin === null || food.portionMax === null) return { ...food, unit: nextUnit };
 
   const portionMin = roundPortion(
     (food.portionMin * currentFactor) / nextFactor,

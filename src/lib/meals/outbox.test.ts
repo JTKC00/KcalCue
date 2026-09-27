@@ -2,8 +2,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "fake-indexeddb/auto";
 import { createEditableFoodItems } from "@/lib/domain/editable-meal";
+import { foodEstimateSchema } from "@/lib/domain/food-analysis";
 import { demoFoodAnalysis } from "@/lib/providers/food-vision/demo";
-import { dayNutrition, newDraft } from "./types";
+import { CURRENT_MEAL_SCHEMA_VERSION, dayNutrition, newDraft } from "./types";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { MealRepository } from "./repository";
 import { changeSyncState, clearSyncState } from "./outbox";
@@ -207,7 +208,7 @@ describe("durable offline meal outbox", () => {
   });
   it("preserves resolved nutrition and today totals through an offline save and portion edit", async () => {
     const input = draft();
-    const match = new LocalNutritionProvider().resolve(input.items[0]);
+    const match = new LocalNutritionProvider().resolve(foodEstimateSchema.parse(input.items[0]));
     expect(match.includedInTotal).toBe(true);
     input.items = [{
       ...input.items[0],
@@ -222,7 +223,7 @@ describe("durable offline meal outbox", () => {
     const edited = await repository.save({
       ...saved,
       items: saved.items.map((item) => ({
-        ...item, portionMin: item.portionMin * 2, portionMax: item.portionMax * 2,
+        ...item, portionMin: item.portionMin! * 2, portionMax: item.portionMax! * 2,
       })),
     }, crypto.randomUUID());
     const restored = await new MealRepository().list();
@@ -389,14 +390,14 @@ describe("durable offline meal outbox", () => {
   });
   it("retains an unsupported-schema edit without automatically replaying it or downgrading remote metadata", async () => {
     const saved = await repository.save(draft(), crypto.randomUUID());
-    const future = { ...saved, schemaVersion: 5, createdAt: "2026-09-26T14:00:00.000Z" };
+    const future = { ...saved, schemaVersion: CURRENT_MEAL_SCHEMA_VERSION + 1, createdAt: "2026-09-26T14:00:00.000Z" };
     fixture.fetch.mockResolvedValueOnce(Response.json({ error: { code: "unsupported_schema" } }, { status: 409 }))
       .mockResolvedValueOnce(Response.json({ records: [future], revision: "future" }))
       .mockResolvedValueOnce(Response.json({ revision: "future" }));
     await repository.sync();
     await new MealRepository().sync();
     expect((await repository.state()).jobs[0]).toMatchObject({ id: saved.mutationId, error: "unsupported_schema" });
-    expect((await repository.list())[0]).toMatchObject({ schemaVersion: 5, createdAt: future.createdAt });
+    expect((await repository.list())[0]).toMatchObject({ schemaVersion: CURRENT_MEAL_SCHEMA_VERSION + 1, createdAt: future.createdAt });
     expect(fixture.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
 
@@ -497,7 +498,7 @@ describe("durable offline meal outbox", () => {
       calorieCorrection: mode === "clear" ? null : undefined,
       calorieInput: "private stale draft text",
       items: saved.items.map((item) => ({ ...item, normalizedName: "async metadata",
-        portionMin: mode === "changed" ? item.portionMin + 0.1 : item.portionMin })),
+        portionMin: mode === "changed" ? item.portionMin! + 0.1 : item.portionMin })),
     };
     await changeSyncState("a", () => ({ remote: [saved], syncedAt: null,
       jobs: [{ id: mutationId, kind: "save", record: pending, expectedVersion: 1 }] }));

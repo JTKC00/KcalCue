@@ -4,7 +4,7 @@ import "../test/setup";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createEditableFoodItems } from "@/lib/domain/editable-meal";
-import type { FoodAnalysis } from "@/lib/domain/food-analysis";
+import { foodEstimateSchema, type FoodAnalysis } from "@/lib/domain/food-analysis";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import type { NutritionMatch } from "@/lib/nutrition/types";
 import { newDraft, type MealDraft, type MealRecord } from "@/lib/meals/types";
@@ -60,7 +60,7 @@ function draft(): MealDraft {
     estimatedInformation: ["估計份量"],
     unknownInformation: [],
   };
-  const items = createEditableFoodItems(analysis.foods, analysis.foods.map(food => provider.resolve(food)));
+  const items = createEditableFoodItems(analysis.foods, analysis.foods.map(food => provider.resolve(foodEstimateSchema.parse(food))));
   return { ...newDraft(), mode: "live", analysis, items, originalItems: structuredClone(items) };
 }
 
@@ -170,5 +170,28 @@ describe("meal identity correction", () => {
     await act(async () => { mocks.pending[2].resolve({ ...mocks.pending[2].local, reasons: ["最新結果"] }); });
     await act(async () => { mocks.pending[0].resolve({ ...mocks.pending[0].local, reasons: ["舊結果"] }); });
     expect(changed.mock.lastCall![0].items[0].nutritionMatch.reasons).toEqual(["最新結果"]);
+  });
+
+  it("cancels a queued name lookup and ignores an in-flight result when the portion becomes unknown", async () => {
+    const changed = vi.fn();
+    render(<KcalCueApp initialProviderMode="live" initialDraft={draft()} onDraftChange={changed} />);
+    const name = screen.getByLabelText("食物名稱");
+    const min = screen.getByLabelText("最少份量");
+    fireEvent.change(name, { target: { value: "穀物飲品甲" } });
+    fireEvent.change(min, { target: { value: "" } });
+    fireEvent.blur(min);
+    await act(async () => { await vi.advanceTimersByTimeAsync(350); });
+    expect(mocks.pending).toHaveLength(0);
+    expect(changed.mock.lastCall![0].items[0]).toMatchObject({ portionMin: null, portionMax: null, nutritionMatch: null });
+
+    fireEvent.change(min, { target: { value: "100" } });
+    fireEvent.blur(min);
+    fireEvent.change(name, { target: { value: "穀物飲品乙" } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(350); });
+    expect(mocks.pending).toHaveLength(1);
+    fireEvent.change(min, { target: { value: "" } });
+    fireEvent.blur(min);
+    await act(async () => { mocks.pending[0].resolve({ ...mocks.pending[0].local, reasons: ["過時結果"] }); });
+    expect(changed.mock.lastCall![0].items[0]).toMatchObject({ portionMin: null, portionMax: null, nutritionMatch: null });
   });
 });

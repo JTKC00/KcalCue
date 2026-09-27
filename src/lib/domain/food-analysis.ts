@@ -9,20 +9,26 @@ export type FoodIdentityLevel = (typeof foodIdentityLevels)[number];
 const confidenceSchema = z.number().min(0).max(1);
 const shortTextSchema = z.string().trim().min(1).max(180);
 
+const foodFields = {
+  displayName: z.string().trim().min(1).max(80),
+  normalizedName: z.string().trim().min(1).max(100),
+  identityLevel: z.enum(foodIdentityLevels),
+  unit: z.enum(portionUnits),
+  recognitionConfidence: confidenceSchema,
+  portionConfidence: confidenceSchema,
+  uncertaintyReasons: z.array(shortTextSchema).max(8),
+  preparationMethod: z.string().trim().min(1).max(120).optional(),
+  visibleIngredients: z.array(shortTextSchema).max(12).optional(),
+  notes: z.string().trim().min(1).max(240).optional(),
+};
+const positivePortionSchema = z.number().positive().max(5000);
+
+// Numeric estimates remain the contract for reference nutrition providers.
 export const foodEstimateSchema = z
   .object({
-    displayName: z.string().trim().min(1).max(80),
-    normalizedName: z.string().trim().min(1).max(100),
-    identityLevel: z.enum(foodIdentityLevels),
-    portionMin: z.number().positive().max(5000),
-    portionMax: z.number().positive().max(5000),
-    unit: z.enum(portionUnits),
-    recognitionConfidence: confidenceSchema,
-    portionConfidence: confidenceSchema,
-    uncertaintyReasons: z.array(shortTextSchema).max(8),
-    preparationMethod: z.string().trim().min(1).max(120).optional(),
-    visibleIngredients: z.array(shortTextSchema).max(12).optional(),
-    notes: z.string().trim().min(1).max(240).optional(),
+    ...foodFields,
+    portionMin: positivePortionSchema,
+    portionMax: positivePortionSchema,
   })
   .strip()
   .refine((food) => food.portionMax >= food.portionMin, {
@@ -30,10 +36,33 @@ export const foodEstimateSchema = z
     path: ["portionMax"],
   });
 
+// A model can recognize food in a shared platter or an unbounded close-up
+// without evidence of the user's own serving. Keep that observation, but do
+// not invent a numeric portion merely to satisfy the estimate contract.
+export const observedFoodSchema = z
+  .object({
+    ...foodFields,
+    portionMin: positivePortionSchema.nullable(),
+    portionMax: positivePortionSchema.nullable(),
+  })
+  .strip()
+  .refine((food) => (food.portionMin === null) === (food.portionMax === null), {
+    message: "portionMin and portionMax must both be null or both be numbers",
+    path: ["portionMax"],
+  })
+  .refine(
+    (food) => food.portionMin === null || food.portionMax === null ||
+      food.portionMax >= food.portionMin,
+    {
+      message: "portionMax must be greater than or equal to portionMin",
+      path: ["portionMax"],
+    },
+  );
+
 export const foodAnalysisSchema = z
   .object({
     analysisStatus: z.enum(["success", "unable_to_identify"]),
-    foods: z.array(foodEstimateSchema).max(12),
+    foods: z.array(observedFoodSchema).max(12),
     uncertaintyReasons: z.array(shortTextSchema).max(12),
     visibleEvidence: z.array(shortTextSchema).max(12),
     estimatedInformation: z.array(shortTextSchema).max(12),
@@ -62,11 +91,13 @@ export const foodAnalysisSchema = z
   });
 
 export type FoodEstimate = z.infer<typeof foodEstimateSchema>;
+export type ObservedFood = z.infer<typeof observedFoodSchema>;
 export type FoodAnalysis = z.infer<typeof foodAnalysisSchema>;
 
 // OpenAI Structured Outputs requires additionalProperties=false on every object
 // and every property to be required. Nullable properties preserve the domain's
-// optional fields; the provider strips nulls before Zod validation.
+// optional fields; the provider strips those nulls before Zod validation.
+// Portion nulls are intentional observations and must survive normalization.
 export const foodAnalysisJsonSchema = {
   type: "object",
   required: [
@@ -93,8 +124,8 @@ export const foodAnalysisJsonSchema = {
             type: "string",
             enum: [...foodIdentityLevels],
           },
-          portionMin: { type: "number" },
-          portionMax: { type: "number" },
+          portionMin: { type: ["number", "null"] },
+          portionMax: { type: ["number", "null"] },
           unit: {
             type: "string",
             enum: [...portionUnits],

@@ -16,6 +16,7 @@ import {
 } from "firebase/firestore";
 import { demoFoodAnalysis } from "@/lib/providers/food-vision/demo";
 import { createEditableFoodItems } from "@/lib/domain/editable-meal";
+import { foodEstimateSchema } from "@/lib/domain/food-analysis";
 import { CURRENT_MEAL_SCHEMA_VERSION, dayNutrition, newDraft, type MealRecord } from "@/lib/meals/types";
 import { dayCalories } from "@/lib/meals/calories";
 import { assertWritableMealSchema, commitMeal, mealCollection, previousMeal } from "@/lib/firebase/meals";
@@ -418,7 +419,7 @@ describe("meal USDA lookup attempt lease against real Firestore emulator", () =>
         uncertaintyReasons: [],
       }];
       expect(getNutritionApiKey()).toBe("test-only-key");
-      const localMatch = new LocalNutritionProvider().resolve(body.items[0]);
+      const localMatch = new LocalNutritionProvider().resolve(foodEstimateSchema.parse(body.items[0]));
       expect(localMatch.includedInTotal).toBe(false);
       expect(isCompositeIdentity(localMatch.identity)).toBe(false);
       const first = POST(request(body));
@@ -498,7 +499,7 @@ describe("Firebase meal API against real Firestore emulator", () => {
       analysisProvenance: { ...provenance, source: "server-verified", verified: true } };
     const created = (await (await POST(request(body))).json()).record;
     expect(created.analysisProvenance).toEqual(provenance);
-    expect(created.schemaVersion).toBe(3);
+    expect(created.schemaVersion).toBe(CURRENT_MEAL_SCHEMA_VERSION);
     const edit = { ...created, mutationId: crypto.randomUUID(), analysis: null, analysisProvenance: null, time: "22:00" };
     const saved = (await (await POST(request(edit))).json()).record;
     expect(saved.analysisProvenance).toEqual(provenance);
@@ -522,7 +523,31 @@ describe("Firebase meal API against real Firestore emulator", () => {
     const saved = (await (await POST(request({ ...legacy, mutationId: crypto.randomUUID(), analysisProvenance: provenance }))).json()).record;
     expect(saved.analysisProvenance).toBeNull();
     expect(saved.analysis).toEqual(legacy.analysis);
-    expect(saved.schemaVersion).toBe(3);
+    expect(saved.schemaVersion).toBe(CURRENT_MEAL_SCHEMA_VERSION);
+  });
+  it("round-trips an unknown personal portion without inventing kcal or changing original AI evidence", async () => {
+    const analysis = { ...demoFoodAnalysis, foods: [{
+      ...demoFoodAnalysis.foods[0], portionMin: null, portionMax: null,
+    }] };
+    const body = { ...input(), mode: "live", analysis, items: createEditableFoodItems(analysis.foods) };
+    const response = await POST(request(body));
+    expect(response.status).toBe(200);
+    const created = (await response.json()).record as MealRecord;
+    expect(created.schemaVersion).toBe(CURRENT_MEAL_SCHEMA_VERSION);
+    expect(created.photoRef).toBeNull();
+    expect(created.items[0]).toMatchObject({ portionMin: null, portionMax: null, nutritionMatch: null });
+    expect(created.originalItems[0]).toMatchObject({ originalPortionMin: null, originalPortionMax: null });
+    expect(dayCalories([created]).range).toBeNull();
+    const listed = (await (await GET(new Request("http://localhost/api/meals"))).json()).records as MealRecord[];
+    expect(listed).toEqual([created]);
+
+    const corrected = (await (await POST(request({ ...created, mutationId: crypto.randomUUID(),
+      items: [{ ...created.items[0], portionMin: 100, portionMax: 150,
+        originalPortionMin: 100, originalPortionMax: 150 }],
+    }))).json()).record as MealRecord;
+    expect(corrected.originalItems[0].portionMin).toBeNull();
+    expect(corrected.items[0].portionMin).toBe(100);
+    expect(dayCalories([corrected]).range).toBeTruthy();
   });
   it("recomputes nutrition, strips image fields, and acknowledges a repeated mutation once", async () => {
     const body = {
@@ -796,7 +821,7 @@ describe("Firebase meal API against real Firestore emulator", () => {
     expect(retained.calorieCorrection).toEqual(created.calorieCorrection);
     expect(retained.createdAt).toBe(created.createdAt);
     const changed = { ...retained, calorieCorrection: undefined, mutationId: crypto.randomUUID(),
-      items: retained.items.map((item) => ({ ...item, portionMax: item.portionMax + 100 })) };
+      items: retained.items.map((item) => ({ ...item, portionMax: item.portionMax! + 100 })) };
     const cleared = (await (await POST(request(changed))).json()).record;
     expect(cleared.calorieCorrection).toBeNull();
     expect(cleared.createdAt).toBe(created.createdAt);

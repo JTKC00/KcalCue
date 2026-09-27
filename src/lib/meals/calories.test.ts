@@ -74,6 +74,25 @@ describe("meal content basis and correction commands", () => {
 });
 
 describe("final calories without fabricated macros", () => {
+  it("persists an unknown personal serving without counting a known subtotal as the whole meal", () => {
+    const unresolved = {
+      ...referenceFood("shared-buffet"),
+      portionMin: null, portionMax: null,
+      originalPortionMin: null, originalPortionMax: null,
+      nutritionMatch: null,
+    };
+    const meal = record([referenceFood("rice"), referenceFood("chicken"), referenceFood("veg"), unresolved]);
+    const accepted = mealInputSchema.safeParse({ ...meal, mutationId: crypto.randomUUID() });
+    expect(accepted.success).toBe(true);
+    expect(mealCalories(meal)).toMatchObject({ range: null, source: "unknown", coverage: "insufficient" });
+    expect(dayCalories([meal])).toMatchObject({ range: null, unknownCount: 1 });
+    expect(mealCalories({ ...meal, calorieCorrection: { kcal: 650, source: "user" } })).toMatchObject({
+      range: { min: 650, max: 650 }, source: "user",
+    });
+    expect(mealInputSchema.safeParse({ ...meal, mutationId: crypto.randomUUID(),
+      items: [{ ...unresolved, portionMax: 100 }],
+    }).success).toBe(false);
+  });
   it("distinguishes complete reference, known partial calories and wholly unknown food", () => {
     const known = record();
     expect(mealCalories(known)).toMatchObject({ range: { min: 180, max: 220 }, source: "reference", coverage: "complete" });

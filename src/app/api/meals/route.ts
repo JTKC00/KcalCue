@@ -13,7 +13,7 @@ import {
   assertWritableMealSchema,
 } from "@/lib/firebase/meals";
 import { accountPath } from "@/lib/firebase/admin";
-import { createEditableFoodItems } from "@/lib/domain/editable-meal";
+import { createEditableFoodItems, hasKnownPortion } from "@/lib/domain/editable-meal";
 import { canReuseNutritionMatchForNameEdit } from "@/lib/nutrition/client";
 import { isCompositeIdentity } from "@/lib/nutrition/canonical";
 import { supportsUsdaPortionUnit, UsdaNutritionClient } from "@/lib/nutrition/usda";
@@ -121,15 +121,17 @@ export async function POST(request: Request) {
     const usda = key ? new UsdaNutritionClient(key, async () =>
       (await reserveHourlyUsdaCall(db, user.id)).allowed, user.id) : null;
     const initialItems = input.items.map((item) => {
+      if (!hasKnownPortion(item)) return { ...item, nutritionMatch: null };
       const old = previous?.items.find((food) => food.id === item.id);
       const match =
         old &&
-        canReuseNutritionMatchForNameEdit(old, item, old.nutritionMatch)
+        hasKnownPortion(old) && canReuseNutritionMatchForNameEdit(old, item, old.nutritionMatch)
           ? old.nutritionMatch!
           : local.resolve(item);
       return { ...item, nutritionMatch: match };
     });
     const needsRemote = (item: typeof initialItems[number]) =>
+      hasKnownPortion(item) && item.nutritionMatch !== null &&
       !item.nutritionMatch.includedInTotal &&
       supportsUsdaPortionUnit(item.unit) &&
       !isCompositeIdentity(item.nutritionMatch.identity);
@@ -155,7 +157,7 @@ export async function POST(request: Request) {
     try {
       const items = await Promise.all(initialItems.map(async (item) => {
         let match = item.nutritionMatch;
-        if (needsRemote(item) && usda && input.mode === "live" && allowRemote) {
+        if (needsRemote(item) && match && hasKnownPortion(item) && usda && input.mode === "live" && allowRemote) {
           try {
             const remote = await usda.resolve(item);
             if (remote.includedInTotal) match = remote;
@@ -168,7 +170,7 @@ export async function POST(request: Request) {
                 ...match.reasons.filter((reason) => reason !== copy.nutritionLookupFailed)],
             };
           }
-        } else if (needsRemote(item) && usda && input.mode === "live" && !allowRemote) {
+        } else if (needsRemote(item) && match && usda && input.mode === "live" && !allowRemote) {
           match = {
             ...match,
             reasons: [copy.nutritionLookupFailed,
@@ -183,7 +185,7 @@ export async function POST(request: Request) {
         (analysis
           ? createEditableFoodItems(
               analysis.foods,
-              analysis.foods.map((food) => local.resolve(food)),
+              analysis.foods.map((food) => hasKnownPortion(food) ? local.resolve(food) : null),
             )
           : items);
       const record: Omit<MealRecord, "updatedAt"> = {

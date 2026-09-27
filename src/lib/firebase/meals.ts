@@ -33,9 +33,9 @@ export function assertWritableMealSchema(
   record: { schemaVersion?: unknown; photoRef?: unknown } | undefined,
 ) {
   const version = record?.schemaVersion;
-  if (version === PHOTO_SCHEMA_VERSION) {
-    // A version-4 meal must retain this explicit field after removal. It is
-    // the rollback floor for writers that understand the photo lifecycle.
+  if (version === PHOTO_SCHEMA_VERSION || version === CURRENT_MEAL_SCHEMA_VERSION) {
+    // Both versions retain the explicit photo field after removal. Version 5
+    // additionally protects nullable portions from older numeric-only writers.
     if (!record || !("photoRef" in record) ||
         record.photoRef !== null &&
         !photoRefSchema.safeParse(record.photoRef).success)
@@ -47,7 +47,7 @@ export function assertWritableMealSchema(
     version !== 0 &&
     version !== 1 &&
     version !== 2 &&
-    version !== CURRENT_MEAL_SCHEMA_VERSION
+    version !== 3
   )
     throw new HttpError(409, "unsupported_schema");
   if (record && "photoRef" in record) throw new HttpError(409, "unsupported_schema");
@@ -188,10 +188,8 @@ export async function commitMeal(
     void _clientPhotoRef;
     const saved: MealRecord = {
       ...mealFields,
-      schemaVersion: previous?.record?.schemaVersion === PHOTO_SCHEMA_VERSION || nextPhotoRef
-        ? PHOTO_SCHEMA_VERSION : CURRENT_MEAL_SCHEMA_VERSION,
-      ...(previous?.record?.schemaVersion === PHOTO_SCHEMA_VERSION || nextPhotoRef
-        ? { photoRef: nextPhotoRef } : {}),
+      schemaVersion: CURRENT_MEAL_SCHEMA_VERSION,
+      photoRef: nextPhotoRef,
       // A legacy record's first cloud write cannot be reconstructed from its
       // last edit or client meal date. Only new documents receive a timestamp.
       createdAt: previous
