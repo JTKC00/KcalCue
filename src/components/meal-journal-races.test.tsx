@@ -10,7 +10,7 @@ import type { LocalMeals } from "@/lib/meals/cache";
 import { provenance } from "@/test/provenance-fixture";
 
 const fixture = vi.hoisted(() => ({
-  callback: null as null | ((user: { uid: string; email: string }) => void),
+  callback: null as null | ((user: { uid: string; email: string } | null) => void),
   uid: "a",
   list: vi.fn(),
   state: vi.fn(),
@@ -24,6 +24,7 @@ const fixture = vi.hoisted(() => ({
   clearSync: vi.fn(),
   signOut: vi.fn(),
   photoFetch: vi.fn(),
+  preparePhoto: vi.fn(),
   draftChange: null as null | ((change: Pick<MealDraft, "items" | "analysis" | "analysisProvenance" | "mode">) => void),
 }));
 vi.mock("@/lib/firebase/client", () => ({
@@ -57,12 +58,23 @@ vi.mock("@/lib/meals/outbox", async (original) => ({
 vi.mock("@/lib/meals/cache", () => ({
   localMeals: { read: fixture.read, write: fixture.write, clear: fixture.clear },
 }));
+vi.mock("@/lib/meals/photo", async (original) => ({
+  ...(await original<typeof import("@/lib/meals/photo")>()),
+  preparePhoto: fixture.preparePhoto,
+}));
 vi.mock("./kcalcue-app", () => ({
-  KcalCueApp: ({ initialDraft, onDraftChange }: { initialDraft: MealDraft; onDraftChange: NonNullable<typeof fixture.draftChange> }) => {
+  KcalCueApp: ({ initialDraft, onDraftChange, onPhotoSelected }: {
+    initialDraft: MealDraft;
+    onDraftChange: NonNullable<typeof fixture.draftChange>;
+    onPhotoSelected: (file: File) => void;
+  }) => {
     fixture.draftChange = onDraftChange;
     return (
     <div data-testid="editor-meal" data-created-at={initialDraft.createdAt ?? "unknown"}>
       {initialDraft.items[0]?.displayName}
+      <button type="button" onClick={() => onPhotoSelected(new File(["private-a"], "a.jpg", { type: "image/jpeg" }))}>
+        選擇測試照片
+      </button>
     </div>
     );
   },
@@ -117,7 +129,7 @@ async function startConflictRecovery(meal: MealRecord) {
 beforeEach(() => {
   states.clear(); caches.clear(); fixture.uid = "a";
   vi.restoreAllMocks(); vi.unstubAllGlobals();
-  for (const mock of [fixture.list, fixture.state, fixture.sync, fixture.save, fixture.remove, fixture.discard, fixture.read, fixture.write, fixture.clear, fixture.clearSync, fixture.signOut, fixture.photoFetch]) mock.mockReset();
+  for (const mock of [fixture.list, fixture.state, fixture.sync, fixture.save, fixture.remove, fixture.discard, fixture.read, fixture.write, fixture.clear, fixture.clearSync, fixture.signOut, fixture.photoFetch, fixture.preparePhoto]) mock.mockReset();
   fixture.list.mockImplementation(async (uid: string) => visibleMeals(structuredClone(states.get(uid) ?? emptySync())));
   fixture.state.mockImplementation(async (uid: string) => structuredClone(states.get(uid) ?? emptySync()));
   fixture.sync.mockResolvedValue(undefined);
@@ -164,6 +176,119 @@ it("reads a private photo only in History and removes its URL on account change"
   await screen.findByRole("heading", { name: "未有餐點記錄" });
   expect(revokeUrl).toHaveBeenCalledWith("blob:account-a-photo");
   expect(screen.queryByRole("img", { name: "餐點附圖" })).not.toBeInTheDocument();
+});
+
+it("does not offer another account a failed photo retry or retain its source file", async () => {
+  caches.set("a", { ...emptyCache(), draft: newDraft() });
+  caches.set("b", { ...emptyCache(), draft: newDraft() });
+  fixture.preparePhoto.mockRejectedValueOnce(new Error("decode failed"));
+  render(<MealJournal initialProviderMode="live" />);
+  await signIn("a");
+  fireEvent.click(await screen.findByRole("button", { name: "繼續草稿" }));
+  fireEvent.click(screen.getByRole("button", { name: "選擇測試照片" }));
+  expect(await screen.findByRole("button", { name: "重試照片處理" })).toBeInTheDocument();
+  await signIn("b");
+  await screen.findByRole("heading", { name: "新餐點草稿" });
+  expect(screen.queryByRole("button", { name: "重試照片處理" })).not.toBeInTheDocument();
+  expect(screen.queryByText("照片壓縮未完成，原相只保留於本次頁面。可重試或移除草稿圖片。")).not.toBeInTheDocument();
+});
+
+it("drops a guest photo retry when the signed-in account already has a different draft", async () => {
+  caches.set("guest", { ...emptyCache(), draft: newDraft() });
+  caches.set("b", { ...emptyCache(), draft: newDraft() });
+  fixture.preparePhoto.mockRejectedValueOnce(new Error("decode failed"));
+  render(<MealJournal initialProviderMode="live" />);
+  await act(async () => { fixture.callback!(null); });
+  fireEvent.click(await screen.findByRole("button", { name: "繼續草稿" }));
+  fireEvent.click(screen.getByRole("button", { name: "選擇測試照片" }));
+  expect(await screen.findByRole("button", { name: "重試照片處理" })).toBeInTheDocument();
+  await signIn("b");
+  await screen.findByRole("heading", { name: "新餐點草稿" });
+  expect(screen.queryByRole("button", { name: "重試照片處理" })).not.toBeInTheDocument();
+});
+
+it("keeps a guest photo retry when its draft is carried into an empty signed-in account", async () => {
+  const guestDraft = newDraft();
+  caches.set("guest", { ...emptyCache(), draft: guestDraft });
+  fixture.preparePhoto.mockRejectedValueOnce(new Error("decode failed"));
+  render(<MealJournal initialProviderMode="live" />);
+  await act(async () => { fixture.callback!(null); });
+  fireEvent.click(await screen.findByRole("button", { name: "繼續草稿" }));
+  fireEvent.click(screen.getByRole("button", { name: "選擇測試照片" }));
+  expect(await screen.findByRole("button", { name: "重試照片處理" })).toBeInTheDocument();
+  await signIn("b");
+  expect(await screen.findByRole("button", { name: "重試照片處理" })).toBeInTheDocument();
+  expect(caches.get("b")?.draft?.id).toBe(guestDraft.id);
+});
+
+it("does not complete a guest photo into an existing account draft with the same meal ID", async () => {
+  const sharedId = crypto.randomUUID();
+  caches.set("guest", { ...emptyCache(), draft: { ...newDraft(), id: sharedId } });
+  caches.set("b", { ...emptyCache(), draft: { ...newDraft(), id: sharedId } });
+  const decode = deferred<Blob>();
+  fixture.preparePhoto.mockReturnValueOnce(decode.promise);
+  render(<MealJournal initialProviderMode="live" />);
+  await act(async () => { fixture.callback!(null); });
+  fireEvent.click(await screen.findByRole("button", { name: "繼續草稿" }));
+  fireEvent.click(screen.getByRole("button", { name: "選擇測試照片" }));
+  expect(await screen.findByText("正在準備壓縮照片…")).toBeInTheDocument();
+  await signIn("b");
+  await screen.findByRole("heading", { name: "新餐點草稿" });
+  await act(async () => { decode.resolve(new Blob(["guest-jpeg"], { type: "image/jpeg" })); });
+  await waitFor(() => expect(caches.get("b")?.draft?.id).toBe(sharedId));
+  expect(caches.get("b")?.draft?.photo).toBeUndefined();
+  expect(fixture.write.mock.calls.some(([uid, value]) => uid === "b" && value.draft?.photo)).toBe(false);
+});
+
+it("drops a signed-in photo retry after cross-tab logout before another account adopts a guest draft", async () => {
+  caches.set("guest", { ...emptyCache(), draft: newDraft() });
+  caches.set("a", { ...emptyCache(), draft: newDraft() });
+  fixture.preparePhoto.mockRejectedValueOnce(new Error("decode failed"));
+  render(<MealJournal initialProviderMode="live" />);
+  await signIn("a");
+  fireEvent.click(await screen.findByRole("button", { name: "繼續草稿" }));
+  fireEvent.click(screen.getByRole("button", { name: "選擇測試照片" }));
+  expect(await screen.findByRole("button", { name: "重試照片處理" })).toBeInTheDocument();
+  const logoutCleanup = deferred<void>();
+  fixture.clear.mockImplementationOnce(async (uid: string) => {
+    expect(uid).toBe("a");
+    await logoutCleanup.promise;
+    caches.delete(uid);
+  });
+  await act(async () => {
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: "kcalcue-logout", newValue: "a:123",
+    }));
+  });
+  await signIn("b");
+  await waitFor(() => expect(caches.get("b")?.draft).not.toBeNull());
+  await act(async () => {
+    history.pushState(null, "", "#new");
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  });
+  await screen.findByRole("heading", { name: "新餐點草稿" });
+  expect(screen.queryByRole("button", { name: "重試照片處理" })).not.toBeInTheDocument();
+  await act(async () => { logoutCleanup.resolve(); });
+});
+
+it("ignores an old account's photo preparation after a new account loads the same meal ID", async () => {
+  const sharedId = crypto.randomUUID();
+  caches.set("a", { ...emptyCache(), draft: { ...newDraft(), id: sharedId } });
+  caches.set("b", { ...emptyCache(), draft: { ...newDraft(), id: sharedId } });
+  const decode = deferred<Blob>();
+  fixture.preparePhoto.mockReturnValueOnce(decode.promise);
+  render(<MealJournal initialProviderMode="live" />);
+  await signIn("a");
+  fireEvent.click(await screen.findByRole("button", { name: "繼續草稿" }));
+  fireEvent.click(screen.getByRole("button", { name: "選擇測試照片" }));
+  expect(await screen.findByText("正在準備壓縮照片…")).toBeInTheDocument();
+  await signIn("b");
+  await screen.findByRole("heading", { name: "新餐點草稿" });
+  await act(async () => { decode.resolve(new Blob(["a-private-jpeg"], { type: "image/jpeg" })); });
+  await waitFor(() => expect(caches.get("b")?.draft?.id).toBe(sharedId));
+  expect(caches.get("b")?.draft?.photo).toBeUndefined();
+  expect(fixture.write.mock.calls.some(([uid, value]) => uid === "b" && value.draft?.photo)).toBe(false);
+  expect(screen.queryByText("正在準備壓縮照片…")).not.toBeInTheDocument();
 });
 
 it("never renders, caches, or discards an old account's conflict under the next account", async () => {

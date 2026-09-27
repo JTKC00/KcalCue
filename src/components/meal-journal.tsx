@@ -222,6 +222,13 @@ export function MealJournal({
     const refreshEpoch = refreshGeneration;
     let loadGeneration = 0;
     let loading = false;
+    function clearVolatilePhoto() {
+      photoGeneration.current++;
+      preparedFile.current = null;
+      setPreparing(false);
+      setPhotoFailure(null);
+      setNotice(clearPhotoNotice);
+    }
     async function load(id: string, address: string | null) {
       const generation = ++loadGeneration;
       const accountVersion = accountGeneration.current;
@@ -255,6 +262,11 @@ export function MealJournal({
         } satisfies LocalMeals;
       });
       if (!isCurrentLoad()) return;
+      if (oldId === "guest" && id !== "guest" && local.draft) {
+        // A signed-in account with its own draft does not adopt the guest
+        // draft. Its retry control must not retain the guest's in-memory File.
+        clearVolatilePhoto();
+      }
       if (guestDraft && !local.draft) {
         local.draft = guestDraft;
         await localMeals.write(id, local);
@@ -286,6 +298,13 @@ export function MealJournal({
     const subscription = auth
       ? onAuthStateChanged(auth, (user) => {
           if (!active) return;
+          const nextId = user?.uid ?? "guest";
+          if (current.current.userId !== "guest" && nextId !== current.current.userId) {
+            // An uncompressed File exists only in memory. It belongs to the
+            // previous account even when the next account has a draft with
+            // the same meal ID. Invalidate its async preparation immediately.
+            clearVolatilePhoto();
+          }
           // Invalidate old continuations immediately, before the next account's
           // IndexedDB load finishes (including an A -> B -> A transition).
           accountGeneration.current++;
@@ -294,7 +313,7 @@ export function MealJournal({
           if (!loading && user?.uid === current.current.userId) {
             setEmail(user.email);
             void refresh();
-          } else void load(user?.uid ?? "guest", user?.email ?? null);
+          } else void load(nextId, user?.email ?? null);
         })
       : undefined;
     if (!auth) void load("guest", null);
@@ -339,7 +358,7 @@ export function MealJournal({
       const logoutGeneration = accountGeneration.current;
       cacheEnabled.current = false;
       refreshGeneration.current++;
-      photoGeneration.current++;
+      clearVolatilePhoto();
       current.current = {
         userId: "guest",
         draft: null,
