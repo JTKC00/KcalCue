@@ -2,6 +2,38 @@
 # COPY statements; future source extensions or public assets need review.
 *
 **/*
+# Docker 20.10, used by Cloud Build, does not enter an excluded directory to
+# apply a later file exception. Name each source directory. A wildcard such as
+# !src/**/ also re-includes files on that client, so do not use one here.
+!src/
+!src/app/
+!src/app/api/
+!src/app/api/analyze/
+!src/app/api/meals/
+!src/app/api/meals/photo/
+!src/app/api/nutrition/
+!src/app/api/nutrition/resolve/
+!src/app/api/status/
+!src/app/sw.js/
+!src/components/
+!src/content/
+!src/lib/
+!src/lib/client/
+!src/lib/domain/
+!src/lib/evaluation/
+!src/lib/firebase/
+!src/lib/meals/
+!src/lib/nutrition/
+!src/lib/providers/
+!src/lib/providers/food-vision/
+!src/lib/pwa/
+!src/lib/server/
+!src/test/
+# Docker 20.10 treats a re-included directory as including every nested file.
+# Exclude those files again, then restore only the source extensions below.
+src/**
+!src/app/api/meals/[[]id]/
+!src/app/api/meals/[[]id]/photo/
 !Dockerfile
 !.dockerignore
 !package.json

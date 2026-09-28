@@ -59,6 +59,61 @@ jobs:
               exit 1
             fi
           done
+      - name: Verify Cloud Build Docker 20.10 context matches the official builder
+        shell: bash
+        run: |
+          set -euo pipefail
+          touch src/.env.local src/service-account.json src/private-meal.gif src/local-note.txt scripts/local-note.txt public/private-meal.jpg
+          probe=""
+          probe_dockerfile=""
+          cleanup() {
+            rm -f src/.env.local src/service-account.json src/private-meal.gif src/local-note.txt scripts/local-note.txt public/private-meal.jpg
+            if [[ -n "$probe" ]]; then docker rm -f "$probe" >/dev/null; fi
+            if [[ -n "$probe_dockerfile" ]]; then rm -f "$probe_dockerfile"; fi
+          }
+          trap cleanup EXIT
+          probe_dockerfile="$(mktemp)"
+          printf '%s\n' 'FROM scratch' 'COPY . /context' 'CMD ["/bin/true"]' > "$probe_dockerfile"
+          # Same client Cloud Build uses. Newer GitHub Docker accepts nested
+          # file exceptions whose parent directories stay ignored. The client
+          # tars /work itself; the host daemon only receives that archive.
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$PWD:/work" \
+            -v "$probe_dockerfile:/probe.Dockerfile:ro" \
+            --entrypoint docker \
+            gcr.io/cloud-builders/docker@sha256:bbb3d633c5c2813b2ce5245852979e1d637768f4acfc504d8ece288f91e9b60f \
+            build --no-cache -f /probe.Dockerfile -t kcalcue:cloud-build-context /work
+          probe="$(docker create kcalcue:cloud-build-context)"
+          context_dir="$(mktemp -d)"
+          docker cp "$probe:/context/." "$context_dir"
+          for path in src/.env.local src/service-account.json src/private-meal.gif src/local-note.txt scripts/local-note.txt public/private-meal.jpg scripts/e2e-server.mjs scripts/cloud-run.mjs; do
+            if [[ -e "$context_dir/$path" ]]; then
+              echo "::error::Cloud Build context included: $path"
+              exit 1
+            fi
+          done
+          while IFS= read -r path; do
+            if [[ ! -f "$context_dir/$path" ]]; then
+              echo "::error::Cloud Build context missing: $path"
+              exit 1
+            fi
+          done < <(find src -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.css' \))
+          while IFS= read -r path; do
+            case "$path" in
+              *.ts|*.tsx|*.css) ;;
+              *)
+                echo "::error::Cloud Build context included non-source: $path"
+                exit 1
+                ;;
+            esac
+          done < <(cd "$context_dir" && find src -type f)
+          for path in public/icon-192.png scripts/check-codecs.mjs scripts/smoke-container.mjs; do
+            if [[ ! -f "$context_dir/$path" ]]; then
+              echo "::error::Cloud Build context missing: $path"
+              exit 1
+            fi
+          done
       - name: Build secret-free image and verify HEVC in builder and runtime
         run: >-
           docker build --tag kcalcue:ci
