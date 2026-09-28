@@ -8,6 +8,24 @@ import {
   sendEmailLink,
 } from "@/lib/firebase/client";
 
+let pendingEmailLinkCompletion: {
+  callback: string;
+  promise: Promise<void>;
+} | null = null;
+
+function completeEmailLinkOnce(email: string) {
+  const callback = `${location.href}\u0000${email}`;
+  if (pendingEmailLinkCompletion?.callback === callback)
+    return pendingEmailLinkCompletion.promise;
+
+  const promise = completeEmailLink(email).finally(() => {
+    if (pendingEmailLinkCompletion?.promise === promise)
+      pendingEmailLinkCompletion = null;
+  });
+  pendingEmailLinkCompletion = { callback, promise };
+  return promise;
+}
+
 export function Account({ onDone, suppressStoredEmail = false }: {
   onDone: () => void;
   suppressStoredEmail?: boolean;
@@ -34,7 +52,7 @@ export function Account({ onDone, suppressStoredEmail = false }: {
     if (isEmailLink && address && !completing.current) {
       completing.current = true;
       setBusy(true);
-      void completeEmailLink(address)
+      void completeEmailLinkOnce(address)
         .then(() => done.current())
         .catch(() => setMessage("登入連結無效或已過期，請重新寄送。"))
         .finally(() => setBusy(false));
@@ -47,7 +65,7 @@ export function Account({ onDone, suppressStoredEmail = false }: {
     setBusy(true);
     try {
       if (link) {
-        await completeEmailLink(email.trim());
+        await completeEmailLinkOnce(email.trim());
         onDone();
       } else {
         if (Date.now() < retryAt) return;

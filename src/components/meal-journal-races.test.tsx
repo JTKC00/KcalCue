@@ -12,6 +12,8 @@ import { provenance } from "@/test/provenance-fixture";
 const fixture = vi.hoisted(() => ({
   callback: null as null | ((user: { uid: string; email: string }) => void),
   uid: "a",
+  emailLink: false,
+  completeEmailLink: vi.fn(),
   list: vi.fn(),
   state: vi.fn(),
   sync: vi.fn(),
@@ -32,7 +34,10 @@ const fixture = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/firebase/client", () => ({
   cloudConfigured: () => true,
-  hasEmailLink: () => false,
+  hasEmailLink: () => fixture.emailLink,
+  completeEmailLink: fixture.completeEmailLink,
+  googleLogin: vi.fn(),
+  sendEmailLink: vi.fn(),
   signOut: fixture.signOut,
   authorizedFetch: fixture.photoFetch,
   firebaseAuth: () => ({ currentUser: { uid: fixture.uid } }),
@@ -127,9 +132,9 @@ async function startConflictRecovery(meal: MealRecord) {
 }
 
 beforeEach(() => {
-  states.clear(); caches.clear(); fixture.uid = "a"; fixture.beforeUpdate = null;
+  states.clear(); caches.clear(); fixture.uid = "a"; fixture.emailLink = false; fixture.beforeUpdate = null;
   vi.restoreAllMocks(); vi.unstubAllGlobals();
-  for (const mock of [fixture.list, fixture.state, fixture.sync, fixture.save, fixture.remove, fixture.discard, fixture.read, fixture.write, fixture.snapshot, fixture.savedDrafts, fixture.restoreDraft, fixture.clear, fixture.clearSync, fixture.signOut, fixture.photoFetch]) mock.mockReset();
+  for (const mock of [fixture.list, fixture.state, fixture.sync, fixture.save, fixture.remove, fixture.discard, fixture.read, fixture.write, fixture.snapshot, fixture.savedDrafts, fixture.restoreDraft, fixture.clear, fixture.clearSync, fixture.signOut, fixture.photoFetch, fixture.completeEmailLink]) mock.mockReset();
   fixture.list.mockImplementation(async (uid: string) => visibleMeals(structuredClone(states.get(uid) ?? emptySync())));
   fixture.state.mockImplementation(async (uid: string) => structuredClone(states.get(uid) ?? emptySync()));
   fixture.sync.mockResolvedValue(undefined);
@@ -143,6 +148,7 @@ beforeEach(() => {
   fixture.discard.mockResolvedValue(undefined);
   fixture.clearSync.mockResolvedValue(undefined);
   fixture.signOut.mockResolvedValue(undefined);
+  fixture.completeEmailLink.mockRejectedValue(new Error("unexpected email-link completion"));
   localStorage.clear(); history.replaceState(null, "", "/");
   Object.defineProperty(navigator, "onLine", { configurable: true, value: false });
   Object.defineProperty(navigator, "locks", { configurable: true, value: { request: async (_name: string, operation: () => Promise<unknown>) => operation() } });
@@ -253,6 +259,57 @@ it("hides the previous account's pending meal names while the next account loads
   fireEvent.click(screen.getByRole("button", { name: "帳戶與安裝" }));
   await screen.findByRole("heading", { name: "尚未確認今日記錄" });
   expect(screen.queryByText(/private-a/)).not.toBeInTheDocument();
+});
+
+it("does not restart Email Link completion when authEpoch remounts Account", async () => {
+  render(<MealJournal initialProviderMode="live" />);
+  await signIn("a");
+  fireEvent.click(screen.getByRole("button", { name: "帳戶與安裝" }));
+  expect(await screen.findByText("a@example.com")).toBeInTheDocument();
+
+  fixture.emailLink = true;
+  localStorage.setItem("kcalcue-login-email", "b@example.com");
+  history.replaceState(null, "", "/?mode=signIn&oobCode=email-link-token");
+  const completion = deferred<void>();
+  fixture.completeEmailLink
+    .mockImplementationOnce(async () => {
+      await completion.promise;
+      fixture.emailLink = false;
+      localStorage.removeItem("kcalcue-login-email");
+      history.replaceState(null, "", "/#today");
+    })
+    .mockRejectedValueOnce(new Error("invalid_link"));
+
+  fireEvent.click(screen.getByRole("button", { name: "重新登入" }));
+  await waitFor(() => expect(fixture.completeEmailLink).toHaveBeenCalledTimes(1));
+  expect(location.search).toContain("oobCode=email-link-token");
+  expect(localStorage.getItem("kcalcue-login-email")).toBe("b@example.com");
+
+  const loadingB = deferred<LocalMeals>();
+  fixture.read.mockImplementation(async (uid: string) =>
+    uid === "b" ? loadingB.promise : emptyCache());
+  await signIn("b");
+  await waitFor(() => expect(fixture.read).toHaveBeenCalledWith("b", "test-tab"));
+
+  const completionCallsAfterAuth = fixture.completeEmailLink.mock.calls.length;
+  expect(completionCallsAfterAuth).toBe(1);
+  expect(screen.queryByText("登入連結無效或已過期，請重新寄送。")).not.toBeInTheDocument();
+  expect(screen.queryByText("a@example.com")).not.toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "Email" })).toHaveValue("b@example.com");
+  expect(location.search).toContain("oobCode=email-link-token");
+  expect(localStorage.getItem("kcalcue-login-email")).toBe("b@example.com");
+
+  await act(async () => {
+    loadingB.resolve(emptyCache());
+    completion.resolve();
+    await completion.promise;
+  });
+  await waitFor(() => expect(screen.getByText("登入成功。草稿需要你確認後才會儲存。")).toBeInTheDocument());
+  expect(fixture.completeEmailLink).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText("登入連結無效或已過期，請重新寄送。")).not.toBeInTheDocument();
+  expect(screen.queryByText("a@example.com")).not.toBeInTheDocument();
+  expect(localStorage.getItem("kcalcue-login-email")).toBeNull();
+  expect(location.search).toBe("");
 });
 
 it("does not show A's recoverable draft after its delayed refresh completes under B", async () => {
