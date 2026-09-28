@@ -13,6 +13,11 @@ export const NUTRITION_RATE_LIMIT: RateLimitConfig = {
   windowMs: 60_000,
 };
 
+export const PHOTO_PREPARATION_RATE_LIMIT: RateLimitConfig = {
+  limit: 12,
+  windowMs: 60_000,
+};
+
 interface Bucket {
   tokens: number;
   updatedAt: number;

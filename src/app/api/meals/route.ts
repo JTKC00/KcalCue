@@ -24,6 +24,7 @@ import { claimMealLookupAttempt, releaseMealLookupAttempt } from "@/lib/server/m
 import { copy } from "@/content/zh-HK";
 import {
   readBoundedRequestBody,
+  RequestBodyTimeoutError,
   RequestBodyTooLargeError,
 } from "@/lib/server/request-body";
 
@@ -116,8 +117,9 @@ export async function POST(request: Request) {
       text = new TextDecoder().decode(bytes);
     } catch (error) {
       throw new HttpError(
-        error instanceof RequestBodyTooLargeError ? 413 : 400,
-        "invalid_request",
+        error instanceof RequestBodyTooLargeError ? 413
+          : error instanceof RequestBodyTimeoutError ? 408 : 400,
+        error instanceof RequestBodyTimeoutError ? "network_timeout" : "invalid_request",
       );
     }
     if (text.length > 150_000) throw new HttpError(413, "invalid_request");

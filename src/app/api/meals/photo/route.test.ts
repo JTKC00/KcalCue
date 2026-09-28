@@ -1,15 +1,18 @@
 import sharp from "sharp";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { clearRateLimitStore, PHOTO_PREPARATION_RATE_LIMIT } from "@/lib/server/rate-limit";
+const account = vi.hoisted(() => ({ uid: "11111111-1111-4111-8111-111111111111" }));
 vi.mock("@/lib/server/auth", async (original) => ({
   ...(await original<typeof import("@/lib/server/auth")>()),
   authenticated: async () => ({
     db: {},
-    user: { id: "11111111-1111-4111-8111-111111111111" },
+    user: { id: account.uid },
   }),
 }));
 import { POST } from "./route";
 
 describe("private photo preparation", () => {
+  beforeEach(() => { clearRateLimitStore(); account.uid = crypto.randomUUID(); });
   afterEach(() => { vi.restoreAllMocks(); });
   it("normalizes orientation, caps dimensions and strips EXIF before persistence", async () => {
     const source = await sharp({
@@ -163,5 +166,76 @@ describe("private photo preparation", () => {
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: { code: "invalid_request" } });
+  });
+
+  it("limits repeated preparation requests by verified account before body parsing", async () => {
+    const parse = vi.spyOn(Response.prototype, "formData");
+    for (let index = 0; index < PHOTO_PREPARATION_RATE_LIMIT.limit; index++) {
+      const response = await POST(new Request("http://localhost/api/meals/photo", {
+        method: "POST", body: "invalid",
+      }));
+      expect(response.status).toBe(400);
+    }
+    const blocked = await POST(new Request("http://localhost/api/meals/photo", {
+      method: "POST", body: "invalid",
+    }));
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get("Retry-After")).toBe("10");
+    expect(parse).toHaveBeenCalledTimes(PHOTO_PREPARATION_RATE_LIMIT.limit);
+  });
+
+  it("rejects a second preparation from the same account while the first body is still arriving", async () => {
+    let finish!: () => void;
+    const firstBody = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        return new Promise<void>((resolve) => {
+          finish = () => { controller.close(); resolve(); };
+        });
+      },
+    }, { highWaterMark: 0 });
+    const first = POST(new Request("http://localhost/api/meals/photo", {
+      method: "POST", body: firstBody, duplex: "half",
+      headers: { "content-type": "multipart/form-data; boundary=test" },
+    } as RequestInit));
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+
+    const second = await POST(new Request("http://localhost/api/meals/photo", {
+      method: "POST", body: "invalid",
+    }));
+    expect(second.status).toBe(429);
+    finish();
+    expect((await first).status).toBe(400);
+  });
+
+  it("bounds simultaneous preparation across separate verified accounts", async () => {
+    const waiting: Array<() => void> = [];
+    const start = async (uid: string) => {
+      account.uid = uid;
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          return new Promise<void>((resolve) => {
+            waiting.push(() => { controller.close(); resolve(); });
+          });
+        },
+      }, { highWaterMark: 0 });
+      const result = POST(new Request("http://localhost/api/meals/photo", {
+        method: "POST", body, duplex: "half",
+        headers: { "content-type": "multipart/form-data; boundary=test" },
+      } as RequestInit));
+      await vi.waitFor(() => expect(waiting.length).toBeGreaterThan(0));
+      return result;
+    };
+    const first = start(crypto.randomUUID());
+    await vi.waitFor(() => expect(waiting).toHaveLength(1));
+    const second = start(crypto.randomUUID());
+    await vi.waitFor(() => expect(waiting).toHaveLength(2));
+    account.uid = crypto.randomUUID();
+    const blocked = await POST(new Request("http://localhost/api/meals/photo", {
+      method: "POST", body: "invalid",
+    }));
+    expect(blocked.status).toBe(429);
+    waiting.forEach((finish) => finish());
+    expect((await (await first)).status).toBe(400);
+    expect((await (await second)).status).toBe(400);
   });
 });

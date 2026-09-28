@@ -103,7 +103,7 @@ export const errorCopy: Record<string, { title: string; body: string }> = {
   },
   rate_limited: {
     title: "暫時太多分析要求",
-    body: "請稍後再試，或先體驗示範餐。",
+    body: "請稍後再試；你亦可以先手動記錄呢餐。",
   },
   analysis_outcome_unknown: {
     title: "重複分析要求已攔截",

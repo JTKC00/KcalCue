@@ -6,6 +6,7 @@ import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { supportsUsdaPortionUnit, UsdaNutritionClient, UsdaNutritionError } from "@/lib/nutrition/usda";
 import { getNutritionApiKey } from "@/lib/server/env";
 import { reserveHourlyUsdaCall } from "@/lib/server/durable-nutrition-quota";
+import { acquirePublicBody } from "@/lib/server/public-body-admission";
 import {
   NUTRITION_RATE_LIMIT,
   clientIpFromHeaders,
@@ -16,6 +17,7 @@ import type { NutritionMatch } from "@/lib/nutrition/types";
 import { elapsedMs, logSafeTiming } from "@/lib/server/timing";
 import {
   readBoundedRequestBody,
+  RequestBodyTimeoutError,
   RequestBodyTooLargeError,
 } from "@/lib/server/request-body";
 import { z } from "zod";
@@ -38,15 +40,27 @@ export async function POST(request: Request) {
     });
   }
 
+  const bodyAdmission = acquirePublicBody("nutrition");
+  if (!bodyAdmission.release) {
+    const limited = rateLimitedJsonResponse(bodyAdmission.retryAfterSeconds);
+    return NextResponse.json(limited.body, {
+      status: limited.status,
+      headers: limited.headers,
+    });
+  }
+
   let body: unknown;
   try {
     const bytes = await readBoundedRequestBody(request, 150_000);
     body = JSON.parse(new TextDecoder().decode(bytes));
   } catch (error) {
     return NextResponse.json(
-      { error: { code: "invalid_request" } },
-      { status: error instanceof RequestBodyTooLargeError ? 413 : 400 },
+      { error: { code: error instanceof RequestBodyTimeoutError ? "network_timeout" : "invalid_request" } },
+      { status: error instanceof RequestBodyTooLargeError ? 413
+        : error instanceof RequestBodyTimeoutError ? 408 : 400 },
     );
+  } finally {
+    bodyAdmission.release();
   }
 
   const parsed = requestSchema.safeParse(body);

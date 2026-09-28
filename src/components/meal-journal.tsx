@@ -54,8 +54,10 @@ function errorText(error: unknown) {
 type JournalNotice = string | { kind: "pending-sync"; message: string };
 const oversizedPhotoNotice = "圖片像素超過 4000 萬，此瀏覽器未能壓縮。請選較低解像度的照片，或移除圖片後手動記錄。";
 const retryablePhotoNotice = "照片壓縮未完成，原相只保留於本次頁面。可重試或移除草稿圖片。";
+const photoRateLimitNotice = "照片處理稍忙，請約 10 秒後重試。原相只保留於本次頁面。";
 function clearPhotoNotice(notice: JournalNotice): JournalNotice {
-  return notice === oversizedPhotoNotice || notice === retryablePhotoNotice ? "" : notice;
+  return notice === oversizedPhotoNotice || notice === retryablePhotoNotice ||
+    notice === photoRateLimitNotice ? "" : notice;
 }
 
 function mealCalorieLabel(record: MealRecord) {
@@ -231,6 +233,13 @@ export function MealJournal({
     const refreshEpoch = refreshGeneration;
     let loadGeneration = 0;
     let loading = false;
+    function clearVolatilePhoto() {
+      photoGeneration.current++;
+      preparedFile.current = null;
+      setPreparing(false);
+      setPhotoFailure(null);
+      setNotice(clearPhotoNotice);
+    }
     async function load(id: string, address: string | null) {
       const generation = ++loadGeneration;
       const accountVersion = accountGeneration.current;
@@ -266,6 +275,11 @@ export function MealJournal({
         } satisfies LocalMeals;
       });
       if (!isCurrentLoad()) return;
+      if (oldId === "guest" && id !== "guest" && local.draft) {
+        // A signed-in account with its own draft does not adopt the guest
+        // draft. Its retry control must not retain the guest's in-memory File.
+        clearVolatilePhoto();
+      }
       if (guestDraft && !local.draft) {
         local.draft = guestDraft;
         await localMeals.write(id, local, tabKey);
@@ -301,6 +315,13 @@ export function MealJournal({
     const subscription = auth
       ? onAuthStateChanged(auth, (user) => {
           if (!active) return;
+          const nextId = user?.uid ?? "guest";
+          if (current.current.userId !== "guest" && nextId !== current.current.userId) {
+            // An uncompressed File exists only in memory. It belongs to the
+            // previous account even when the next account has a draft with
+            // the same meal ID. Invalidate its async preparation immediately.
+            clearVolatilePhoto();
+          }
           // Invalidate old continuations immediately, before the next account's
           // IndexedDB load finishes (including an A -> B -> A transition).
           accountGeneration.current++;
@@ -309,7 +330,7 @@ export function MealJournal({
           if (!loading && user?.uid === current.current.userId) {
             setEmail(user.email);
             void refresh();
-          } else void load(user?.uid ?? "guest", user?.email ?? null);
+          } else void load(nextId, user?.email ?? null);
         })
       : undefined;
     if (!auth) void load("guest", null);
@@ -352,7 +373,7 @@ export function MealJournal({
       accountGeneration.current++;
       cacheEnabled.current = false;
       refreshGeneration.current++;
-      photoGeneration.current++;
+      clearVolatilePhoto();
       current.current = {
         userId: "guest",
         draft: null,
@@ -569,6 +590,9 @@ export function MealJournal({
       }
       const id = current.current.draft?.id;
       if (!id) return;
+      setDraft((value) =>
+        value?.id === id ? { ...value, photo: undefined, photoPath: null } : value,
+      );
       setPreparing(true);
       setPhotoFailure(null);
       setNotice(clearPhotoNotice);
@@ -585,8 +609,11 @@ export function MealJournal({
           if (generation === photoGeneration.current) {
             const tooLarge = error instanceof PhotoPreparationError &&
               error.code === "image_dimensions_too_large";
+            const rateLimited = error instanceof PhotoPreparationError &&
+              error.code === "photo_rate_limited";
             setPhotoFailure(tooLarge ? "too_large" : "retryable");
-            setNotice(tooLarge ? oversizedPhotoNotice : retryablePhotoNotice);
+            setNotice(tooLarge ? oversizedPhotoNotice :
+              rateLimited ? photoRateLimitNotice : retryablePhotoNotice);
           }
         })
         .finally(() => {

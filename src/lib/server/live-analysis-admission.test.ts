@@ -1,8 +1,8 @@
 /** @vitest-environment node */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createLiveAnalysisAdmission } from "./live-analysis-admission";
-import { ANALYZE_RATE_LIMIT, clearRateLimitStore, consumeRateLimit } from "./rate-limit";
+import { createLiveAnalysisAdmission, createUserWorkAdmission } from "./live-analysis-admission";
+import { ANALYZE_RATE_LIMIT, PHOTO_PREPARATION_RATE_LIMIT, clearRateLimitStore, consumeRateLimit } from "./rate-limit";
 
 describe("Live analysis admission", () => {
   beforeEach(() => {
@@ -95,5 +95,18 @@ describe("Live analysis admission", () => {
     for (let ip = 0; ip < 10_000; ip++) consumeRateLimit(`analyze:ip-${ip}`, ANALYZE_RATE_LIMIT);
     expect(acquire("user-a")).toBeNull();
     expect(acquire("user-b")).toBeTypeOf("function");
+  });
+
+  it("keeps photo preparation quota separate from public IP bucket eviction", () => {
+    const acquire = createUserWorkAdmission(PHOTO_PREPARATION_RATE_LIMIT);
+    for (let attempt = 0; attempt < PHOTO_PREPARATION_RATE_LIMIT.limit; attempt++)
+      acquire("photo-user")?.();
+    for (let ip = 0; ip < 10_000; ip++)
+      consumeRateLimit(`analyze:ip-${ip}`, ANALYZE_RATE_LIMIT);
+    expect(acquire("photo-user")).toBeNull();
+    vi.advanceTimersByTime(4_999);
+    expect(acquire("photo-user")).toBeNull();
+    vi.advanceTimersByTime(1);
+    expect(acquire("photo-user")).toBeTypeOf("function");
   });
 });

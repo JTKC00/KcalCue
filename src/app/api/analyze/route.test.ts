@@ -13,6 +13,11 @@ vi.mock("@/lib/server/live-analysis-admission", async importOriginal => ({
   acquireLiveAnalysis: vi.fn(),
 }));
 
+vi.mock("@/lib/server/public-body-admission", async importOriginal => ({
+  ...await importOriginal<typeof import("@/lib/server/public-body-admission")>(),
+  acquirePublicBody: vi.fn(),
+}));
+
 vi.mock("@/lib/server/durable-analysis-quota", () => ({
   reserveDailyLiveAnalysis: vi.fn(),
 }));
@@ -36,6 +41,7 @@ import { FoodVisionError } from "@/lib/providers/food-vision/errors";
 import { demoFoodAnalysis } from "@/lib/providers/food-vision/demo";
 import { ANALYZE_RATE_LIMIT, clearRateLimitStore } from "@/lib/server/rate-limit";
 import { acquireLiveAnalysis, createLiveAnalysisAdmission } from "@/lib/server/live-analysis-admission";
+import { acquirePublicBody, createPublicBodyAdmission } from "@/lib/server/public-body-admission";
 import { reserveDailyLiveAnalysis } from "@/lib/server/durable-analysis-quota";
 import { POST } from "./route";
 import { provenanceMetadata } from "@/test/provenance-fixture";
@@ -94,6 +100,7 @@ describe("POST /api/analyze", () => {
     analyzeImage.mockReset();
     authorize.mockReset().mockResolvedValue({ db: { fixture: true }, user: { id: "test-user" } });
     vi.mocked(acquireLiveAnalysis).mockReset().mockImplementation(createLiveAnalysisAdmission());
+    vi.mocked(acquirePublicBody).mockReset().mockImplementation(createPublicBodyAdmission());
     vi.mocked(reserveDailyLiveAnalysis).mockReset().mockResolvedValue({ allowed: true, retryAfterSeconds: 0 });
     clearRateLimitStore();
     vi.spyOn(Date, "now").mockReturnValue(1_000_000);
@@ -451,6 +458,52 @@ describe("POST /api/analyze", () => {
     expect(body).toEqual({ error: { code: "file_too_large" } });
     expect(analyzeImage).not.toHaveBeenCalled();
     expect(acquireLiveAnalysis).not.toHaveBeenCalled();
+  });
+
+  it("keeps public body reads below the process cap and releases slots after abort", async () => {
+    const controllers = [new AbortController(), new AbortController()];
+    const pulls = [vi.fn(), vi.fn()];
+    const stalled = controllers.map((controller, index) =>
+      POST(new Request("http://localhost/api/analyze", {
+        method: "POST",
+        headers: {
+          "content-type": "multipart/form-data; boundary=test",
+          "x-forwarded-for": `198.51.100.${index + 1}`,
+        },
+        body: new ReadableStream<Uint8Array>({ pull: pulls[index] }, { highWaterMark: 0 }),
+        signal: controller.signal,
+        duplex: "half",
+      } as RequestInit)));
+    await vi.waitFor(() => expect(pulls.every((pull) => pull.mock.calls.length > 0)).toBe(true));
+
+    const blocked = await POST(distinctIpRequest(3));
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get("Retry-After")).toBe("5");
+    expect(authorize).not.toHaveBeenCalled();
+
+    controllers.forEach((controller) => controller.abort());
+    expect((await Promise.all(stalled)).map((response) => response.status)).toEqual([400, 400]);
+    analyzeImage.mockResolvedValue(demoFoodAnalysis);
+    expect((await POST(distinctIpRequest(4))).status).toBe(200);
+  });
+
+  it("holds a fixed public budget when forwarded IP values rotate", async () => {
+    vi.mocked(acquirePublicBody).mockImplementation(createPublicBodyAdmission({
+      maxConcurrent: 2,
+      routes: {
+        analyze: { limit: 3, windowMs: 60_000 },
+        nutrition: { limit: 3, windowMs: 60_000 },
+      },
+    }));
+    analyzeImage.mockResolvedValue(demoFoodAnalysis);
+    for (let index = 0; index < 3; index++) {
+      expect((await POST(distinctIpRequest(index))).status).toBe(200);
+    }
+    const blocked = await POST(distinctIpRequest(3));
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get("Retry-After")).toBe("20");
+    expect(authorize).toHaveBeenCalledTimes(3);
+    expect(analyzeImage).toHaveBeenCalledTimes(3);
   });
 
   it.each([undefined, "8"])(

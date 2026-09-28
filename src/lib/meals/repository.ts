@@ -1,7 +1,7 @@
 import { authorizedFetch, firebaseAuth } from "@/lib/firebase/client";
 import { mealInputSchema, type MealDraft, type MealRecord } from "./types";
 import { readAnalysisProvenance } from "@/lib/domain/analysis-provenance";
-import { changeSyncState, visibleMeals, type PendingMeal } from "./outbox";
+import { changeSyncState, hasCurrentMealVersion, visibleMeals, type PendingMeal } from "./outbox";
 import { resolveCalorieCorrection } from "./calories";
 export class RepositoryError extends Error {
   constructor(
@@ -115,7 +115,11 @@ export class MealRepository {
       await changeSyncState(uid, (state) => {
         if (state.jobs.some((job) => job.record.id === draft.id && job.error))
           throw new RepositoryError("conflict", 409);
-        if (!state.jobs.some((job) => job.id === mutationId))
+        const existing = state.jobs.some((job) => job.id === mutationId);
+        if (state.jobs.some((pending) => pending.record.id === draft.id && pending.kind === "delete") ||
+            (!existing && !hasCurrentMealVersion(state, draft.id, draft.version)))
+          throw new RepositoryError("conflict", 409);
+        if (!existing)
           state.jobs.push({
             id: mutationId,
             kind: "save",
@@ -138,6 +142,8 @@ export class MealRepository {
         throw new RepositoryError("login_required", 401);
       await changeSyncState(uid, (state) => {
         if (state.jobs.some((job) => job.record.id === record.id && job.error))
+          throw new RepositoryError("conflict", 409);
+        if (!hasCurrentMealVersion(state, record.id, record.version, false))
           throw new RepositoryError("conflict", 409);
         state.jobs.push({
           id: crypto.randomUUID(),

@@ -10,6 +10,7 @@ import { newDraft, type MealRecord } from "@/lib/meals/types";
 const fixture = vi.hoisted(() => ({
   callback: null as null | ((user: { uid: string; email: string }) => void),
   list: vi.fn(),
+  write: vi.fn(),
   preparePhoto: vi.fn(),
   sync: vi.fn(),
   syncedAt: {} as Record<string, string | null>,
@@ -41,7 +42,7 @@ vi.mock("@/lib/meals/cache", () => ({
   prepareDraftTabId: async () => "test-tab",
   localMeals: {
     read: async () => ({ records: [], draft: null, syncedAt: fixture.cachedSyncedAt }),
-    write: async () => {},
+    write: fixture.write,
     writeSnapshot: async () => {},
     clear: async () => {},
     listDrafts: async () => [],
@@ -65,6 +66,7 @@ import { MealJournal } from "./meal-journal";
 import { PhotoPreparationError } from "@/lib/meals/photo";
 beforeEach(() => {
   fixture.list.mockReset();
+  fixture.write.mockReset();
   fixture.preparePhoto.mockReset();
   fixture.sync.mockReset();
   fixture.syncedAt = {};
@@ -101,6 +103,36 @@ it("still offers retry for a transient photo preparation failure", async () => {
 
   expect(await screen.findByText(/照片壓縮未完成/)).toBeVisible();
   expect(screen.getByRole("button", { name: "重試照片處理" })).toBeVisible();
+});
+
+it("shows a delayed retry when photo preparation is rate limited", async () => {
+  fixture.list.mockResolvedValue([]);
+  fixture.preparePhoto.mockRejectedValue(new PhotoPreparationError("photo_rate_limited"));
+  render(<MealJournal initialProviderMode="live" />);
+  await act(async () => fixture.callback!({ uid: "a", email: "a@example.com" }));
+  fireEvent.click(screen.getByRole("button", { name: "＋ 新增餐點" }));
+  fireEvent.click(screen.getByRole("button", { name: "選擇測試照片" }));
+
+  expect(await screen.findByText(/照片處理稍忙，請約 10 秒後重試/)).toBeVisible();
+  expect(screen.getByRole("button", { name: "重試照片處理" })).toBeVisible();
+});
+
+it("does not retain the previous draft photo when a valid replacement fails preparation", async () => {
+  fixture.list.mockResolvedValue([]);
+  const previous = new Blob(["previous photo"], { type: "image/jpeg" });
+  fixture.preparePhoto.mockResolvedValueOnce(previous)
+    .mockRejectedValueOnce(new PhotoPreparationError("photo_failed"));
+  render(<MealJournal initialProviderMode="live" />);
+  await act(async () => fixture.callback!({ uid: "a", email: "a@example.com" }));
+  fireEvent.click(screen.getByRole("button", { name: "＋ 新增餐點" }));
+  fireEvent.click(screen.getByRole("button", { name: "選擇測試照片" }));
+  await waitFor(() => expect(fixture.write.mock.calls.some(([, state]) =>
+    state.draft?.photo === previous,
+  )).toBe(true));
+
+  fireEvent.click(screen.getByRole("button", { name: "選擇測試照片" }));
+  expect(await screen.findByText(/照片壓縮未完成/)).toBeVisible();
+  await waitFor(() => expect(fixture.write.mock.lastCall?.[1]?.draft?.photo).toBeUndefined());
 });
 it("clears the pixel-limit notice after selecting a smaller photo", async () => {
   fixture.list.mockResolvedValue([]);

@@ -1172,6 +1172,81 @@ test("AI failure keeps the selected photo and a double tap starts one new analys
   expect(backend.saves).toHaveLength(0);
 });
 
+test("rejecting a replacement cannot restore an earlier photo after its preparation finishes", async ({ page, context }, testInfo) => {
+  const backend = cloud();
+  await backend.install(context);
+  await page.addInitScript(() => {
+    const decode = window.createImageBitmap.bind(window);
+    const encode = HTMLCanvasElement.prototype.toBlob;
+    HTMLCanvasElement.prototype.toBlob = function (callback, type, quality) {
+      return encode.call(this, (blob) => {
+        callback(blob);
+        window.setTimeout(() => {
+          (window as Window & { __photoEncodeSettled?: boolean }).__photoEncodeSettled = true;
+        }, 0);
+      }, type, quality);
+    };
+    window.createImageBitmap = (source: ImageBitmapSource, options?: ImageBitmapOptions) =>
+      new Promise<ImageBitmap>((resolve, reject) => {
+        (window as Window & { __releasePhotoDecode?: () => void }).__releasePhotoDecode = () => {
+          void decode(source, options).then((bitmap) => {
+            (window as Window & { __photoDecodeFinished?: boolean }).__photoDecodeFinished = true;
+            resolve(bitmap);
+          }, reject);
+        };
+      });
+  });
+  await page.goto("/");
+  await login(page);
+  await page.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  const input = page.locator('input[type="file"]').nth(1);
+  await input.setInputFiles(path.join(testInfo.project.testDir, "fixtures/hk-milk-tea.jpg"));
+  await expect.poll(() => page.evaluate(() =>
+    !!(window as Window & { __releasePhotoDecode?: () => void }).__releasePhotoDecode,
+  )).toBe(true);
+  await input.setInputFiles({
+    name: "oversized.jpg", mimeType: "image/jpeg", buffer: Buffer.alloc(10 * 1024 * 1024 + 1),
+  });
+  await expect(page.getByRole("img", { name: "已選擇的餐點相片預覽" })).toHaveCount(0);
+  await page.evaluate(() =>
+    (window as Window & { __releasePhotoDecode?: () => void }).__releasePhotoDecode?.(),
+  );
+  await expect.poll(() => page.evaluate(() =>
+    (window as Window & { __photoDecodeFinished?: boolean }).__photoDecodeFinished === true,
+  )).toBe(true);
+  await expect.poll(() => page.evaluate(() =>
+    (window as Window & { __photoEncodeSettled?: boolean }).__photoEncodeSettled === true,
+  )).toBe(true);
+  const persistedPhotoSize = await page.evaluate(async (uid) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const open = indexedDB.open("kcalcue-private");
+      open.onsuccess = () => resolve(open.result);
+      open.onerror = () => reject(open.error);
+    });
+    try {
+      return await new Promise<number>((resolve, reject) => {
+        const tx = db.transaction("accounts", "readonly");
+        let size = 0;
+        const cursor = tx.objectStore("accounts").openCursor();
+        cursor.onsuccess = () => {
+          const row = cursor.result;
+          if (!row) return;
+          const key = row.key;
+          const owned = key === uid || (Array.isArray(key) && key[0] === "draft" && key[1] === uid);
+          if (owned) size = Math.max(size, row.value?.draft?.photo?.size ?? 0);
+          row.continue();
+        };
+        tx.oncomplete = () => resolve(size);
+        tx.onerror = () => reject(tx.error);
+      });
+    } finally { db.close(); }
+  }, userId);
+  expect(persistedPhotoSize).toBe(0);
+  await page.reload();
+  await expect(page.getByRole("img", { name: "已選擇的餐點相片預覽" })).toHaveCount(0);
+  expect(backend.saves).toHaveLength(0);
+});
+
 test("refresh during an unfinished analysis restores the durable photo draft", async ({ page, context }, testInfo) => {
   const backend = cloud();
   await backend.install(context);

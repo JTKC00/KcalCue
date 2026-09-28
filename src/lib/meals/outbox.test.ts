@@ -297,6 +297,50 @@ describe("durable offline meal outbox", () => {
     ).toHaveLength(1);
     expect((await repository.state()).jobs).toHaveLength(0);
   });
+  it("accepts an identical queued save retry without duplicating its job", async () => {
+    Object.defineProperty(navigator, "onLine", { value: false });
+    const input = draft();
+    const mutationId = crypto.randomUUID();
+    const first = await repository.save(input, mutationId);
+    const retry = await new MealRepository().save(input, mutationId);
+    expect(retry).toEqual(first);
+    expect((await repository.state()).jobs).toHaveLength(1);
+    expect((await repository.state()).jobs[0].id).toBe(mutationId);
+    expect(fixture.fetch).not.toHaveBeenCalled();
+  });
+  it("rejects a stale second-tab delete after an offline edit", async () => {
+    Object.defineProperty(navigator, "onLine", { value: false });
+    const secondTab = new MealRepository();
+    const first = await repository.save(draft(), crypto.randomUUID());
+    const edited = await repository.save({ ...first, time: "13:00" }, crypto.randomUUID());
+    await expect(secondTab.delete(first)).rejects.toMatchObject({
+      code: "conflict", status: 409,
+    });
+    expect((await repository.state()).jobs).toHaveLength(2);
+    expect(await secondTab.list()).toEqual([edited]);
+    expect(fixture.fetch).not.toHaveBeenCalled();
+  });
+  it("rejects a stale second-tab save after an offline delete", async () => {
+    Object.defineProperty(navigator, "onLine", { value: false });
+    const secondTab = new MealRepository();
+    const first = await repository.save(draft(), crypto.randomUUID());
+    await repository.delete(first);
+    await expect(secondTab.save({ ...first, time: "13:00" }, crypto.randomUUID()))
+      .rejects.toMatchObject({ code: "conflict", status: 409 });
+    expect((await repository.state()).jobs.map((job) => job.kind)).toEqual(["save", "delete"]);
+    expect(await secondTab.list()).toEqual([]);
+    expect(fixture.fetch).not.toHaveBeenCalled();
+  });
+  it("rejects an older save retry after deletion has been queued", async () => {
+    const input = draft(), mutationId = crypto.randomUUID();
+    const first = await repository.save(input, mutationId);
+    await repository.delete(first);
+    await expect(new MealRepository().save(input, mutationId)).rejects.toMatchObject({
+      code: "conflict", status: 409,
+    });
+    expect((await repository.state()).jobs.map((job) => job.kind)).toEqual(["save", "delete"]);
+    expect(await repository.list()).toEqual([]);
+  });
   it("retains conflicts, blocks dependent edits and still syncs unrelated meals", async () => {
     const first = await repository.save(draft(), crypto.randomUUID());
     await repository.save({ ...first, time: "15:00" }, crypto.randomUUID());
