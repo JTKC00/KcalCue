@@ -81,7 +81,6 @@ vi.mock("./pwa-controls", () => ({ PwaControls: ({ beforeUpdate }: { beforeUpdat
   fixture.beforeUpdate = beforeUpdate;
   return null;
 } }));
-vi.mock("./firebase-account", () => ({ Account: () => null }));
 import { MealJournal } from "./meal-journal";
 import { RepositoryError } from "@/lib/meals/repository";
 
@@ -225,6 +224,35 @@ it("ignores a delayed B account load when authentication has returned to A", asy
   await act(async () => { loadingB.resolve(emptyCache()); });
   await screen.findByRole("heading", { name: "meal-a" });
   expect(screen.queryByRole("heading", { name: "meal-b" })).not.toBeInTheDocument();
+});
+
+it("hides the previous account's pending meal names while the next account loads", async () => {
+  conflict(record("a", "private-a"));
+  render(<MealJournal initialProviderMode="live" />);
+  await signIn("a");
+  await screen.findByRole("button", { name: "保留修改為新餐點草稿" });
+  fireEvent.click(screen.getByRole("button", { name: "帳戶與安裝" }));
+  expect(screen.getByText("a@example.com")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "重新登入" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Email" }), {
+    target: { value: "private-a@example.com" },
+  });
+
+  const loadingB = deferred<LocalMeals>();
+  fixture.read.mockImplementation(async (uid: string) =>
+    uid === "b" ? loadingB.promise : emptyCache());
+  await signIn("b");
+  await waitFor(() => expect(fixture.read).toHaveBeenCalledWith("b", "test-tab"));
+  expect(screen.getByText("正在讀取記錄…")).toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "Email" })).toHaveValue("");
+  expect(screen.queryByText(/private-a/)).not.toBeInTheDocument();
+  expect(screen.queryByText("a@example.com")).not.toBeInTheDocument();
+
+  await act(async () => { loadingB.resolve(emptyCache()); });
+  expect(screen.getByRole("textbox", { name: "Email" })).toHaveValue("");
+  fireEvent.click(screen.getByRole("button", { name: "帳戶與安裝" }));
+  await screen.findByRole("heading", { name: "尚未確認今日記錄" });
+  expect(screen.queryByText(/private-a/)).not.toBeInTheDocument();
 });
 
 it("does not show A's recoverable draft after its delayed refresh completes under B", async () => {

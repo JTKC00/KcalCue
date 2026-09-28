@@ -8,7 +8,10 @@ import {
   sendEmailLink,
 } from "@/lib/firebase/client";
 
-export function Account({ onDone }: { onDone: () => void }) {
+export function Account({ onDone, suppressStoredEmail = false }: {
+  onDone: () => void;
+  suppressStoredEmail?: boolean;
+}) {
   const [email, setEmail] = useState("");
   const [link, setLink] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -17,16 +20,18 @@ export function Account({ onDone }: { onDone: () => void }) {
   const [now, setNow] = useState(0);
   const completing = useRef(false);
   const done = useRef(onDone);
+  const suppressStoredEmailOnMount = useRef(suppressStoredEmail);
   useEffect(() => {
     done.current = onDone;
   }, [onDone]);
   useEffect(() => {
     // Browser-only URL/storage hydration must happen after mounting.
+    const isEmailLink = hasEmailLink();
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLink(hasEmailLink());
+    setLink(isEmailLink);
     const address = localStorage.getItem("kcalcue-login-email") ?? "";
-    setEmail(address);
-    if (hasEmailLink() && address && !completing.current) {
+    setEmail(isEmailLink || !suppressStoredEmailOnMount.current ? address : "");
+    if (isEmailLink && address && !completing.current) {
       completing.current = true;
       setBusy(true);
       void completeEmailLink(address)

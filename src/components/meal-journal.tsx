@@ -897,7 +897,7 @@ export function MealJournal({
       </header>
       <div className="journal-status" role="status">
         {online
-          ? syncedAt
+          ? ready && syncedAt
             ? `上次同步：${new Date(syncedAt).toLocaleString("zh-HK")}`
             : "連線中 · 尚未同步"
           : "離線中 · 可新增、修改及刪除，重連後自動同步"}
@@ -924,7 +924,7 @@ export function MealJournal({
           ))}
         </section>
       )}
-      {!!pending.length && (
+      {ready && pending.length > 0 && (
         <section className="journal-card">
           <p>
             {pending.length} 項修改待同步{syncing ? " · 同步中…" : ""}
@@ -971,7 +971,7 @@ export function MealJournal({
         </section>
       )}
       <PwaControls
-        visible={account}
+        visible={account && ready}
         beforeUpdate={async () => {
           if (busyRef.current) throw new Error("Save in progress");
           const scope = operationScope();
@@ -991,7 +991,8 @@ export function MealJournal({
       {account ? (
         <main className="journal-main">
           <h1>帳戶與資料</h1>
-          {email && !reauth ? (
+          {!ready && <p role="status">正在讀取記錄…</p>}
+          {ready && email && !reauth ? (
             <section className="journal-card">
               <p>{email}</p>
               <button
@@ -1018,6 +1019,8 @@ export function MealJournal({
             </section>
           ) : (
             <Account
+              key={authEpoch}
+              suppressStoredEmail={!ready}
               onDone={() => {
                 setAccount(false);
                 setReauth(false);
