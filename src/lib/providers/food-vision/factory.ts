@@ -6,7 +6,14 @@ import { getOpenAIServerConfig, readGeminiServerConfig } from "@/lib/server/env"
 import type { FoodVisionProvider } from "./types";
 
 export function getFoodVisionProviderMode(): FoodVisionProvider["mode"] {
-  return createFoodVisionProvider().mode;
+  try {
+    return createFoodVisionProvider().mode;
+  } catch (error) {
+    // A rejected RC provider is still a live path. The journal stays available;
+    // analyze keeps the fail-closed error instead of silently using Demo.
+    if (error instanceof FoodVisionError) return "live";
+    throw error;
+  }
 }
 
 export function createFoodVisionProvider(): FoodVisionProvider {

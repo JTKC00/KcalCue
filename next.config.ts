@@ -33,6 +33,7 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   output: process.env.KCALCUE_STANDALONE === "1" ? "standalone" : undefined,
   poweredByHeader: false,
+  reactStrictMode: true,
   serverExternalPackages: ["@google/genai"],
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];

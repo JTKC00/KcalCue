@@ -868,13 +868,16 @@ describe("food vision provider selection", () => {
     vi.stubEnv("OPENAI_API_KEY", "test-only-key");
     vi.stubEnv("GEMINI_API_KEY", "");
     vi.stubEnv("KCALCUE_VISION_PROVIDER", "gemini");
+    expect(getFoodVisionProviderMode()).toBe("live");
     expect(() => createFoodVisionProvider()).toThrowError(expect.objectContaining({ code: "invalid_key" }));
 
     vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
     vi.stubEnv("GEMINI_MODEL", "gemini-3.5-flash");
+    expect(getFoodVisionProviderMode()).toBe("live");
     expect(() => createFoodVisionProvider()).toThrowError(expect.objectContaining({ code: "model_unavailable" }));
 
     vi.stubEnv("KCALCUE_VISION_PROVIDER", "claude");
+    expect(getFoodVisionProviderMode()).toBe("live");
     expect(() => createFoodVisionProvider()).toThrowError(expect.objectContaining({ code: "model_unavailable" }));
   });
 });
