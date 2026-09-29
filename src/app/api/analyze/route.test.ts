@@ -197,6 +197,20 @@ describe("POST /api/analyze", () => {
     );
   });
 
+  it("ignores a client request to choose the vision provider", async () => {
+    analyzeImage.mockResolvedValueOnce(demoFoodAnalysis);
+    const form = new FormData();
+    form.set("image", new File([Uint8Array.from([0xff, 0xd8, 0xff, 0xd9])], "meal.jpg", { type: "image/jpeg" }));
+    form.set("provider", "gemini");
+    form.set("model", "gemini-3.8-flash");
+    const response = await POST(new Request("http://localhost/api/analyze", { method: "POST", body: form }));
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.mode).toBe("live");
+    expect(analyzeImage).toHaveBeenCalledOnce();
+    expect(JSON.stringify(body)).not.toContain("gemini");
+  });
+
   it("passes a validated attempt fingerprint and blocks a duplicate before the paid provider", async () => {
     const id = "9cded041-a32e-4f85-8d88-ff4ec9913ac7";
     analyzeImage.mockResolvedValue(demoFoodAnalysis);

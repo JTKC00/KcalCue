@@ -69,6 +69,7 @@ import sharp, { type Sharp } from "sharp";
 import { crc32 } from "node:zlib";
 import { foodAnalysisJsonSchema } from "@/lib/domain/food-analysis";
 import { DemoFoodVisionProvider, demoFoodAnalysis } from "./demo";
+import { GeminiFoodVisionProvider } from "./gemini";
 import {
   OPENAI_ABORT_TIMEOUT_MS,
   OPENAI_HTTP_TIMEOUT_MS,
@@ -839,13 +840,41 @@ describe("food vision provider selection", () => {
 
   it("uses Demo when the OpenAI key is missing", () => {
     vi.stubEnv("OPENAI_API_KEY", "");
+    vi.stubEnv("KCALCUE_VISION_PROVIDER", "");
     expect(createFoodVisionProvider()).toBeInstanceOf(DemoFoodVisionProvider);
     expect(getFoodVisionProviderMode()).toBe("demo");
   });
 
   it("uses OpenAI when a key is configured", () => {
     vi.stubEnv("OPENAI_API_KEY", "test-only-key");
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    vi.stubEnv("KCALCUE_VISION_PROVIDER", "");
     expect(createFoodVisionProvider()).toBeInstanceOf(OpenAIFoodVisionProvider);
     expect(getFoodVisionProviderMode()).toBe("live");
+  });
+
+  it("selects Gemini only when the RC provider is explicit and the key is present", () => {
+    vi.stubEnv("OPENAI_API_KEY", "test-only-key");
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    vi.stubEnv("GEMINI_MODEL", "gemini-3.8-flash");
+    vi.stubEnv("KCALCUE_VISION_PROVIDER", "gemini");
+    const provider = createFoodVisionProvider();
+    expect(provider).toBeInstanceOf(GeminiFoodVisionProvider);
+    expect(provider.id).toBe("gemini");
+    expect(getFoodVisionProviderMode()).toBe("live");
+  });
+
+  it("fails closed for Gemini without a key, a different model, or an unknown provider", () => {
+    vi.stubEnv("OPENAI_API_KEY", "test-only-key");
+    vi.stubEnv("GEMINI_API_KEY", "");
+    vi.stubEnv("KCALCUE_VISION_PROVIDER", "gemini");
+    expect(() => createFoodVisionProvider()).toThrowError(expect.objectContaining({ code: "invalid_key" }));
+
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    vi.stubEnv("GEMINI_MODEL", "gemini-3.5-flash");
+    expect(() => createFoodVisionProvider()).toThrowError(expect.objectContaining({ code: "model_unavailable" }));
+
+    vi.stubEnv("KCALCUE_VISION_PROVIDER", "claude");
+    expect(() => createFoodVisionProvider()).toThrowError(expect.objectContaining({ code: "model_unavailable" }));
   });
 });

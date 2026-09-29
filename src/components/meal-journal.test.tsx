@@ -397,3 +397,34 @@ it("never renders an older account's late cache result after switching users", a
   ).not.toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "meal-b" })).toBeVisible();
 });
+
+it("shows the corrected History meal and the original AI suggestion separately", async () => {
+  const original = createEditableFoodItems([{
+    ...demoFoodAnalysis.foods[1],
+    displayName: "烤雞肉",
+    normalizedName: "grilled chicken",
+    portionMin: 280,
+    portionMax: 420,
+  }])[0];
+  const corrected: MealRecord = {
+    ...newDraft(), userId: "a", mode: "live",
+    analysis: {
+      ...demoFoodAnalysis,
+      foods: [{ ...demoFoodAnalysis.foods[1], displayName: "烤雞肉", normalizedName: "grilled chicken", portionMin: 280, portionMax: 420 }],
+    },
+    originalItems: [original],
+    items: [{ ...original, displayName: "三文魚", normalizedName: "三文魚", portionMin: 180, portionMax: 180 }],
+    updatedAt: new Date().toISOString(), mutationId: crypto.randomUUID(),
+  };
+  fixture.list.mockResolvedValue([corrected]);
+  render(<MealJournal initialProviderMode="live" />);
+  await act(async () => fixture.callback!({ uid: "a", email: "a@example.com" }));
+  fireEvent.click(screen.getByRole("button", { name: "歷史" }));
+  const meal = screen.getByRole("article");
+  expect(within(meal).getByRole("heading", { name: "三文魚" })).toBeVisible();
+  expect(meal).not.toHaveTextContent("你食了");
+  fireEvent.click(within(meal).getByText("查看原始 AI 辨識"));
+  const details = within(meal).getByText("查看原始 AI 辨識").closest("details");
+  expect(details).toHaveTextContent("烤雞肉：約 280–420 克 (g)");
+  expect(details).not.toHaveTextContent("三文魚");
+});

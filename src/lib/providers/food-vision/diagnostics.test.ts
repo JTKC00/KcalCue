@@ -120,5 +120,19 @@ describe("food-vision diagnostics", () => {
       requestedModel: null,
       reportedModel: "gpt-6-sol",
     });
+    logFoodVisionUsage({
+      requestedModel: "gemini-3.8-flash",
+      reportedModel: "gemini-2.5-flash",
+      analysisVersion: "food-vision-v2",
+      foodVisionMs: 1,
+      usage: { input_tokens: 3, output_tokens: 2, total_tokens: 9 },
+    });
+    expect(spy.mock.calls[1]?.[1]).toMatchObject({
+      requestedModel: "gemini-3.8-flash",
+      reportedModel: null,
+      inputTokens: 3,
+      outputTokens: 2,
+      totalTokens: 9,
+    });
   });
 });

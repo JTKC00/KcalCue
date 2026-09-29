@@ -1,5 +1,6 @@
 export type FoodVisionFailureStage =
   | "openai_request"
+  | "gemini_request"
   | "image_prepare"
   | "empty_response"
   | "parse_json"
@@ -11,6 +12,7 @@ export interface FoodVisionDiagnostic {
   errorClass: string;
   httpStatus: number | null;
   openaiErrorCode: string | null;
+  providerErrorCode?: string | null;
   safeMessage: string;
   model: string;
   imageMimeType: string;
@@ -34,7 +36,14 @@ export interface FoodVisionUsage {
 const REDACTED = "[redacted]";
 
 export function sanitizeDiagnosticMessage(message: string): string {
-  return message
+  let sanitized = message;
+  for (const name of ["OPENAI_API_KEY", "GEMINI_API_KEY", "NUTRITION_API_KEY"]) {
+    const secret = process.env[name];
+    if (typeof secret === "string" && secret.length >= 8) {
+      sanitized = sanitized.split(secret).join(REDACTED);
+    }
+  }
+  return sanitized
     .replace(/sk-[0-9A-Za-z_-]{8,}/g, REDACTED)
     .replace(/AIza[0-9A-Za-z_-]{8,}/g, REDACTED)
     .replace(/Bearer\s+\S+/gi, `Bearer ${REDACTED}`)
@@ -129,6 +138,9 @@ export function logFoodVisionDiagnostic(diagnostic: FoodVisionDiagnostic): void 
   if (diagnostic.foodVisionMs !== undefined) {
     safeFields.foodVisionMs = diagnostic.foodVisionMs;
   }
+  if (diagnostic.providerErrorCode) {
+    safeFields.providerErrorCode = diagnostic.providerErrorCode;
+  }
   console.error("[kcalcue:food-vision]", safeFields);
 }
 
@@ -136,7 +148,7 @@ function safeUsageModel(value: unknown): string | null {
   if (typeof value !== "string") return null;
   // Log only known public families, not arbitrary provider/config strings or
   // fine-tuned model IDs that may contain private account identifiers.
-  const match = /^(gpt-(?:5\.6-(?:luna|terra|sol)|6-(?:luna|sol|astra)))(?:-\d{4}-\d{2}-\d{2})?$/.exec(value);
+  const match = /^(gpt-(?:5\.6-(?:luna|terra|sol)|6-(?:luna|sol|astra))|gemini-3\.8-flash)(?:-\d{4}-\d{2}-\d{2})?$/.exec(value);
   return match?.[1] ?? null;
 }
 

@@ -120,6 +120,49 @@ describe("durable offline meal outbox", () => {
       ? { ...job, record: { ...job.record, analysisProvenance: { ...provenance, requestedModel: "replacement" } } } : job) }));
     expect((await repository.list())[0].analysisProvenance).toEqual(provenance);
   });
+  it("reloads the corrected meal while the original Gemini analysis stays unchanged", async () => {
+    const original = createEditableFoodItems([{
+      ...demoFoodAnalysis.foods[1],
+      displayName: "烤雞肉",
+      normalizedName: "grilled chicken",
+    }])[0];
+    const corrected = {
+      ...original,
+      displayName: "三文魚",
+      normalizedName: "三文魚",
+      nutritionMatch: new LocalNutritionProvider().resolve({
+        ...original,
+        displayName: "三文魚",
+        normalizedName: "三文魚",
+        portionMin: original.portionMin ?? 140,
+        portionMax: original.portionMax ?? 180,
+      }),
+    };
+    const analysis = {
+      ...demoFoodAnalysis,
+      foods: [{ ...demoFoodAnalysis.foods[1], displayName: "烤雞肉", normalizedName: "grilled chicken" }],
+    };
+    const gemini = {
+      ...provenance,
+      provider: "gemini" as const,
+      requestedModel: "gemini-3.8-flash",
+      reportedModel: "gemini-3.8-flash",
+    };
+    await repository.save({
+      ...draft(),
+      mode: "live",
+      analysis,
+      analysisProvenance: gemini,
+      items: [corrected],
+      originalItems: [original],
+    }, crypto.randomUUID());
+    const reloaded = (await repository.list())[0];
+    expect(reloaded.items[0].displayName).toBe("三文魚");
+    expect(reloaded.items[0].nutritionMatch?.profile?.canonicalName).toBe("salmon");
+    expect(reloaded.analysis?.foods[0].displayName).toBe("烤雞肉");
+    expect(reloaded.originalItems[0].displayName).toBe("烤雞肉");
+    expect(reloaded.analysisProvenance?.provider).toBe("gemini");
+  });
   it("keeps a legacy cloud baseline unknown despite newly supplied pending metadata", async () => {
     const first = await repository.save({ ...draft(), mode: "live", analysis: demoFoodAnalysis }, crypto.randomUUID());
     const { analysisProvenance: _removed, ...legacy } = first;

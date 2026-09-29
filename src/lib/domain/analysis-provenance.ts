@@ -6,7 +6,7 @@ export const FOOD_VISION_ANALYSIS_VERSION = "food-vision-v2";
 
 const modelNameSchema = z.string().min(1).max(200).refine((value) => value.trim().length > 0);
 export const analysisProvenanceMetadataSchema = z.object({
-  provider: z.enum(["openai", "demo"]),
+  provider: z.enum(["openai", "gemini", "demo"]),
   requestedModel: modelNameSchema.nullable(),
   reportedModel: modelNameSchema.nullable(),
   // An alias or SDK response model is not evidence of model weights/version.
@@ -31,6 +31,7 @@ export function readAnalysisProvenance(
 ): AnalysisProvenance | null {
   const parsed = analysisProvenanceMetadataSchema.safeParse(value);
   if (!parsed.success || mode === "manual") return null;
-  if (mode && parsed.data.provider !== (mode === "demo" ? "demo" : "openai")) return null;
+  if (mode === "demo" && parsed.data.provider !== "demo") return null;
+  if (mode === "live" && parsed.data.provider !== "openai" && parsed.data.provider !== "gemini") return null;
   return { ...parsed.data, source: "client-reported" };
 }

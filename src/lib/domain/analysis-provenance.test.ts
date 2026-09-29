@@ -20,9 +20,12 @@ describe("analysis provenance is a bounded client claim, not attestation", () =>
       .toMatchObject({ reportedModel: null, modelVersion: null });
     expect(readAnalysisProvenance(provenance, "manual")).toBeNull();
     expect(readAnalysisProvenance(provenance, "demo")).toBeNull();
-    const demo = { ...provenanceMetadata, provider: "demo", requestedModel: null, reportedModel: null };
+    const demo = { ...provenanceMetadata, provider: "demo" as const, requestedModel: null, reportedModel: null };
     expect(readAnalysisProvenance(demo, "demo")).toMatchObject({ provider: "demo", modelVersion: null });
     expect(readAnalysisProvenance({ ...demo, reportedModel: "pretend-model" })).toBeNull();
+    const gemini = { ...provenanceMetadata, provider: "gemini" as const, requestedModel: "gemini-3.8-flash", reportedModel: "gemini-3.8-flash" };
+    expect(readAnalysisProvenance(gemini, "live")).toMatchObject({ provider: "gemini", source: "client-reported" });
+    expect(readAnalysisProvenance(gemini, "demo")).toBeNull();
     expect(boundedModelName(undefined)).toBeNull();
     expect(boundedModelName(" ")).toBeNull();
     expect(boundedModelName("x".repeat(201))).toBeNull();

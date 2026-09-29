@@ -21,6 +21,7 @@
     "test:firestore": "vitest run --config vitest.firestore.config.mts"
   },
   "dependencies": {
+    "@google/genai": "2.24.0",
     "firebase": "12.18.0",
     "firebase-admin": "14.3.0",
     "next": "^16.3.0",
