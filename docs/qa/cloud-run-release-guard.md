@@ -1,14 +1,60 @@
 # Cloud Run private-trial release guard
 
-This PR adds source tooling only. It does not run Cloud Build, change a Cloud Run service, modify Firebase, or authorize a production release. The CLI requires an explicit private config outside the repository, a project labelled `kcalcue=private-trial`, and a separately authenticated `gcloud` operator. The checked-in example contains placeholders only.
+This change is source tooling only. It does not run Cloud Build, create a Cloud Run revision, change traffic, modify Firebase, or authorize a production release. The CLI requires an explicit private config outside the repository, a project labelled `kcalcue=private-trial`, and a separately authenticated `gcloud` operator. The checked-in example contains placeholders only.
 
-`npm run trial:cloud -- preflight --config /absolute/private/config.json` is read-only. `build`, `deploy`, `pause`, `resume`, and `rollback` are live mutations and require a separate authorized release decision. Do not run them from CI. The release operator must verify the exact merged source tree, image digest, build-time Firebase web config, current service/account allowlist, analysis switch, and previous revision before a deployment. Keep rollback and QA acceptance evidence with that release.
+`deploy` is rejected before any `gcloud` call. It no longer creates a revision and then sends production traffic to it. Use the split sequence below. Do not run live mutations from CI.
 
-## Source safety properties
+## Release sequence
 
-- An existing service must have the expected Firebase project, the same account allowlist as the private config, and an explicit `true` or `false` analysis switch. Missing or unexpected state stops before `run deploy`; this prevents a stale two-account config from silently removing a QA account or an unknown switch from being changed without review.
-- Existing deployments use `--update-env-vars` and `--update-secrets`. Local `gcloud run deploy --help` states `--env-vars-file` removes all existing variables; the first deployment alone may use it because there is no environment to preserve.
-- Deploy/pause/resume create a revision with `--no-traffic`, verify its account list, project, analysis switch, and Ready state, then explicitly route 100% and read back the serving traffic. Rollback first checks both the currently serving and target revisions against the expected project/account list, plus the target's explicit analysis switch and Ready condition, before moving traffic; it then reads back Ready 100% traffic before reporting PASS. This cannot prove that an older application writer is schema-compatible, so the operator must separately verify the target image and migration/rollback plan. Any uncertain failure stops; the CLI does not retry.
-- The first service deployment starts with analysis paused. Existing deployments preserve the current analysis switch and other runtime environment/secret entries. Changing the allowlist is intentionally a separate reviewed operation.
+1. `npm run trial:cloud -- preflight --config /absolute/private/config.json`  
+   Read-only check of the project label, billing, required APIs, the selected OpenAI secret version, and, when `nutritionSecretVersion` is set, that `kcalcue-nutrition` version. A missing or non-`ENABLED` nutrition version stops preflight.
+2. `npm run trial:cloud -- build --config /absolute/private/config.json --tag <immutable-tag>`  
+   Submits Cloud Build for that tag. `latest` is rejected.
+3. `npm run trial:cloud -- stage --config /absolute/private/config.json --tag <verified-tag>`  
+   Creates one candidate revision at zero production traffic. `stage` does not call `update-traffic`. The command reports the new revision name and the revision that still serves 100%.
+4. Candidate inspection and hosted smoke against that zero-traffic revision.
+5. Explicit owner approval of that exact revision.
+6. `npm run trial:cloud -- promote --config /absolute/private/config.json --revision <candidate-revision>`  
+   Re-reads the named candidate and the current single production revision. Only then moves production traffic to the candidate at 100% and reads the service back.
+7. Production smoke.
+8. `npm run trial:cloud -- rollback --config /absolute/private/config.json --revision <previous-revision>` if the smoke fails.
 
-Fake-`gcloud` tests cover new/existing services, preserving the allowlist and secret/env update modes, no-traffic routing, switch mismatch, rollback readback, and project/auth-domain guards. These tests do not prove current production IAM, secret state, Cloud Run API responses, or a real release. No live mutation was run for this PR.
+`pause` and `resume` are not release steps. They still publish an analysis-switch revision at 100% after checks. They are safe to keep only because they no longer inherit the service template: they pin `--image` to the currently serving revision's digest, replace the full environment and secret set, and verify the new revision before `update-traffic`.
+
+## Production configuration
+
+RC1 production remains OpenAI:
+
+- `KCALCUE_VISION_PROVIDER=openai`
+- `OPENAI_MODEL=gpt-5.6-luna`
+- required secret mapping `OPENAI_API_KEY=kcalcue-openai:<openaiSecretVersion>`
+
+`openaiSecretVersion` stays required. Optional `nutritionSecretVersion` is the only way to keep the USDA FoodData Central fallback. `getNutritionApiKey()` reads `NUTRITION_API_KEY`. When the field is set, the production secret set is exactly:
+
+- `OPENAI_API_KEY=kcalcue-openai:<openaiSecretVersion>`
+- `NUTRITION_API_KEY=kcalcue-nutrition:<nutritionSecretVersion>`
+
+When the field is omitted, the production secret set is exactly the OpenAI mapping. The secret name is the fixed reviewed name `kcalcue-nutrition`. Gemini secrets stay forbidden. Any other secret stays forbidden. The same declared set is what `stage`, `promote`, `pause`, `resume`, and `rollback` write or accept.
+
+Gemini stays RC-only. A candidate must not contain `GEMINI_MODEL` or a `GEMINI_API_KEY` secret mapping. `stage` does not inherit the service template. Local `gcloud run deploy --help` states that `--env-vars-file` removes every existing environment variable before adding the file, and `--set-secrets` removes every existing secret before adding the listed mapping. `stage` always passes both, including for an existing service. The file sets the Firebase web config, the account allowlist, the approved analysis switch, `OPENAI_MODEL=gpt-5.6-luna`, and `KCALCUE_VISION_PROVIDER=openai`. No Gemini key is written. Secret values are never accepted on the command line or printed. Full replacement still applies: an undeclared template secret, including a previously mounted nutrition secret, is removed rather than copied.
+
+The approved analysis switch is read from the revision that currently serves 100%, not from the service template. The first service starts paused (`KCALCUE_ANALYSIS_ENABLED=false`). If that serving revision's Firebase project or account allowlist differs from the private config, or its analysis switch is not exactly `true` or `false`, `stage` stops before `run deploy`.
+
+## Fail-closed checks
+
+After `stage` creates the candidate, the CLI reads that revision back and stops without `update-traffic` unless all of the following are true:
+
+- the image is the immutable Artifact Registry digest just resolved for the tag;
+- the revision is Ready;
+- the Firebase project and account allowlist match the private config;
+- `KCALCUE_ANALYSIS_ENABLED` matches the approved production switch;
+- `KCALCUE_VISION_PROVIDER=openai` and `OPENAI_MODEL=gpt-5.6-luna`;
+- Gemini model and Gemini secret configuration are absent, and the revision secret set equals the declared production set above;
+- production traffic is still entirely on the pre-stage revision at 100%, or the service is new and nothing is serving;
+- the candidate has no production traffic.
+
+`promote --revision <candidate>` repeats those candidate checks before changing traffic. It also requires the current service to have exactly one revision at 100%. The candidate image must be a digest-pinned image in this project's `kcalcue/web` repository; `promote` has no tag, so it cannot re-check a caller-supplied digest. It then sets that revision to 100% and reads the service back. Success requires that revision at 100% and service Ready. Any uncertain read stops before `update-traffic`.
+
+`rollback --revision <previous-revision>` still requires an explicit revision, a known single current production revision, and matching current project and allowlist. The target must be Ready and match the project, allowlist, and an explicit analysis switch before traffic moves. The CLI then reads back 100% traffic. Rollback also rejects Gemini configuration, a non-`openai` provider, a missing or different OpenAI model, a secret set that differs from the declared production contract, and an image that is not an immutable project digest. A target may omit `KCALCUE_VISION_PROVIDER` because revisions created before this split did not set it; if the variable is present it must be `openai`. Rollback does not require the current serving revision to be free of Gemini, so it can move traffic off a contaminated revision onto a previously verified target.
+
+Fake-`gcloud` tests cover a Gemini-contaminated service template, zero-traffic stage, rejection of a candidate that still contains Gemini, the declared OpenAI-only and OpenAI-plus-nutrition secret sets, undeclared or wrong nutrition secrets, preflight of the optional nutrition version, explicit promote and readback, retired `deploy`, and the existing rollback guards. These tests do not prove current production IAM, secret state, Cloud Run API responses, or a real release. No live build, stage, promote, rollback, pause, or resume was run for this change.
