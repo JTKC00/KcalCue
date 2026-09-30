@@ -16,6 +16,7 @@ const help = `Cloud Run private trial (explicit commands; staging never promotes
 stage creates a zero-traffic candidate and does not call update-traffic.
 promote is separate and requires the exact candidate revision after inspection and approval.
 deploy was split for safety and is rejected.
+Optional nutritionSecretVersion maps NUTRITION_API_KEY to kcalcue-nutrition:<version>. Omit it to keep the OpenAI secret only.
 Requires dedicated project label kcalcue=private-trial, authenticated gcloud, and docs/qa/cloud-run-release-guard.md setup.
 GCLOUD_BIN may specify an absolute gcloud executable. No secret values are accepted in config.`;
 const schema = z.object({
@@ -26,6 +27,7 @@ const schema = z.object({
   firebaseAppId: z.string().regex(/^1:\d+:web:[a-zA-Z0-9]+$/),
   allowedEmails: z.array(z.email()).min(1).max(10),
   openaiSecretVersion: z.string().regex(/^[1-9]\d*$/),
+  nutritionSecretVersion: z.string().regex(/^[1-9]\d*$/).optional(),
 }).strict();
 const actions = ["preflight", "build", "stage", "promote", "rollback", "pause", "resume"];
 const productionModel = "gpt-5.6-luna";
@@ -60,7 +62,14 @@ function main() {
   const normalizeEmails = value => value.split(",").map(email => email.trim().toLowerCase()).filter(Boolean).sort().join(",");
   const expectedEmails = () => normalizeEmails(config.allowedEmails.join(","));
   const imagePrefix = `${config.region}-docker.pkg.dev/${config.projectId}/kcalcue/web@`;
-  const openaiSecret = `--set-secrets=OPENAI_API_KEY=kcalcue-openai:${config.openaiSecretVersion}`;
+  const declaredSecrets = [
+    { envName: "OPENAI_API_KEY", secretName: "kcalcue-openai", secretVersion: config.openaiSecretVersion },
+    ...(config.nutritionSecretVersion
+      ? [{ envName: "NUTRITION_API_KEY", secretName: "kcalcue-nutrition", secretVersion: config.nutritionSecretVersion }]
+      : []),
+  ];
+  const secretFlag = `--set-secrets=${declaredSecrets.map(secret => `${secret.envName}=${secret.secretName}:${secret.secretVersion}`).join(",")}`;
+  const secretMismatch = "Revision secrets do not match the declared production secret set; traffic was not changed.";
   function describeRevision(revision) {
     if (!isRevision(revision)) throw new Error("The updated revision could not be identified; traffic was not changed.");
     const described = JSON.parse(gcloud(["run", "revisions", "describe", revision, `--region=${config.region}`, "--format=json"], true));
@@ -114,13 +123,10 @@ function main() {
       }
     }
     const volumes = described?.spec?.volumes ?? [];
-    if (!Array.isArray(volumes) || volumes.some(volume => volume?.secret || volume?.secretName)) {
-      throw new Error("Revision secrets are not the production OpenAI mapping; traffic was not changed.");
-    }
-    const [secret] = secretEntries;
-    if (secretEntries.length !== 1 || secret.envName !== "OPENAI_API_KEY" || secret.secretName !== "kcalcue-openai" || secret.secretVersion !== config.openaiSecretVersion) {
-      throw new Error("Revision secrets are not the production OpenAI mapping; traffic was not changed.");
-    }
+    if (!Array.isArray(volumes) || volumes.some(volume => volume?.secret || volume?.secretName)) throw new Error(secretMismatch);
+    const sameSecret = (actual, expected) => actual.envName === expected.envName && actual.secretName === expected.secretName && actual.secretVersion === expected.secretVersion;
+    const matchesDeclared = secretEntries.length === declaredSecrets.length && declaredSecrets.every(expected => secretEntries.filter(actual => sameSecret(actual, expected)).length === 1);
+    if (!matchesDeclared) throw new Error(secretMismatch);
   }
   // Candidate revisions must declare the production provider. Rollback may
   // target an older OpenAI revision that predates KCALCUE_VISION_PROVIDER.
@@ -237,6 +243,14 @@ function main() {
     if (required.some(api => !enabled.includes(api))) throw new Error("Required project APIs are missing; finish CLOUD_RUN.md setup.");
     const secret = gcloud(["secrets", "versions", "describe", config.openaiSecretVersion, "--secret=kcalcue-openai", "--format=value(state)"], true);
     if (secret !== "ENABLED") throw new Error("The selected secret version is not enabled.");
+    if (config.nutritionSecretVersion) {
+      const nutrition = spawnSync(executable, ["secrets", "versions", "describe", config.nutritionSecretVersion, "--secret=kcalcue-nutrition", "--format=value(state)", "--project", config.projectId, "--quiet"], {
+        stdio: ["ignore", "pipe", "pipe"], encoding: "utf8", shell: false,
+      });
+      if (nutrition.error || nutrition.status !== 0 || nutrition.stdout.trim() !== "ENABLED") {
+        throw new Error("The configured nutrition secret version is missing or not enabled.");
+      }
+    }
     console.log("PASS: dedicated project label, billing, APIs and enabled secret version. Device flows, IAM permissions and alert delivery still require acceptance.");
     return;
   }
@@ -256,7 +270,7 @@ function main() {
       `--region=${config.region}`, `--service-account=kcalcue-runtime@${config.projectId}.iam.gserviceaccount.com`,
       "--allow-unauthenticated", "--no-traffic", "--port=8080", "--cpu=1", "--memory=1Gi", "--concurrency=4", "--timeout=120s",
       "--min=0", "--max=1", "--min-instances=0", "--max-instances=1", "--cpu-throttling", "--no-cpu-boost",
-      `--env-vars-file=${envFile}`, openaiSecret, "--format=value(status.latestCreatedRevisionName)"], true));
+      `--env-vars-file=${envFile}`, secretFlag, "--format=value(status.latestCreatedRevisionName)"], true));
     assertCandidate(revision, analysisEnabled, pinnedImage);
     assertStagedTraffic(revision, serving?.revision ?? null);
     console.log(serving
@@ -319,7 +333,7 @@ function main() {
   if (!/^sha256:[a-f0-9]{64}$/.test(digest)) throw new Error("Serving revision image is not an immutable project digest; traffic was not changed.");
   const analysisEnabled = action === "resume";
   const revision = withRuntimeFile(analysisEnabled, envFile => gcloud(["run", "services", "update", "kcalcue", `--image=${serving.image}`,
-    `--region=${config.region}`, "--no-traffic", `--env-vars-file=${envFile}`, openaiSecret,
+    `--region=${config.region}`, "--no-traffic", `--env-vars-file=${envFile}`, secretFlag,
     "--format=value(status.latestCreatedRevisionName)"], true));
   routeRevision(revision, analysisEnabled, serving.image);
 }

@@ -15,7 +15,7 @@ const image = `asia-east1-docker.pkg.dev/demo-kcalcue/kcalcue/web@${digest}`;
 // The fake service template is contaminated with Gemini. A revision describe
 // returns the deployed env/secret replacement, unless a failure mode forces
 // the candidate to stay contaminated or to carry the wrong digest.
-function run(action: "pause" | "resume" | "deploy" | "rollback" | "stage" | "promote", failure = "") {
+function run(action: "pause" | "resume" | "deploy" | "rollback" | "stage" | "promote" | "preflight", failure = "", options: { nutritionSecretVersion?: string } = {}) {
   const directory = mkdtempSync(path.join(tmpdir(), "kcalcue-cloud-routing-test-"));
   temporary.push(directory);
   const executable = path.join(directory, "gcloud.mjs");
@@ -28,6 +28,7 @@ function run(action: "pause" | "resume" | "deploy" | "rollback" | "stage" | "pro
     projectId: "demo-kcalcue", region: "asia-east1", firebaseApiKey: "test-firebase-public-key",
     firebaseAuthDomain: "demo-kcalcue.firebaseapp.com", firebaseAppId: "1:123:web:abc",
     allowedEmails: ["tester@example.com"], openaiSecretVersion: "1",
+    ...(options.nutritionSecretVersion ? { nutritionSecretVersion: options.nutritionSecretVersion } : {}),
   }));
   writeFileSync(executable, `#!/usr/bin/env node
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
@@ -46,16 +47,16 @@ const templateEnv = () => [
   { name: 'GEMINI_MODEL', value: 'gemini-3.8-flash' },
   { name: 'GEMINI_API_KEY', valueFrom: { secretKeyRef: { name: 'kcalcue-gemini', key: '1' } } },
 ];
-const secretEntry = flag => {
-  const body = flag.slice(flag.indexOf('=') + 1);
-  const separator = body.indexOf('=');
-  const spec = body.slice(separator + 1);
-  return { name: body.slice(0, separator), valueFrom: { secretKeyRef: { name: spec.split(':')[0], key: spec.split(':')[1] || 'latest' } } };
-};
+const secretEntriesFromFlag = flag => flag.slice(flag.indexOf('=') + 1).split(',').filter(Boolean).map(pair => {
+  const separator = pair.indexOf('=');
+  const spec = pair.slice(separator + 1);
+  const colon = spec.indexOf(':');
+  return { name: pair.slice(0, separator), valueFrom: { secretKeyRef: { name: spec.slice(0, colon), key: spec.slice(colon + 1) || 'latest' } } };
+});
 const deployedEnv = () => {
   if (state.candidateEnv) {
     const entries = Object.entries(state.candidateEnv).map(([name, value]) => ({ name, value: String(value) }));
-    if (typeof state.secretFlag === 'string' && state.secretFlag.startsWith('--set-secrets=')) entries.push(secretEntry(state.secretFlag));
+    if (typeof state.secretFlag === 'string' && state.secretFlag.startsWith('--set-secrets=')) entries.push(...secretEntriesFromFlag(state.secretFlag));
     else entries.push({ name: 'GEMINI_API_KEY', valueFrom: { secretKeyRef: { name: 'kcalcue-gemini', key: '1' } } });
     return entries;
   }
@@ -67,12 +68,19 @@ const deployedEnv = () => {
     else entries.push(next);
   }
   if (typeof state.secretFlag === 'string' && state.secretFlag.startsWith('--set-secrets=')) {
-    return entries.filter(entry => !entry.valueFrom).concat(secretEntry(state.secretFlag));
+    return entries.filter(entry => !entry.valueFrom).concat(secretEntriesFromFlag(state.secretFlag));
   }
-  if (typeof state.secretFlag === 'string' && state.secretFlag.startsWith('--update-secrets=')) entries.push(secretEntry(state.secretFlag));
+  if (typeof state.secretFlag === 'string' && state.secretFlag.startsWith('--update-secrets=')) entries.push(...secretEntriesFromFlag(state.secretFlag));
   return entries;
 };
 if (matches('projects', 'describe')) emit('private-trial');
+else if (matches('billing', 'projects', 'describe')) emit('true');
+else if (matches('services', 'list')) emit(['run.googleapis.com', 'cloudbuild.googleapis.com', 'artifactregistry.googleapis.com', 'secretmanager.googleapis.com', 'firestore.googleapis.com', 'identitytoolkit.googleapis.com'].join('\\n'));
+else if (matches('secrets', 'versions', 'describe')) {
+  const secretArg = args.find(value => value.startsWith('--secret=')) || '';
+  if (secretArg === '--secret=kcalcue-nutrition' && failure === 'nutrition-missing') process.exit(1);
+  emit(secretArg === '--secret=kcalcue-nutrition' && failure === 'nutrition-disabled' ? 'DISABLED' : 'ENABLED');
+}
 else if (matches('artifacts', 'docker', 'images', 'describe')) emit('sha256:' + 'a'.repeat(64));
 else if (matches('run', 'services', 'list')) {
   const listed = failure === 'new-service' ? [] : [{ spec: { template: { spec: { containers: [{ env: templateEnv() }] } } } }];
@@ -138,6 +146,21 @@ else if (matches('run', 'services', 'update') || matches('run', 'deploy')) {
     ] : []),
     { name: 'OPENAI_API_KEY', valueFrom: { secretKeyRef: { name: 'kcalcue-openai', key: '1' } } },
   ];
+  const nutritionVersion = process.env.KCAL_TEST_NUTRITION_VERSION || '';
+  const builtFromDeploy = isNew && mutated && failure !== 'gemini-candidate' && failure !== 'digest-mismatch';
+  if (!builtFromDeploy && nutritionVersion && !gemini && !(failure === 'rollback-omit-nutrition' && isRollbackTarget) && !env.some(entry => entry.name === 'NUTRITION_API_KEY')) {
+    env.push({ name: 'NUTRITION_API_KEY', valueFrom: { secretKeyRef: { name: 'kcalcue-nutrition', key: nutritionVersion } } });
+  }
+  if (!isCurrent && failure === 'extra-secret') env.push({ name: 'OTHER_API_KEY', valueFrom: { secretKeyRef: { name: 'kcalcue-other', key: '1' } } });
+  if (!isCurrent && (failure === 'wrong-nutrition-name' || failure === 'wrong-nutrition-version')) {
+    env = env.map(entry => {
+      if (entry.name !== 'NUTRITION_API_KEY' || !entry.valueFrom) return entry;
+      return { name: 'NUTRITION_API_KEY', valueFrom: { secretKeyRef: {
+        name: failure === 'wrong-nutrition-name' ? 'kcalcue-food' : 'kcalcue-nutrition',
+        key: failure === 'wrong-nutrition-version' ? '9' : entry.valueFrom.secretKeyRef.key,
+      } } };
+    });
+  }
   emit({
     spec: { containers: [{ env, image: revisionImage }] },
     status: { conditions: [{ type: 'Ready', status: isRollbackTarget && failure === 'rollback-not-ready' ? 'False' : 'True' }] },
@@ -156,7 +179,8 @@ else if (matches('run', 'services', 'update') || matches('run', 'deploy')) {
     ...(action === "rollback" ? ["--revision", "kcalcue-00002-old"] : []),
     ...(action === "promote" && failure !== "missing-revision" ? ["--revision", "kcalcue-00003-new"] : [])], {
     cwd: process.cwd(), encoding: "utf8", env: { ...process.env, GCLOUD_BIN: executable,
-      KCAL_TEST_TRACE: trace, KCAL_TEST_STATE: state, KCAL_TEST_FAILURE: failure },
+      KCAL_TEST_TRACE: trace, KCAL_TEST_STATE: state, KCAL_TEST_FAILURE: failure,
+      KCAL_TEST_NUTRITION_VERSION: options.nutritionSecretVersion ?? "" },
   });
   const calls = existsSync(trace)
     ? readFileSync(trace, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line) as string[])
@@ -377,5 +401,83 @@ describe("Cloud Run routing after rollback", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("Traffic verification failed");
     expect(result.stdout).not.toContain("PASS");
+  });
+});
+
+const nutritionConfig = { nutritionSecretVersion: "2" };
+const nutritionSecrets = "--set-secrets=OPENAI_API_KEY=kcalcue-openai:1,NUTRITION_API_KEY=kcalcue-nutrition:2";
+
+describe("declared production secrets", () => {
+  it("stages both approved secrets when nutrition is configured", () => {
+    const { result, calls, finalState } = run("stage", "", nutritionConfig);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("production remains kcalcue-00001-old");
+    expect(finalState.secretFlag).toBe(nutritionSecrets);
+    expect(finalState.routedRevision).toBe("kcalcue-00001-old");
+    expect(trafficChanged(calls)).toBe(false);
+  });
+
+  it("stages OpenAI only when nutrition is not configured", () => {
+    const { result, calls, finalState } = run("stage");
+    expect(result.status, result.stderr).toBe(0);
+    expect(finalState.secretFlag).toBe("--set-secrets=OPENAI_API_KEY=kcalcue-openai:1");
+    expect(finalState.secretFlag).not.toContain("NUTRITION");
+    expect(trafficChanged(calls)).toBe(false);
+  });
+
+  it.each(["stage", "promote"] as const)("rejects an undeclared extra secret before traffic changes: %s", action => {
+    const { result, calls } = run(action, "extra-secret", nutritionConfig);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("declared production secret set");
+    expect(result.stderr).toContain("traffic was not changed");
+    expect(trafficChanged(calls)).toBe(false);
+  });
+
+  it.each(["wrong-nutrition-name", "wrong-nutrition-version"])("rejects a nutrition secret outside the declared contract: %s", failure => {
+    const { result, calls, finalState } = run("stage", failure, nutritionConfig);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("declared production secret set");
+    expect(result.stderr).toContain("traffic was not changed");
+    expect(finalState.secretFlag).toBe(nutritionSecrets);
+    expect(trafficChanged(calls)).toBe(false);
+  });
+
+  it("uses the declared nutrition secret when pausing", () => {
+    const { result, calls } = run("pause", "", nutritionConfig);
+    expect(result.status, result.stderr).toBe(0);
+    const update = calls.find(call => call[2] === "update") ?? [];
+    expect(update).toContain(nutritionSecrets);
+    expect(calls.some(call => call.includes("update-traffic"))).toBe(true);
+  });
+
+  it("rolls back only when the target matches the declared nutrition secret", () => {
+    const success = run("rollback", "", nutritionConfig);
+    expect(success.result.status, success.result.stderr).toBe(0);
+    expect(success.calls.some(call => call.includes("update-traffic"))).toBe(true);
+    const missing = run("rollback", "rollback-omit-nutrition", nutritionConfig);
+    expect(missing.result.status).toBe(1);
+    expect(missing.result.stderr).toContain("declared production secret set");
+    expect(missing.calls.some(call => call.includes("update-traffic"))).toBe(false);
+  });
+
+  it("preflight checks an enabled nutrition secret version when configured", () => {
+    const { result, calls } = run("preflight", "", nutritionConfig);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("PASS");
+    expect(calls.some(call => call.includes("--secret=kcalcue-openai") && call.includes("1"))).toBe(true);
+    expect(calls.some(call => call.includes("--secret=kcalcue-nutrition") && call.includes("2"))).toBe(true);
+  });
+
+  it("preflight skips nutrition when the config does not declare it", () => {
+    const { result, calls } = run("preflight");
+    expect(result.status, result.stderr).toBe(0);
+    expect(calls.some(call => call.includes("--secret=kcalcue-nutrition"))).toBe(false);
+  });
+
+  it.each(["nutrition-disabled", "nutrition-missing"])("preflight rejects a %s nutrition secret version", failure => {
+    const { result, calls } = run("preflight", failure, nutritionConfig);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("configured nutrition secret version is missing or not enabled");
+    expect(calls.some(call => call[1] === "deploy" || call.includes("update-traffic"))).toBe(false);
   });
 });

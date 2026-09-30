@@ -7,7 +7,7 @@ This change is source tooling only. It does not run Cloud Build, create a Cloud 
 ## Release sequence
 
 1. `npm run trial:cloud -- preflight --config /absolute/private/config.json`  
-   Read-only check of the project label, billing, required APIs, and the selected OpenAI secret version.
+   Read-only check of the project label, billing, required APIs, the selected OpenAI secret version, and, when `nutritionSecretVersion` is set, that `kcalcue-nutrition` version. A missing or non-`ENABLED` nutrition version stops preflight.
 2. `npm run trial:cloud -- build --config /absolute/private/config.json --tag <immutable-tag>`  
    Submits Cloud Build for that tag. `latest` is rejected.
 3. `npm run trial:cloud -- stage --config /absolute/private/config.json --tag <verified-tag>`  
@@ -27,9 +27,16 @@ RC1 production remains OpenAI:
 
 - `KCALCUE_VISION_PROVIDER=openai`
 - `OPENAI_MODEL=gpt-5.6-luna`
-- secret mapping `OPENAI_API_KEY=kcalcue-openai:<version>`
+- required secret mapping `OPENAI_API_KEY=kcalcue-openai:<openaiSecretVersion>`
 
-Gemini stays RC-only. A candidate must not contain `GEMINI_MODEL` or a `GEMINI_API_KEY` secret mapping. `stage` does not inherit the service template. Local `gcloud run deploy --help` states that `--env-vars-file` removes every existing environment variable before adding the file, and `--set-secrets` removes every existing secret before adding the listed mapping. `stage` always passes both, including for an existing service. The file sets the Firebase web config, the account allowlist, the approved analysis switch, `OPENAI_MODEL=gpt-5.6-luna`, and `KCALCUE_VISION_PROVIDER=openai`. No Gemini key is written. Secret values are never accepted on the command line or printed.
+`openaiSecretVersion` stays required. Optional `nutritionSecretVersion` is the only way to keep the USDA FoodData Central fallback. `getNutritionApiKey()` reads `NUTRITION_API_KEY`. When the field is set, the production secret set is exactly:
+
+- `OPENAI_API_KEY=kcalcue-openai:<openaiSecretVersion>`
+- `NUTRITION_API_KEY=kcalcue-nutrition:<nutritionSecretVersion>`
+
+When the field is omitted, the production secret set is exactly the OpenAI mapping. The secret name is the fixed reviewed name `kcalcue-nutrition`. Gemini secrets stay forbidden. Any other secret stays forbidden. The same declared set is what `stage`, `promote`, `pause`, `resume`, and `rollback` write or accept.
+
+Gemini stays RC-only. A candidate must not contain `GEMINI_MODEL` or a `GEMINI_API_KEY` secret mapping. `stage` does not inherit the service template. Local `gcloud run deploy --help` states that `--env-vars-file` removes every existing environment variable before adding the file, and `--set-secrets` removes every existing secret before adding the listed mapping. `stage` always passes both, including for an existing service. The file sets the Firebase web config, the account allowlist, the approved analysis switch, `OPENAI_MODEL=gpt-5.6-luna`, and `KCALCUE_VISION_PROVIDER=openai`. No Gemini key is written. Secret values are never accepted on the command line or printed. Full replacement still applies: an undeclared template secret, including a previously mounted nutrition secret, is removed rather than copied.
 
 The approved analysis switch is read from the revision that currently serves 100%, not from the service template. The first service starts paused (`KCALCUE_ANALYSIS_ENABLED=false`). If that serving revision's Firebase project or account allowlist differs from the private config, or its analysis switch is not exactly `true` or `false`, `stage` stops before `run deploy`.
 
@@ -42,12 +49,12 @@ After `stage` creates the candidate, the CLI reads that revision back and stops 
 - the Firebase project and account allowlist match the private config;
 - `KCALCUE_ANALYSIS_ENABLED` matches the approved production switch;
 - `KCALCUE_VISION_PROVIDER=openai` and `OPENAI_MODEL=gpt-5.6-luna`;
-- Gemini model and Gemini secret configuration are absent, and the only secret mapping is `OPENAI_API_KEY` from `kcalcue-openai`;
+- Gemini model and Gemini secret configuration are absent, and the revision secret set equals the declared production set above;
 - production traffic is still entirely on the pre-stage revision at 100%, or the service is new and nothing is serving;
 - the candidate has no production traffic.
 
 `promote --revision <candidate>` repeats those candidate checks before changing traffic. It also requires the current service to have exactly one revision at 100%. The candidate image must be a digest-pinned image in this project's `kcalcue/web` repository; `promote` has no tag, so it cannot re-check a caller-supplied digest. It then sets that revision to 100% and reads the service back. Success requires that revision at 100% and service Ready. Any uncertain read stops before `update-traffic`.
 
-`rollback --revision <previous-revision>` still requires an explicit revision, a known single current production revision, and matching current project and allowlist. The target must be Ready and match the project, allowlist, and an explicit analysis switch before traffic moves. The CLI then reads back 100% traffic. Rollback also rejects Gemini configuration, a non-`openai` provider, a missing or different OpenAI model, any secret other than `kcalcue-openai`, and an image that is not an immutable project digest. A target may omit `KCALCUE_VISION_PROVIDER` because revisions created before this split did not set it; if the variable is present it must be `openai`. Rollback does not require the current serving revision to be free of Gemini, so it can move traffic off a contaminated revision onto a previously verified target.
+`rollback --revision <previous-revision>` still requires an explicit revision, a known single current production revision, and matching current project and allowlist. The target must be Ready and match the project, allowlist, and an explicit analysis switch before traffic moves. The CLI then reads back 100% traffic. Rollback also rejects Gemini configuration, a non-`openai` provider, a missing or different OpenAI model, a secret set that differs from the declared production contract, and an image that is not an immutable project digest. A target may omit `KCALCUE_VISION_PROVIDER` because revisions created before this split did not set it; if the variable is present it must be `openai`. Rollback does not require the current serving revision to be free of Gemini, so it can move traffic off a contaminated revision onto a previously verified target.
 
-Fake-`gcloud` tests cover a Gemini-contaminated service template, zero-traffic stage, rejection of a candidate that still contains Gemini, explicit promote and readback, retired `deploy`, and the existing rollback guards. These tests do not prove current production IAM, secret state, Cloud Run API responses, or a real release. No live build, stage, promote, rollback, pause, or resume was run for this change.
+Fake-`gcloud` tests cover a Gemini-contaminated service template, zero-traffic stage, rejection of a candidate that still contains Gemini, the declared OpenAI-only and OpenAI-plus-nutrition secret sets, undeclared or wrong nutrition secrets, preflight of the optional nutrition version, explicit promote and readback, retired `deploy`, and the existing rollback guards. These tests do not prove current production IAM, secret state, Cloud Run API responses, or a real release. No live build, stage, promote, rollback, pause, or resume was run for this change.
