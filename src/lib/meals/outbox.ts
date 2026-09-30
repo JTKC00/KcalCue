@@ -1,4 +1,6 @@
 import type { MealRecord } from "./types";
+import { resolveCalorieCorrection } from "./calories";
+import { readAnalysisProvenance } from "@/lib/domain/analysis-provenance";
 export interface PendingMeal {
   id: string;
   kind: "save" | "delete";
@@ -12,12 +14,27 @@ export interface SyncState {
   syncedAt: string | null;
   revision?: string;
 }
+// Call inside the account's IndexedDB write transaction. Another tab can hold
+// an older meal object, but must not enqueue a command against an older local
+// version or revive a meal already queued for deletion.
+export function hasCurrentMealVersion(
+  state: SyncState, mealId: string, expectedVersion: number, allowCreate = true,
+): boolean {
+  if (state.jobs.some((job) => job.record.id === mealId && job.kind === "delete"))
+    return false;
+  const current = visibleMeals(state).find((meal) => meal.id === mealId);
+  return current ? current.version === expectedVersion : allowCreate && expectedVersion === 0;
+}
 const empty = (): SyncState => ({ remote: [], jobs: [], syncedAt: null });
 async function open() {
   return new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open("kcalcue-sync", 1);
-    request.onupgradeneeded = () =>
-      request.result.createObjectStore("accounts");
+    // Open the installed schema. A pinned v1 opener fails with VersionError
+    // after a later client adds an object store for atomic photo payloads.
+    const request = indexedDB.open("kcalcue-sync");
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains("accounts"))
+        request.result.createObjectStore("accounts");
+    };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
@@ -55,10 +72,33 @@ export async function changeSyncState(
   }
 }
 export function visibleMeals(state: SyncState) {
-  const meals = new Map(state.remote.map((record) => [record.id, record]));
+  const remote = new Map(state.remote.map((record) => [record.id, record]));
+  const meals = new Map(remote);
   for (const job of state.jobs) {
     if (job.kind === "delete") meals.delete(job.record.id);
-    else meals.set(job.record.id, job.record);
+    else {
+      const confirmed = remote.get(job.record.id);
+      const previous = meals.get(job.record.id);
+      // An old queued edit may predate the first cloud acknowledgement. Its
+      // editable values win, but cannot erase or replace confirmed metadata.
+      meals.set(job.record.id, {
+        ...job.record,
+        // Edits cannot replace the accepted/first-queued analysis baseline.
+        analysis: previous ? previous.analysis : job.record.analysis,
+        originalItems: previous?.originalItems ?? job.record.originalItems,
+        analysisProvenance: previous
+          ? previous.analysisProvenance ?? null
+          : job.record.analysis ? readAnalysisProvenance(job.record.analysisProvenance, job.record.mode) : null,
+        calorieCorrection: resolveCalorieCorrection(job.record.calorieCorrection, job.record.items, previous),
+        ...(confirmed ? {
+          schemaVersion: confirmed.schemaVersion,
+          createdAt: confirmed.createdAt,
+          // A queued edit contains editable meal fields, not the server-owned
+          // photo reference. Keep the confirmed attachment visible offline.
+          ...("photoRef" in confirmed ? { photoRef: confirmed.photoRef } : {}),
+        } : {}),
+      });
+    }
   }
   return [...meals.values()];
 }

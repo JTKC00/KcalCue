@@ -4,7 +4,7 @@ import OpenAI, {
   APIError,
   APIUserAbortError,
 } from "openai";
-import sharp from "sharp";
+import { boundedModelName, FOOD_VISION_ANALYSIS_VERSION } from "@/lib/domain/analysis-provenance";
 import {
   foodAnalysisJsonSchema,
   foodAnalysisSchema,
@@ -15,6 +15,7 @@ import {
   base64ByteLength,
   extractOpenAIErrorDetails,
   logFoodVisionDiagnostic,
+  logFoodVisionUsage,
   type FoodVisionDiagnostic,
   type FoodVisionFailureStage,
 } from "./diagnostics";
@@ -27,21 +28,12 @@ import type {
   FoodImageInput,
   FoodVisionAnalyzeOptions,
   FoodVisionProvider,
-  SupportedImageMimeType,
 } from "./types";
+
+import { prepareImageOneAtATime } from "./image-preparation";
 
 import { OPENAI_HTTP_TIMEOUT_MS, OPENAI_ABORT_TIMEOUT_MS } from "./timeout";
 export { OPENAI_HTTP_TIMEOUT_MS, OPENAI_ABORT_TIMEOUT_MS } from "./timeout";
-
-type OpenAIImageMimeType = Exclude<
-  SupportedImageMimeType,
-  "image/heic" | "image/heif"
->;
-
-interface OpenAIImageInput {
-  data: string;
-  mimeType: OpenAIImageMimeType;
-}
 
 function mapOpenAIError(error: unknown): FoodVisionError {
   if (error instanceof FoodVisionError) return error;
@@ -142,37 +134,16 @@ function mapOpenAIError(error: unknown): FoodVisionError {
   });
 }
 
-function stripNulls(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(stripNulls);
+function stripOptionalNulls(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripOptionalNulls);
   if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value)
-        .filter(([, nested]) => nested !== null)
-        .map(([key, nested]) => [key, stripNulls(nested)]),
+        .filter(([key, nested]) => nested !== null || key === "portionMin" || key === "portionMax")
+        .map(([key, nested]) => [key, stripOptionalNulls(nested)]),
     );
   }
   return value;
-}
-
-async function prepareOpenAIImage(image: FoodImageInput): Promise<OpenAIImageInput> {
-  const mimeType = image.mimeType;
-  if (mimeType !== "image/heic" && mimeType !== "image/heif") {
-    return { data: image.data, mimeType };
-  }
-
-  try {
-    const jpeg = await sharp(Buffer.from(image.data, "base64"))
-      .rotate()
-      .jpeg()
-      .toBuffer();
-    return { data: jpeg.toString("base64"), mimeType: "image/jpeg" };
-  } catch (error) {
-    throw new FoodVisionError(
-      "image_rejected",
-      "OpenAI could not decode the image.",
-      { cause: error },
-    );
-  }
 }
 
 function diagnosticFor(
@@ -230,7 +201,7 @@ export class OpenAIFoodVisionProvider implements FoodVisionProvider {
 
     try {
       options?.signal?.throwIfAborted();
-      const preparedImage = await prepareOpenAIImage(image);
+      const preparedImage = await prepareImageOneAtATime(image, options?.signal);
       options?.signal?.throwIfAborted();
       stage = "openai_request";
       const response = await this.client.responses.create(
@@ -262,7 +233,7 @@ export class OpenAIFoodVisionProvider implements FoodVisionProvider {
           store: false,
         },
         {
-          maxRetries: 2,
+          maxRetries: 0,
           timeout: OPENAI_HTTP_TIMEOUT_MS,
           signal: AbortSignal.any([
             AbortSignal.timeout(OPENAI_ABORT_TIMEOUT_MS),
@@ -270,6 +241,17 @@ export class OpenAIFoodVisionProvider implements FoodVisionProvider {
           ]),
         },
       );
+
+      // A provider response may incur usage even if its JSON later fails validation.
+      if (response.usage) {
+        logFoodVisionUsage({
+          requestedModel: this.config.model,
+          reportedModel: response.model,
+          analysisVersion: FOOD_VISION_ANALYSIS_VERSION,
+          foodVisionMs: performance.now() - startedAt,
+          usage: response.usage,
+        });
+      }
 
       if (!response.output_text.trim()) {
         stage = "empty_response";
@@ -279,7 +261,7 @@ export class OpenAIFoodVisionProvider implements FoodVisionProvider {
       let parsed: unknown;
       try {
         stage = "parse_json";
-        parsed = stripNulls(JSON.parse(response.output_text));
+        parsed = stripOptionalNulls(JSON.parse(response.output_text));
       } catch (error) {
         throw new FoodVisionError(
           "invalid_response",
@@ -298,6 +280,14 @@ export class OpenAIFoodVisionProvider implements FoodVisionProvider {
         );
       }
 
+      options?.onMetadata?.({
+        provider: "openai",
+        requestedModel: boundedModelName(this.config.model),
+        reportedModel: boundedModelName(response.model),
+        modelVersion: null,
+        analysisVersion: FOOD_VISION_ANALYSIS_VERSION,
+        analyzedAt: new Date().toISOString(),
+      });
       return validated.data;
     } catch (error) {
       const mapped = mapOpenAIError(error);

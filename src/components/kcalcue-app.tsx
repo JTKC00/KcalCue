@@ -8,6 +8,8 @@ import {
   applyPortionPreset,
   convertPortionUnit,
   createEditableFoodItems,
+  hasKnownPortion,
+  renameFoodItem,
   type EditableFoodItem,
   type PortionPreset,
 } from "@/lib/domain/editable-meal";
@@ -17,7 +19,6 @@ import {
   enrichUnresolvedMatches,
   resolveNutritionMatchWithFallback,
 } from "@/lib/nutrition/client";
-import { normalizeFoodName } from "@/lib/nutrition/canonical";
 import type { NutritionMatch } from "@/lib/nutrition/types";
 import {
   DEMO_ANALYZE_DELAY_MS,
@@ -43,6 +44,7 @@ import {
 import { ResultView } from "./result-view";
 import { authorizedFetch } from "@/lib/firebase/client";
 import type { MealDraft } from "@/lib/meals/types";
+import { readAnalysisProvenance, type AnalysisProvenance } from "@/lib/domain/analysis-provenance";
 
 type AppStage = "input" | "analyzing" | "result" | "unable" | "error";
 type ProviderMode = FoodVisionProvider["mode"];
@@ -56,6 +58,7 @@ interface AppError {
 
 interface AnalyzeResponse {
   analysis?: unknown;
+  analysisProvenance?: unknown;
   mode?: unknown;
   error?: { code?: unknown };
 }
@@ -63,13 +66,17 @@ interface AnalyzeResponse {
 interface KcalCueAppProps {
   initialProviderMode: ProviderMode;
   initialDraft?: MealDraft;
-  onDraftChange?: (change: Pick<MealDraft, "items" | "analysis" | "mode">, file: File | null) => void;
+  calorieCorrection?: MealDraft["calorieCorrection"];
+  onDraftChange?: (change: Pick<MealDraft, "items" | "analysis" | "analysisProvenance" | "mode">, file: File | null) => void;
   onExit?: () => void;
+  onNewMeal?: () => void;
   manual?: boolean;
   onPhotoSelected?: (file: File | null) => void;
 }
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+// Give the server's 12-second partial-result deadline time to reach the client.
+const NUTRITION_ENRICH_TIMEOUT_MS = 15_000;
 
 function delay(ms: number, signal?: AbortSignal) {
   return new Promise<void>((resolve, reject) => {
@@ -250,7 +257,7 @@ function LoadingView({
           <p className="eyebrow">{demoMode ? "準備示範結果" : "AI 圖片分析"}</p>
           <h1>{copy.loadingTitle}</h1>
           <p>{copy.loadingBody}</p>
-          <p className={loadingStepClass(step, 0)}>等候分析及營養配對完成，通常需要一段時間。</p>
+          <p className={loadingStepClass(step, 0)}>等候 AI 圖片分析完成；營養資料會在結果頁繼續補查。</p>
           <div className="loading-actions">
             <button className="button button-secondary" type="button" onClick={onCancel}>
               {copy.cancelAnalyze}
@@ -349,24 +356,32 @@ function SiteFooter() {
   );
 }
 
-export function KcalCueApp({ initialProviderMode, initialDraft, onDraftChange, onExit, manual, onPhotoSelected }: KcalCueAppProps) {
+export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrection, onDraftChange, onExit, onNewMeal, manual, onPhotoSelected }: KcalCueAppProps) {
   const [stage, setStage] = useState<AppStage>(initialDraft?.items.length || manual ? "result" : "input");
   const [file, setFile] = useState<File | null>(() => initialDraft?.photo && !initialDraft.items.length ? new File([initialDraft.photo], "餐點.jpg", { type: "image/jpeg" }) : null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewFailed, setPreviewFailed] = useState(false);
   const [analysis, setAnalysis] = useState<FoodAnalysis | null>(initialDraft?.analysis ?? null);
+  const [analysisProvenance, setAnalysisProvenance] = useState<AnalysisProvenance | null>(() =>
+    initialDraft?.analysis ? readAnalysisProvenance(initialDraft.analysisProvenance, initialDraft.mode) : null);
   const [items, setItems] = useState<EditableFoodItem[]>(initialDraft?.items.length ? initialDraft.items : manual ? [createManualItem()] : []);
   const [activeMode, setActiveMode] = useState<AppMode>(
     initialDraft?.items.length ? initialDraft.mode : manual ? "manual" : initialProviderMode,
   );
   const [appError, setAppError] = useState<AppError | null>(null);
+  const [nutritionPending, setNutritionPending] = useState(false);
   const nutritionProvider = useMemo(() => new LocalNutritionProvider(), []);
+  const originalFoods = useMemo(
+    () => new Map(createEditableFoodItems(analysis?.foods ?? []).map(food => [food.id, food])),
+    [analysis],
+  );
   const nameEditTimers = useRef(new Map<string, number>());
+  const nameEditRevisions = useRef(new Map<string, number>());
   const analyzeAbortRef = useRef<AbortController | null>(null);
   const editAbortRef = useRef(new AbortController());
   useLayoutEffect(() => {
-    if (stage === "result") onDraftChange?.({ items, analysis, mode: activeMode }, file);
-  }, [stage, items, analysis, activeMode, file, onDraftChange]);
+    if (stage === "result") onDraftChange?.({ items, analysis, analysisProvenance, mode: activeMode }, file);
+  }, [stage, items, analysis, analysisProvenance, activeMode, file, onDraftChange]);
   useEffect(() => {
     if (!initialDraft?.photo) return;
     const url = URL.createObjectURL(initialDraft.photo);
@@ -403,8 +418,10 @@ export function KcalCueApp({ initialProviderMode, initialDraft, onDraftChange, o
     editAbortRef.current.abort();
     editAbortRef.current = new AbortController();
     setAppError(null);
+    setNutritionPending(false);
     setPreviewFailed(false);
     setAnalysis(null);
+    setAnalysisProvenance(null);
     setItems([]);
 
     if (!nextFile) {
@@ -415,6 +432,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, onDraftChange, o
       return;
     }
     if (nextFile.size === 0 || !inferSupportedImageMimeType(nextFile.name, nextFile.type)) {
+      onPhotoSelected?.(null);
       setFile(null);
       setPreviewUrl(null);
       setAppError(getError("invalid_file"));
@@ -422,6 +440,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, onDraftChange, o
       return;
     }
     if (nextFile.size > MAX_IMAGE_BYTES) {
+      onPhotoSelected?.(null);
       setFile(null);
       setPreviewUrl(null);
       setAppError(getError("file_too_large"));
@@ -432,6 +451,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, onDraftChange, o
     try {
       setPreviewUrl(URL.createObjectURL(nextFile));
     } catch {
+      onPhotoSelected?.(null);
       setFile(null);
       setPreviewUrl(null);
       setPreviewFailed(true);
@@ -467,6 +487,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, onDraftChange, o
     setActiveMode(demoRequest ? "demo" : "live");
     setStage("analyzing");
     setAppError(null);
+    setNutritionPending(false);
 
     const timeoutId = window.setTimeout(
       () => controller.abort("timeout"),
@@ -479,6 +500,9 @@ export function KcalCueApp({ initialProviderMode, initialDraft, onDraftChange, o
         formData.set("mode", "demo");
       } else {
         formData.set("image", file);
+        // One ID per explicit analysis action. Transport replays of this POST
+        // must not reserve or invoke the paid provider a second time.
+        formData.set("attemptId", crypto.randomUUID());
       }
 
       const [response] = await Promise.all([
@@ -504,22 +528,77 @@ export function KcalCueApp({ initialProviderMode, initialDraft, onDraftChange, o
       const responseMode = body.mode === "live" ? "live" : "demo";
       setActiveMode(responseMode);
       setAnalysis(parsed.data);
+      setAnalysisProvenance(readAnalysisProvenance(body.analysisProvenance, responseMode));
 
       if (parsed.data.analysisStatus === "unable_to_identify") {
         setItems([]);
         setStage("unable");
       } else {
         const localMatches = parsed.data.foods.map((food) =>
-          nutritionProvider.resolve(food),
+          hasKnownPortion(food) ? nutritionProvider.resolve(food) : null,
         );
-        const matches =
-          responseMode === "live"
-            ? await enrichUnresolvedMatches(parsed.data.foods, localMatches, controller.signal)
-            : localMatches;
-        controller.signal.throwIfAborted();
-        if (analyzeAbortRef.current !== controller) return;
-        setItems(createEditableFoodItems(parsed.data.foods, matches));
+        const initialItems = createEditableFoodItems(parsed.data.foods, localMatches);
+        setItems(initialItems);
         setStage("result");
+        if (responseMode === "live" && localMatches.some((match) => match && !match.includedInTotal)) {
+          setNutritionPending(true);
+          const unchangedFood = (item: EditableFoodItem, index: number) => {
+            const original = initialItems[index];
+            return Boolean(
+              original && item.id === original.id &&
+              item.displayName === original.displayName &&
+              item.normalizedName === original.normalizedName &&
+              item.unit === original.unit &&
+              item.nutritionMatch === localMatches[index]
+            );
+          };
+          const editSignal = editAbortRef.current.signal;
+          const nutritionController = new AbortController();
+          const nutritionSignal = AbortSignal.any([editSignal, nutritionController.signal]);
+          const nutritionTimeoutId = window.setTimeout(
+            () => {
+              nutritionController.abort("timeout");
+              if (editSignal.aborted) return;
+              setItems((current) => current.map((item, index) => {
+                const match = localMatches[index];
+                if (!match || match.includedInTotal || !unchangedFood(item, index)) return item;
+                return {
+                  ...item,
+                  nutritionMatch: {
+                    ...match,
+                    reasons: [copy.nutritionLookupFailed,
+                      ...match.reasons.filter((reason) => reason !== copy.nutritionLookupFailed)],
+                  },
+                };
+              }));
+              setNutritionPending(false);
+            },
+            NUTRITION_ENRICH_TIMEOUT_MS,
+          );
+          const knownFoods = parsed.data.foods.flatMap((food, index) =>
+            hasKnownPortion(food) && localMatches[index]
+              ? [{ index, food, match: localMatches[index]! }] : [],
+          );
+          void enrichUnresolvedMatches(
+            knownFoods.map(entry => entry.food),
+            knownFoods.map(entry => entry.match),
+            nutritionSignal,
+          )
+            .then((matches) => {
+              if (nutritionSignal.aborted) return;
+              setItems((current) => current.map((item, index) => {
+                const knownIndex = knownFoods.findIndex(entry => entry.index === index);
+                if (knownIndex < 0 || !unchangedFood(item, index) ||
+                    matches[knownIndex] === localMatches[index]) return item;
+                return { ...item, nutritionMatch: matches[knownIndex] };
+              }));
+            })
+            .catch(() => {})
+            .finally(() => {
+              window.clearTimeout(nutritionTimeoutId);
+              if (!editSignal.aborted) setNutritionPending(false);
+            });
+        }
       }
     } catch (error) {
       if (analyzeAbortRef.current !== controller) return;
@@ -563,13 +642,16 @@ export function KcalCueApp({ initialProviderMode, initialDraft, onDraftChange, o
     setPreviewUrl(null);
     setPreviewFailed(false);
     setAnalysis(null);
+    setAnalysisProvenance(null);
     setItems([]);
     setAppError(null);
+    setNutritionPending(false);
     setActiveMode(initialProviderMode);
   };
 
   const startManual = () => {
     setAnalysis(null);
+    setAnalysisProvenance(null);
     setItems([createManualItem()]);
     setActiveMode("manual");
     setStage("result");
@@ -582,32 +664,30 @@ export function KcalCueApp({ initialProviderMode, initialDraft, onDraftChange, o
     setItems((current) => current.map((item) => (item.id === id ? update(item) : item)));
   };
 
-  const handleNameChange = (id: string, name: string) => {
-    const previousTimer = nameEditTimers.current.get(id);
-    if (previousTimer !== undefined) {
-      window.clearTimeout(previousTimer);
+  const invalidateNameLookup = (id: string) => {
+    const timer = nameEditTimers.current.get(id);
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
       nameEditTimers.current.delete(id);
     }
+    const revision = (nameEditRevisions.current.get(id) ?? 0) + 1;
+    nameEditRevisions.current.set(id, revision);
+    return revision;
+  };
 
+  const handleNameChange = (id: string, name: string) => {
+    const revision = invalidateNameLookup(id);
     const currentItem = items.find((item) => item.id === id);
     if (!currentItem) return;
-
-    const nextFood = {
-      ...currentItem,
-      displayName: name,
-      normalizedName:
-        normalizeFoodName(currentItem.displayName) === normalizeFoodName(name)
-          ? currentItem.normalizedName
-          : name,
-    };
-    const cachedMatch = canReuseNutritionMatchForNameEdit(
+    const nextFood = renameFoodItem(currentItem, name, originalFoods.get(id) ?? initialDraft?.originalItems.find(food => food.id === id));
+    const cachedMatch = hasKnownPortion(currentItem) && hasKnownPortion(nextFood) && canReuseNutritionMatchForNameEdit(
       currentItem,
       nextFood,
       currentItem.nutritionMatch,
     )
       ? currentItem.nutritionMatch
       : null;
-    const localMatch = name.trim() ? nutritionProvider.resolve(nextFood) : null;
+    const localMatch = name.trim() && hasKnownPortion(nextFood) ? nutritionProvider.resolve(nextFood) : null;
     const match = cachedMatch ?? localMatch;
 
     updateItem(id, () => ({
@@ -620,7 +700,8 @@ export function KcalCueApp({ initialProviderMode, initialDraft, onDraftChange, o
       activeMode !== "live" ||
       !localMatch ||
       localMatch.includedInTotal ||
-      cachedMatch
+      cachedMatch ||
+      !hasKnownPortion(nextFood)
     ) {
       return;
     }
@@ -629,7 +710,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, onDraftChange, o
       const signal = editAbortRef.current.signal;
       void resolveNutritionMatchWithFallback(nextFood, localMatch, signal).then(
         (resolvedMatch) => {
-          if (signal.aborted) return;
+          if (signal.aborted || nameEditRevisions.current.get(id) !== revision) return;
           updateItem(id, (item) => {
             if (item.displayName !== name) return item;
             return {
@@ -648,32 +729,45 @@ export function KcalCueApp({ initialProviderMode, initialDraft, onDraftChange, o
   const handlePortionChange = (
     id: string,
     field: "portionMin" | "portionMax",
-    value: number,
+    value: number | null,
   ) => {
-    if (!Number.isFinite(value) || value <= 0) return;
+    if (value !== null && (!Number.isFinite(value) || value <= 0)) return;
+    invalidateNameLookup(id);
     updateItem(id, (item) => {
+      if (value === null) return {
+        ...item, portionMin: null, portionMax: null,
+        originalPortionMin: null, originalPortionMax: null,
+        nutritionMatch: null,
+      };
       if (field === "portionMin") {
-        const portionMax = Math.max(value, item.portionMax);
+        const portionMax = Math.max(value, item.portionMax ?? value);
         return {
           ...item,
           portionMin: value,
           portionMax,
           originalPortionMin: value,
           originalPortionMax: portionMax,
+          nutritionMatch: item.nutritionMatch ?? nutritionProvider.resolve({
+            ...item, portionMin: value, portionMax,
+          }),
         };
       }
-      const portionMin = Math.min(value, item.portionMin);
+      const portionMin = Math.min(value, item.portionMin ?? value);
       return {
         ...item,
         portionMin,
         portionMax: value,
         originalPortionMin: portionMin,
         originalPortionMax: value,
+        nutritionMatch: item.nutritionMatch ?? nutritionProvider.resolve({
+          ...item, portionMin, portionMax: value,
+        }),
       };
     });
   };
 
   const handleUnitChange = (id: string, unit: PortionUnit) => {
+    invalidateNameLookup(id);
     updateItem(id, (item) => {
       const profile =
         item.nutritionMatch?.profile ??
@@ -684,6 +778,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, onDraftChange, o
   };
 
   const handlePreset = (id: string, preset: PortionPreset) => {
+    invalidateNameLookup(id);
     updateItem(id, (item) => applyPortionPreset(item, preset));
   };
 
@@ -749,6 +844,8 @@ export function KcalCueApp({ initialProviderMode, initialDraft, onDraftChange, o
           analysis={analysis}
           items={items}
           mode={activeMode}
+          nutritionPending={nutritionPending}
+          calorieCorrection={calorieCorrection}
           previewUrl={previewUrl}
           previewFailed={previewFailed}
           isHeic={isHeicFile(file?.name ?? "", file?.type)}
@@ -758,7 +855,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, onDraftChange, o
           onPreset={handlePreset}
           onDelete={(id) => setItems((current) => current.filter((item) => item.id !== id))}
           onAdd={() => setItems((current) => [...current, createManualItem()])}
-          onReset={reset}
+          onReset={onNewMeal ?? reset}
         />
       ) : null}
 

@@ -36,7 +36,7 @@ export const copy = {
   foodBreakdown: "食物明細",
   foodBreakdownBody: "修正名稱、份量或單位，總數會即時更新。",
   uncertaintyTitle: "主要不確定因素",
-  evidenceTitle: "相片分析依據",
+  evidenceTitle: "原始 AI 相片分析",
   localNutritionNotice: "營養數值來自有來源的參考資料，不是 AI 自行估算。",
   nutritionSourceTitle: "營養資料來源",
   partialNutrition: "此總數只包括有可靠營養資料的食物。",
@@ -47,6 +47,7 @@ export const copy = {
   nutritionLabel: "營養資料",
   nutritionIncomplete: "未完整",
   nutritionUnavailable: "未有足夠資料",
+  nutritionLookupFailed: "補充營養資料暫時未能取得，這項食物仍未計入總數。你可以手動選擇有資料的食物。",
   addFood: "新增食物",
   emptyName: "未命名食物",
   deleteFood: "刪除",
@@ -67,6 +68,7 @@ export const unitCopy = {
 } as const;
 
 export const errorCopy: Record<string, { title: string; body: string }> = {
+  analysis_paused: { title: "AI 分析暫停中", body: "目前暫停新的圖片分析。你仍可手動記餐、修正及同步已有記錄。" },
   login_required: { title: "請先登入", body: "到帳戶使用 Email 登入連結或 Google 登入後，再試一次。相片仍保留於目前頁面。" },
   trial_access_required: { title: "尚未開通試用權限", body: "請聯絡管理員為這個 Email 開通試用權限，再試一次。" },
   email_unverified: { title: "請驗證 Email", body: "請使用 Email 登入連結或已驗證的 Google 帳戶重新登入。" },
@@ -101,7 +103,11 @@ export const errorCopy: Record<string, { title: string; body: string }> = {
   },
   rate_limited: {
     title: "暫時太多分析要求",
-    body: "請稍後再試，或先體驗示範餐。",
+    body: "請稍後再試；你亦可以先手動記錄呢餐。",
+  },
+  analysis_outcome_unknown: {
+    title: "重複分析要求已攔截",
+    body: "同一分析要求可能仍在處理，或回覆未能送達。相片仍在本頁；再次按分析可能使用新的 AI 額度。",
   },
   service_unavailable: {
     title: "AI 服務暫時有問題",

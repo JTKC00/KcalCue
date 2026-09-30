@@ -3,6 +3,7 @@ import {
   base64ByteLength,
   extractOpenAIErrorDetails,
   logFoodVisionDiagnostic,
+  logFoodVisionUsage,
   sanitizeDiagnosticMessage,
 } from "./diagnostics";
 
@@ -76,5 +77,62 @@ describe("food-vision diagnostics", () => {
       imageByteSize: 2048,
     });
     expect(JSON.stringify(spy.mock.calls[0])).not.toMatch(/sk-|input_image|authorization/i);
+  });
+
+  it("logs only bounded model labels and nonnegative token counts", () => {
+    const spy = vi.spyOn(console, "info").mockImplementation(() => {});
+    logFoodVisionUsage({
+      requestedModel: "gpt-6-sol",
+      reportedModel: "gpt-sk-proj-DummySecretValueForTestsOnly123456789",
+      analysisVersion: "food-vision-v2",
+      foodVisionMs: 125.6,
+      usage: {
+        input_tokens: 100,
+        input_tokens_details: { cached_tokens: -1 },
+        output_tokens: 42,
+        total_tokens: Number.POSITIVE_INFINITY,
+      },
+    });
+    expect(spy).toHaveBeenCalledExactlyOnceWith("[kcalcue:food-vision-usage]", {
+      stage: "provider_response",
+      requestedModel: "gpt-6-sol",
+      reportedModel: null,
+      analysisVersion: "food-vision-v2",
+      inputTokens: 100,
+      cachedInputTokens: null,
+      outputTokens: 42,
+      totalTokens: null,
+      foodVisionMs: 126,
+    });
+    expect(JSON.stringify(spy.mock.calls)).not.toContain("DummySecretValueForTestsOnly");
+  });
+
+  it("does not log unknown model suffixes that could contain private IDs", () => {
+    const spy = vi.spyOn(console, "info").mockImplementation(() => {});
+    logFoodVisionUsage({
+      requestedModel: "gpt-6-sol-private-account-123",
+      reportedModel: "gpt-6-sol-2026-09-28",
+      analysisVersion: "food-vision-v2",
+      foodVisionMs: 1,
+      usage: { input_tokens: 1, output_tokens: 2, total_tokens: 3 },
+    });
+    expect(spy.mock.calls[0]?.[1]).toMatchObject({
+      requestedModel: null,
+      reportedModel: "gpt-6-sol",
+    });
+    logFoodVisionUsage({
+      requestedModel: "gemini-3.8-flash",
+      reportedModel: "gemini-2.5-flash",
+      analysisVersion: "food-vision-v2",
+      foodVisionMs: 1,
+      usage: { input_tokens: 3, output_tokens: 2, total_tokens: 9 },
+    });
+    expect(spy.mock.calls[1]?.[1]).toMatchObject({
+      requestedModel: "gemini-3.8-flash",
+      reportedModel: null,
+      inputTokens: 3,
+      outputTokens: 2,
+      totalTokens: 9,
+    });
   });
 });

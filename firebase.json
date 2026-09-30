@@ -1,5 +1,17 @@
 {
   "firestore": { "rules": "firestore.rules" },
+  "hosting": {
+    "site": "gen-lang-client-0116641325",
+    "rewrites": [
+      {
+        "source": "**",
+        "run": { "serviceId": "kcalcue", "region": "asia-east1" }
+      }
+    ],
+    "headers": [
+      { "source": "/api/**", "headers": [{ "key": "Cache-Control", "value": "private, no-store" }] }
+    ]
+  },
   "emulators": {
     "firestore": { "host": "127.0.0.1", "port": 8080 },
     "ui": { "enabled": false }

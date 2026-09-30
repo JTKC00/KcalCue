@@ -1,11 +1,12 @@
-import { foodAnalysisSchema, type FoodAnalysis } from "@/lib/domain/food-analysis";
+import { foodAnalysisSchema, foodEstimateSchema, type FoodAnalysis, type FoodEstimate } from "@/lib/domain/food-analysis";
+import { FOOD_VISION_ANALYSIS_VERSION } from "@/lib/domain/analysis-provenance";
 import type {
   FoodImageInput,
   FoodVisionAnalyzeOptions,
   FoodVisionProvider,
 } from "./types";
 
-export const demoFoodAnalysis: FoodAnalysis = foodAnalysisSchema.parse({
+const parsedDemoFoodAnalysis = foodAnalysisSchema.parse({
   analysisStatus: "success",
   foods: [
     {
@@ -69,6 +70,13 @@ export const demoFoodAnalysis: FoodAnalysis = foodAnalysisSchema.parse({
   unknownInformation: ["實際用油、醬汁配方及被遮蓋部分均不知道。"],
 });
 
+// The bundled demo has intentionally known numeric portions; preserve that
+// narrower type for numeric nutrition fixtures and callers.
+export const demoFoodAnalysis: FoodAnalysis & { foods: FoodEstimate[] } = {
+  ...parsedDemoFoodAnalysis,
+  foods: parsedDemoFoodAnalysis.foods.map(food => foodEstimateSchema.parse(food)),
+};
+
 export class DemoFoodVisionProvider implements FoodVisionProvider {
   readonly id = "demo";
   readonly mode = "demo" as const;
@@ -79,6 +87,15 @@ export class DemoFoodVisionProvider implements FoodVisionProvider {
   ): Promise<FoodAnalysis> {
     void image;
     options?.signal?.throwIfAborted();
-    return foodAnalysisSchema.parse(structuredClone(demoFoodAnalysis));
+    const analysis = foodAnalysisSchema.parse(structuredClone(demoFoodAnalysis));
+    options?.onMetadata?.({
+      provider: "demo",
+      requestedModel: null,
+      reportedModel: null,
+      modelVersion: null,
+      analysisVersion: FOOD_VISION_ANALYSIS_VERSION,
+      analyzedAt: new Date().toISOString(),
+    });
+    return analysis;
   }
 }

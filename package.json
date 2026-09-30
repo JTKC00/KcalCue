@@ -14,11 +14,14 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "eval": "vitest run src/lib/evaluation/evaluation.test.ts --reporter=dot",
+    "trial:cloud": "node scripts/cloud-run.mjs",
+    "check:codecs": "node scripts/check-codecs.mjs",
     "test:watch": "vitest",
     "test:e2e": "node scripts/e2e-server.mjs",
     "test:firestore": "vitest run --config vitest.firestore.config.mts"
   },
   "dependencies": {
+    "@google/genai": "2.24.0",
     "firebase": "12.18.0",
     "firebase-admin": "14.3.0",
     "next": "^16.3.0",
@@ -41,6 +44,8 @@
     "eslint-config-next": "^16.3.0",
     "fake-indexeddb": "6.2.5",
     "jsdom": "^30.0.1",
+    "node-addon-api": "8.9.2",
+    "node-gyp": "13.0.2",
     "typescript": "^6.0.3",
     "vitest": "4.1.11"
   },

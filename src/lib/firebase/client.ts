@@ -55,7 +55,11 @@ export async function sendEmailLink(email: string) {
   const auth = firebaseAuth();
   if (!auth) throw new Error("cloud_unavailable");
   await sendSignInLinkToEmail(auth, email, {
-    url: `${location.origin}/`,
+    // Enable the canonical destination only with the verified production build.
+    url: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID === "gen-lang-client-0116641325" &&
+      process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN === "kcalcue.snugzap.com"
+      ? "https://kcalcue.snugzap.com/"
+      : `${location.origin}/`,
     handleCodeInApp: true,
   });
   localStorage.setItem("kcalcue-login-email", email);

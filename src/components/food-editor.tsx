@@ -3,7 +3,6 @@
 import { useState } from "react";
 
 import { confidenceCopy, copy, unitCopy } from "@/content/zh-HK";
-import { confidenceLevel } from "@/lib/domain/confidence";
 import {
   portionUnits,
   type PortionUnit,
@@ -12,11 +11,16 @@ import type { EditableFoodItem, PortionPreset } from "@/lib/domain/editable-meal
 import { roundRange, type CalculatedFood } from "@/lib/nutrition/calculation";
 import { TrashIcon } from "./icons";
 
+export interface RecognitionBadge {
+  label: string;
+}
+
 interface FoodEditorProps {
   item: EditableFoodItem;
   calculation: CalculatedFood;
+  recognition: RecognitionBadge;
   onNameChange: (name: string) => void;
-  onPortionChange: (field: "portionMin" | "portionMax", value: number) => void;
+  onPortionChange: (field: "portionMin" | "portionMax", value: number | null) => void;
   onUnitChange: (unit: PortionUnit) => void;
   onPreset: (preset: PortionPreset) => void;
   onDelete: () => void;
@@ -28,15 +32,16 @@ const presetLabels: Record<PortionPreset, string> = {
   large: "多",
 };
 
-function PortionInput({ id, value, onCommit }: { id: string; value: number; onCommit: (value: number) => void }) {
+function PortionInput({ id, value, onCommit }: { id: string; value: number | null; onCommit: (value: number | null) => void }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [error, setError] = useState(false);
-  return <><input id={id} type="number" inputMode="decimal" min="0.1" max="5000" step="any" required
-    value={editing ?? value} aria-invalid={error || undefined} aria-describedby={error ? `${id}-error` : undefined}
+  return <><input id={id} type="number" inputMode="decimal" min="0.1" max="5000" step="any"
+    value={editing ?? value ?? ""} placeholder="未知" aria-invalid={error || undefined} aria-describedby={error ? `${id}-error` : undefined}
     onChange={event => { setEditing(event.target.value); setError(false); }}
     onBlur={event => {
       const number = Number(event.target.value);
-      if (!event.target.value || !Number.isFinite(number) || number < .1 || number > 5000) { setError(true); return; }
+      if (!event.target.value) { onCommit(null); setEditing(null); setError(false); return; }
+      if (!Number.isFinite(number) || number < .1 || number > 5000) { setError(true); return; }
       onCommit(number); setEditing(null); setError(false);
     }} />{error && <small id={`${id}-error`} role="alert">請輸入 0.1 至 5000 的份量。</small>}</>;
 }
@@ -50,13 +55,13 @@ function calorieRange(calculation: CalculatedFood): string {
 export function FoodEditor({
   item,
   calculation,
+  recognition,
   onNameChange,
   onPortionChange,
   onUnitChange,
   onPreset,
   onDelete,
 }: FoodEditorProps) {
-  const recognition = confidenceLevel(item.recognitionConfidence);
   const nutrition = calculation.match;
   const fieldId = `food-${item.id}`;
 
@@ -93,8 +98,8 @@ export function FoodEditor({
 
       <div className="food-summary-line">
         <strong>{calorieRange(calculation)}</strong>
-        <span className={`confidence-badge confidence-${recognition}`}>
-          {copy.recognitionLabel}：{confidenceCopy[recognition]}
+        <span className="confidence-badge">
+          {recognition.label}
         </span>
         <span
           className={`confidence-badge confidence-${
@@ -112,7 +117,7 @@ export function FoodEditor({
         <legend>快速調整份量</legend>
         <div className="segment-control">
           {(Object.keys(presetLabels) as PortionPreset[]).map((preset) => (
-            <button key={preset} type="button" onClick={() => onPreset(preset)}>
+            <button key={preset} type="button" disabled={item.portionMin === null} onClick={() => onPreset(preset)}>
               {presetLabels[preset]}
             </button>
           ))}
@@ -156,6 +161,10 @@ export function FoodEditor({
           </select>
         </div>
       </div>
+
+      {item.portionMin === null ? (
+        <p className="food-uncertainty" role="status">請核對食物名稱；現有資料不足以判斷你吃了多少。可填寫份量；留空儲存時，本餐 kcal 會標示為未知。</p>
+      ) : null}
 
       {calculation.unavailableReason ? (
         <p className="inline-warning">{calculation.unavailableReason}</p>

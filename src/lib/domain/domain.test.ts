@@ -13,7 +13,9 @@ import {
 } from "./editable-meal";
 import {
   foodAnalysisJsonSchema,
+  foodEstimateSchema,
   foodIdentityLevels,
+  observedFoodSchema,
   validateFoodAnalysis,
   type FoodAnalysis,
   type FoodEstimate,
@@ -187,6 +189,32 @@ describe("portion adjustment", () => {
 describe("structured food analysis validation", () => {
   it("accepts a valid structured analysis", () => {
     expect(validateFoodAnalysis(makeAnalysis())).toEqual(makeAnalysis());
+    expect(foodEstimateSchema.parse(makeFood())).toEqual(makeFood());
+    expect(observedFoodSchema.parse(makeFood())).toEqual(makeFood());
+  });
+
+  it("retains visible food with an unknown personal portion, without making it a numeric estimate", () => {
+    const unknownPortion = makeFood({ uncertaintyReasons: ["共用餐盤，未見個人份量。"] });
+    const analysis = {
+      ...makeAnalysis(),
+      foods: [{ ...unknownPortion, portionMin: null, portionMax: null }],
+    };
+    expect(validateFoodAnalysis(analysis).foods[0]).toMatchObject({
+      displayName: "白飯",
+      portionMin: null,
+      portionMax: null,
+    });
+    expect(foodEstimateSchema.safeParse(analysis.foods[0]).success).toBe(false);
+  });
+
+  it.each([
+    { portionMin: null, portionMax: 150 },
+    { portionMin: 100, portionMax: null },
+  ])("rejects a partially unknown portion: %j", (portion) => {
+    expect(() => validateFoodAnalysis({
+      ...makeAnalysis(),
+      foods: [{ ...makeFood(), ...portion }],
+    })).toThrow(/portionMin and portionMax must both be null or both be numbers/);
   });
 
   it("rejects internally inconsistent or out-of-range structured data", () => {
@@ -264,6 +292,10 @@ describe("structured food analysis validation", () => {
     expect(
       foodAnalysisJsonSchema.properties.foods.items.properties.unit.enum,
     ).toEqual(["g", "ml", "piece", "bowl", "cup"]);
+    expect(foodAnalysisJsonSchema.properties.foods.items.properties.portionMin.type)
+      .toEqual(["number", "null"]);
+    expect(foodAnalysisJsonSchema.properties.foods.items.properties.portionMax.type)
+      .toEqual(["number", "null"]);
     expect(foodAnalysisJsonSchema.properties.foods.items.required).toContain(
       "identityLevel",
     );

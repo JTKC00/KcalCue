@@ -324,6 +324,18 @@ describe("nutrition matching", () => {
     });
   });
 
+  it("does not mark an exact local food as included when its unit has no gram factor", () => {
+    const match = provider.resolve(makeFood({
+      displayName: "香蕉", normalizedName: "banana", unit: "ml",
+    }));
+    expect(match).toMatchObject({
+      profile: null,
+      matchType: "unresolved",
+      includedInTotal: false,
+    });
+    expect(match.reasons[0]).toContain("ml");
+  });
+
   it("does not treat generic curry as a reliable match", () => {
     const match = provider.resolve(
       makeFood({

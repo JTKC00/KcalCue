@@ -108,6 +108,7 @@ const USDA_DESCRIPTION_FILLER_WORDS = new Set([
 
 export type UsdaFailureCode =
   | "missing_key"
+  | "canceled"
   | "timeout"
   | "rate_limited"
   | "invalid_response"
@@ -258,8 +259,10 @@ function toPointProfile(food: UsdaFood): NutritionProfile | null {
 function nutritionCacheKey(
   food: FoodEstimate,
   identity: ReturnType<typeof canonicalizeFood>,
+  query: string,
 ): string {
   return [
+    query,
     normalizeFoodName(food.normalizedName || food.displayName),
     identity.canonicalName,
     identity.category,
@@ -269,16 +272,64 @@ function nutritionCacheKey(
   ].join("|");
 }
 
-const queryCache = new Map<string, NutritionMatch>();
+const USDA_CACHE_TTL_MS = 60 * 60 * 1_000;
+const USDA_CACHE_MAX_ENTRIES = 256;
+const queryCache = new Map<string, { match: NutritionMatch; expiresAt: number }>();
+interface PendingQuery {
+  promise: Promise<NutritionMatch>;
+  controller: AbortController;
+  subscribers: number;
+}
+const pendingQueries = new Map<string, PendingQuery>();
+let cacheGeneration = 0;
+
+function canceledLookup(): UsdaNutritionError {
+  return new UsdaNutritionError("canceled", "USDA lookup was canceled.");
+}
+
+function assertActive(signal: AbortSignal): void {
+  if (signal.aborted) throw canceledLookup();
+}
+
+function rememberMatch(key: string, match: NutritionMatch): void {
+  queryCache.delete(key);
+  queryCache.set(key, { match, expiresAt: Date.now() + USDA_CACHE_TTL_MS });
+  while (queryCache.size > USDA_CACHE_MAX_ENTRIES) {
+    const oldest = queryCache.keys().next().value;
+    if (oldest === undefined) break;
+    queryCache.delete(oldest);
+  }
+}
 
 export function clearUsdaCache(): void {
   queryCache.clear();
+  pendingQueries.clear();
+  cacheGeneration += 1;
+}
+
+export function supportsUsdaPortionUnit(unit: FoodEstimate["unit"]): boolean {
+  // FDC search profiles only contain per-100g values; this pipeline has no
+  // evidence-based conversion for volume or count units.
+  return unit === "g";
 }
 
 export class UsdaNutritionClient {
-  constructor(private readonly apiKey: string) {}
+  private readonly pendingScope: string;
 
-  async resolve(food: FoodEstimate): Promise<NutritionMatch> {
+  constructor(
+    private readonly apiKey: string,
+    private readonly reserveLookup?: () => Promise<boolean>,
+    accountScope?: string,
+  ) {
+    // A reservation belongs to one account. Never let another account join
+    // its in-flight promise, including a failed quota reservation.
+    this.pendingScope = accountScope
+      ? `account:${accountScope}`
+      : reserveLookup ? `client:${crypto.randomUUID()}` : "public";
+  }
+
+  async resolve(food: FoodEstimate, signal?: AbortSignal): Promise<NutritionMatch> {
+    if (signal?.aborted) throw canceledLookup();
     const identity = canonicalizeFood(food);
     if (isCompositeIdentity(identity)) {
       return {
@@ -293,17 +344,111 @@ export class UsdaNutritionClient {
     if (!this.apiKey.trim()) {
       throw new UsdaNutritionError("missing_key", "USDA API key is not configured.");
     }
+    if (!supportsUsdaPortionUnit(food.unit)) {
+      return {
+        profile: null,
+        confidence: "low",
+        matchType: "unresolved",
+        reasons: [`USDA 未有 ${food.unit} 的可靠克重換算，因此不納入總數。`],
+        identity,
+        includedInTotal: false,
+      };
+    }
 
     const query = [...new Set(
       [food.normalizedName, food.displayName]
         .map(normalizeFoodName)
         .filter(Boolean),
     )].join(" ");
-    const cacheKey = nutritionCacheKey(food, identity);
+    const cacheKey = nutritionCacheKey(food, identity, query);
     const cached = queryCache.get(cacheKey);
-    if (cached) return { ...cached, identity };
+    if (cached && cached.expiresAt > Date.now()) return { ...cached.match, identity };
+    if (cached) queryCache.delete(cacheKey);
 
+    const pendingKey = JSON.stringify([this.pendingScope, cacheKey]);
+    let pending = pendingQueries.get(pendingKey);
+    if (!pending) {
+      const generation = cacheGeneration;
+      const entry: PendingQuery = {
+        promise: undefined!,
+        controller: new AbortController(),
+        subscribers: 0,
+      };
+      entry.promise = this.lookup(food, identity, query, entry.controller.signal)
+        .then((match) => {
+          if (generation === cacheGeneration && !entry.controller.signal.aborted && entry.subscribers > 0)
+            rememberMatch(cacheKey, match);
+          return match;
+        })
+        .finally(() => {
+          if (pendingQueries.get(pendingKey) === entry) pendingQueries.delete(pendingKey);
+        });
+      // A reservation callback may synchronously abort before the first
+      // subscriber attaches. Keep that cancellation from becoming unhandled.
+      void entry.promise.catch(() => {});
+      pending = entry;
+      pendingQueries.set(pendingKey, entry);
+    }
+    return { ...(await this.subscribe(pendingKey, pending, signal)), identity };
+  }
+
+  private subscribe(
+    key: string,
+    pending: PendingQuery,
+    signal?: AbortSignal,
+  ): Promise<NutritionMatch> {
+    return new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        if (pending.subscribers === 0) {
+          pending.controller.abort();
+          if (pendingQueries.get(key) === pending) pendingQueries.delete(key);
+        }
+        reject(canceledLookup());
+        return;
+      }
+
+      pending.subscribers += 1;
+      let settled = false;
+      const finish = (callback: () => void, canceled = false) => {
+        if (settled) return;
+        settled = true;
+        signal?.removeEventListener("abort", onAbort);
+        pending.subscribers -= 1;
+        if (canceled && pending.subscribers === 0) {
+          pending.controller.abort();
+          if (pendingQueries.get(key) === pending) pendingQueries.delete(key);
+        }
+        callback();
+      };
+      const onAbort = () => finish(() => reject(canceledLookup()), true);
+      signal?.addEventListener("abort", onAbort, { once: true });
+      pending.promise.then(
+        (match) => finish(() => resolve(match)),
+        (error: unknown) => finish(() => reject(error)),
+      );
+    });
+  }
+
+  private async lookup(
+    food: FoodEstimate,
+    identity: ReturnType<typeof canonicalizeFood>,
+    query: string,
+    signal: AbortSignal,
+  ): Promise<NutritionMatch> {
     try {
+      // Cache hits and coalesced in-flight lookups never reserve another call.
+      // A failed reservation must stop before the external USDA request.
+      if (this.reserveLookup) {
+        let allowed: boolean;
+        try {
+          allowed = await this.reserveLookup();
+        } catch {
+          throw new UsdaNutritionError("unavailable", "USDA lookup budget is unavailable.");
+        }
+        if (!allowed)
+          throw new UsdaNutritionError("rate_limited", "USDA lookup budget is exhausted.");
+      }
+      assertActive(signal);
       const url = new URL(USDA_SEARCH_URL);
       url.searchParams.set("api_key", this.apiKey);
       url.searchParams.set("query", query);
@@ -312,8 +457,9 @@ export class UsdaNutritionClient {
 
       const response = await fetch(url, {
         method: "GET",
-        signal: AbortSignal.timeout(USDA_TIMEOUT_MS),
+        signal: AbortSignal.any([signal, AbortSignal.timeout(USDA_TIMEOUT_MS)]),
       });
+      assertActive(signal);
 
       if (response.status === 429) {
         throw new UsdaNutritionError("rate_limited", "USDA rate limit reached.");
@@ -323,6 +469,7 @@ export class UsdaNutritionClient {
       }
 
       const payload = (await response.json()) as UsdaSearchResponse;
+      assertActive(signal);
       const profile = (payload.foods ?? [])
         .map((candidate) => ({
           candidate,
@@ -342,7 +489,6 @@ export class UsdaNutritionClient {
           identity,
           includedInTotal: false,
         };
-        queryCache.set(cacheKey, unresolved);
         return unresolved;
       }
 
@@ -360,9 +506,9 @@ export class UsdaNutritionClient {
         identity,
         includedInTotal,
       };
-      queryCache.set(cacheKey, match);
       return match;
     } catch (error) {
+      if (signal.aborted) throw canceledLookup();
       if (error instanceof UsdaNutritionError) throw error;
       if (
         error instanceof DOMException &&

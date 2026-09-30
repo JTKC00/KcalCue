@@ -10,6 +10,7 @@ import {
 } from "./types";
 import { demoFoodAnalysis } from "@/lib/providers/food-vision/demo";
 import { createEditableFoodItems } from "@/lib/domain/editable-meal";
+import { provenance } from "@/test/provenance-fixture";
 
 describe("meal records and local drafts", () => {
   it("preserves the original local date independently of a later time zone", () => {
@@ -77,5 +78,101 @@ describe("meal records and local drafts", () => {
     await localMeals.clear("a");
     expect((await localMeals.read("a")).draft).toBeNull();
     expect((await localMeals.read("b")).draft).not.toBeNull();
+  });
+  it("isolates two tabs' drafts while either tab refreshes the same account", async () => {
+    const uid = "two-tab-drafts";
+    const first = { ...newDraft(), photo: new Blob(["A"], { type: "image/jpeg" }) };
+    const second = { ...newDraft(), photo: new Blob(["B"], { type: "image/jpeg" }) };
+    await localMeals.write(uid, { records: [], draft: null, syncedAt: null }, "tab-a");
+    await localMeals.write(uid, { records: [], draft: null, syncedAt: null }, "tab-b");
+    await localMeals.write(uid, { records: [], draft: first, syncedAt: null }, "tab-a");
+    await localMeals.write(uid, { records: [], draft: null, syncedAt: "2026-09-28T00:00:00Z" }, "tab-b");
+    expect((await localMeals.read(uid, "tab-a")).draft?.id).toBe(first.id);
+    expect(await (await localMeals.read(uid, "tab-a")).draft?.photo?.text()).toBe("A");
+    await localMeals.write(uid, { records: [], draft: second, syncedAt: null }, "tab-b");
+    expect((await localMeals.read(uid, "tab-a")).draft?.id).toBe(first.id);
+    expect((await localMeals.read(uid, "tab-b")).draft?.id).toBe(second.id);
+    await localMeals.clear(uid, "tab-b");
+    expect((await localMeals.read(uid, "tab-a")).draft?.id).toBe(first.id);
+    expect((await localMeals.read(uid, "tab-b")).draft).toBeNull();
+    await localMeals.clear(uid);
+    expect((await localMeals.read(uid, "tab-a")).draft).toBeNull();
+    expect((await localMeals.read(uid, "tab-b")).draft).toBeNull();
+  });
+  it("adopts an older account draft once without letting a new tab steal it", async () => {
+    const uid = "legacy-tab-upgrade";
+    const old = newDraft();
+    await localMeals.write(uid, { records: [], draft: old, syncedAt: null });
+    expect((await localMeals.read(uid, "first-tab")).draft?.id).toBe(old.id);
+    expect((await localMeals.read(uid, "later-tab")).draft?.id).toBe(old.id);
+    expect((await localMeals.read(uid)).draft?.id).toBe(old.id);
+    await localMeals.clear(uid);
+  });
+  it("keeps a newer sibling draft when a stale copy is cleared", async () => {
+    const uid = "stale-draft-clear";
+    const first = newDraft();
+    await localMeals.write(uid, { records: [], draft: first, syncedAt: null }, "tab-a");
+    expect((await localMeals.read(uid, "tab-b")).draft?.id).toBe(first.id);
+    const edited = { ...first, date: "2026-09-28" };
+    await localMeals.write(uid, { records: [], draft: edited, syncedAt: null }, "tab-a");
+    await localMeals.write(uid, { records: [], draft: null, syncedAt: null }, "tab-b");
+    expect((await localMeals.read(uid, "fresh-tab")).draft).toEqual(edited);
+    await localMeals.clear(uid);
+  });
+  it("keeps a newer sibling draft visible when an older copy is edited", async () => {
+    const uid = "stale-draft-edit";
+    const first = { ...newDraft(), date: "2026-09-27" };
+    await localMeals.write(uid, { records: [], draft: first, syncedAt: null }, "tab-a");
+    expect((await localMeals.read(uid, "tab-b")).draft).toEqual(first);
+    const newer = { ...first, date: "2026-09-28" };
+    await localMeals.write(uid, { records: [], draft: newer, syncedAt: null }, "tab-a");
+    await localMeals.write(uid, {
+      records: [], draft: { ...first, time: "12:30" }, syncedAt: null,
+    }, "tab-b");
+    expect((await localMeals.read(uid, "fresh-tab")).draft).toEqual(newer);
+    expect((await localMeals.read(uid, "tab-b")).draft?.time).toBe("12:30");
+    const variants = await localMeals.listDrafts(uid);
+    expect(new Set(variants.map((variant) => variant.revision)).size).toBe(2);
+    const olderFork = variants.find((variant) => variant.tabId === "tab-b")!;
+    const restored = await localMeals.restoreDraft(uid, "fresh-tab", olderFork.tabId);
+    expect(restored.time).toBe("12:30");
+    expect((await localMeals.read(uid, "fresh-tab")).draft?.time).toBe("12:30");
+    expect((await localMeals.read(uid, "later-tab")).draft?.time).toBe("12:30");
+    await localMeals.write(uid, {
+      records: [], draft: { ...first, time: "13:00" }, syncedAt: null,
+    }, "tab-b");
+    expect((await localMeals.read(uid, "another-tab")).draft?.time).toBe("12:30");
+    await localMeals.clear(uid, "tab-b");
+    expect((await localMeals.read(uid, "last-tab")).draft?.time).toBe("12:30");
+    expect((await localMeals.listDrafts(uid)).some((variant) =>
+      variant.tabId !== "fresh-tab" && variant.revision !== olderFork.revision)).toBe(true);
+    await localMeals.clear(uid);
+    expect(await localMeals.listDrafts(uid)).toEqual([]);
+  });
+  it("preserves read-only metadata with draft photos without treating it as writable input", async () => {
+    const draft = {
+      ...newDraft(), version: 3, schemaVersion: 1,
+      createdAt: "2026-09-01T00:00:00.000Z",
+      analysis: demoFoodAnalysis, analysisProvenance: provenance,
+      calorieInput: "", calorieCorrection: null,
+      items: createEditableFoodItems(demoFoodAnalysis.foods),
+      photo: new Blob(["draft photo"], { type: "image/jpeg" }),
+    };
+    await localMeals.write("metadata-account", { records: [], draft, syncedAt: null });
+    const restored = (await localMeals.read("metadata-account")).draft!;
+    expect(restored.createdAt).toBe(draft.createdAt);
+    expect(restored.schemaVersion).toBe(1);
+    expect(restored.analysisProvenance).toEqual(provenance);
+    expect(restored.analysis).toEqual(demoFoodAnalysis);
+    expect(restored.calorieInput).toBe("");
+    expect(restored.calorieCorrection).toBeNull();
+    expect(await restored.photo!.text()).toBe("draft photo");
+    const command = mealInputSchema.parse({ ...restored, mutationId: crypto.randomUUID() });
+    expect(command).not.toHaveProperty("createdAt");
+    expect(command).not.toHaveProperty("schemaVersion");
+    expect(command).not.toHaveProperty("photo");
+    expect(newDraft()).not.toHaveProperty("createdAt");
+    expect(newDraft().analysisProvenance).toBeNull();
+    await localMeals.clear("metadata-account");
   });
 });

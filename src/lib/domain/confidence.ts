@@ -1,4 +1,4 @@
-import type { FoodAnalysis, FoodEstimate } from "./food-analysis";
+import type { FoodAnalysis, ObservedFood } from "./food-analysis";
 
 export type ConfidenceLevel = "high" | "medium" | "low";
 
@@ -8,13 +8,13 @@ export function confidenceLevel(score: number): ConfidenceLevel {
   return "low";
 }
 
-export function foodConfidence(food: FoodEstimate): ConfidenceLevel {
+export function foodConfidence(food: ObservedFood): ConfidenceLevel {
   return confidenceLevel(
     Math.min(food.recognitionConfidence, food.portionConfidence),
   );
 }
 
-export function mealConfidence(foods: FoodEstimate[]): ConfidenceLevel {
+export function mealConfidence(foods: ObservedFood[]): ConfidenceLevel {
   if (foods.length === 0) return "low";
   const conservativeScore = Math.min(
     ...foods.map((food) =>
@@ -24,14 +24,14 @@ export function mealConfidence(foods: FoodEstimate[]): ConfidenceLevel {
   return confidenceLevel(conservativeScore);
 }
 
-export function recognitionConfidenceLevel(foods: FoodEstimate[]): ConfidenceLevel {
+export function recognitionConfidenceLevel(foods: ObservedFood[]): ConfidenceLevel {
   if (foods.length === 0) return "low";
   return confidenceLevel(
     Math.min(...foods.map((food) => food.recognitionConfidence)),
   );
 }
 
-export function portionConfidenceLevel(foods: FoodEstimate[]): ConfidenceLevel {
+export function portionConfidenceLevel(foods: ObservedFood[]): ConfidenceLevel {
   if (foods.length === 0) return "low";
   return confidenceLevel(
     Math.min(...foods.map((food) => food.portionConfidence)),

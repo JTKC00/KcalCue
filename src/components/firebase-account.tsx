@@ -8,7 +8,28 @@ import {
   sendEmailLink,
 } from "@/lib/firebase/client";
 
-export function Account({ onDone }: { onDone: () => void }) {
+let pendingEmailLinkCompletion: {
+  callback: string;
+  promise: Promise<void>;
+} | null = null;
+
+function completeEmailLinkOnce(email: string) {
+  const callback = `${location.href}\u0000${email}`;
+  if (pendingEmailLinkCompletion?.callback === callback)
+    return pendingEmailLinkCompletion.promise;
+
+  const promise = completeEmailLink(email).finally(() => {
+    if (pendingEmailLinkCompletion?.promise === promise)
+      pendingEmailLinkCompletion = null;
+  });
+  pendingEmailLinkCompletion = { callback, promise };
+  return promise;
+}
+
+export function Account({ onDone, suppressStoredEmail = false }: {
+  onDone: () => void;
+  suppressStoredEmail?: boolean;
+}) {
   const [email, setEmail] = useState("");
   const [link, setLink] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -17,19 +38,21 @@ export function Account({ onDone }: { onDone: () => void }) {
   const [now, setNow] = useState(0);
   const completing = useRef(false);
   const done = useRef(onDone);
+  const suppressStoredEmailOnMount = useRef(suppressStoredEmail);
   useEffect(() => {
     done.current = onDone;
   }, [onDone]);
   useEffect(() => {
     // Browser-only URL/storage hydration must happen after mounting.
+    const isEmailLink = hasEmailLink();
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLink(hasEmailLink());
+    setLink(isEmailLink);
     const address = localStorage.getItem("kcalcue-login-email") ?? "";
-    setEmail(address);
-    if (hasEmailLink() && address && !completing.current) {
+    setEmail(isEmailLink || !suppressStoredEmailOnMount.current ? address : "");
+    if (isEmailLink && address && !completing.current) {
       completing.current = true;
       setBusy(true);
-      void completeEmailLink(address)
+      void completeEmailLinkOnce(address)
         .then(() => done.current())
         .catch(() => setMessage("登入連結無效或已過期，請重新寄送。"))
         .finally(() => setBusy(false));
@@ -42,7 +65,7 @@ export function Account({ onDone }: { onDone: () => void }) {
     setBusy(true);
     try {
       if (link) {
-        await completeEmailLink(email.trim());
+        await completeEmailLinkOnce(email.trim());
         onDone();
       } else {
         if (Date.now() < retryAt) return;
