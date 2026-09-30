@@ -14,6 +14,7 @@ function cloud() {
   const tombstones = new Map<string, { version: number; mutationId: string }>();
   const saves: TestRecord[] = [];
   let failSave = false;
+  let blockSave = false;
   let failAfterCommittedSave = false;
   let committedSaveAckGate: Promise<void> | null = null;
   let releaseCommittedSaveAck: (() => void) | null = null;
@@ -132,6 +133,13 @@ function cloud() {
       }
       const input = req.postDataJSON() as TestRecord;
       saves.push(input);
+      if (blockSave) {
+        await route.fulfill({
+          status: 400,
+          json: { error: { code: "invalid_request" } },
+        });
+        return;
+      }
       if (failSave) {
         failSave = false;
         await route.fulfill({
@@ -186,6 +194,9 @@ function cloud() {
     },
     failNextSave: () => {
       failSave = true;
+    },
+    blockSaves: (value: boolean) => {
+      blockSave = value;
     },
     failAfterNextCommittedSave: () => { failAfterCommittedSave = true; },
     allowCommittedSaveAck: () => {
@@ -648,15 +659,48 @@ test("Email link login restores a guest draft and automatically retries a failed
   ).toHaveValue("120");
   backend.failNextSave();
   await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
-  await expect(page.getByText(/1 項修改待同步/)).toBeVisible();
   await expect.poll(() => backend.records.size, { timeout: 12_000 }).toBe(1);
-  await expect(page.getByText(/1 項修改待同步/)).not.toBeVisible();
+  await expect(page.getByText(/項修改待同步/)).not.toBeVisible();
+  expect(backend.saves).toHaveLength(2);
   expect(backend.saves[0].mutationId).toBe(backend.saves[1].mutationId);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth > innerWidth,
     ),
   ).toBe(false);
+});
+
+test("a blocked cloud save keeps the draft, shows an error, and retries the same mutation", async ({ page, context }) => {
+  const backend = cloud();
+  await backend.install(context);
+  await page.goto("/");
+  await login(page);
+  await rice(page);
+  backend.blockSaves(true);
+  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  const alert = page.getByRole("alert").filter({ hasText: "未能儲存到雲端" });
+  await expect(alert).toBeVisible();
+  await expect(alert).toContainText("請檢查食物名稱、份量及日期時間");
+  await expect(page.getByRole("heading", { name: "新餐點草稿", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "儲存餐點", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "重試儲存", exact: true })).toBeEnabled();
+  await expect(page.getByText("已儲存到本機，連線時會自動同步。")).not.toBeVisible();
+  await expect(page.getByText(/尚有 \d+ 項待同步/)).not.toBeVisible();
+  await expect.poll(() => backend.saves.length).toBe(1);
+  expect(backend.records.size).toBe(0);
+
+  backend.blockSaves(false);
+  await page.getByRole("button", { name: "重試儲存", exact: true }).click();
+  await expect.poll(() => backend.records.size).toBe(1);
+  await expect.poll(() => backend.saves.length).toBe(2);
+  expect(backend.saves[0].mutationId).toBe(backend.saves[1].mutationId);
+  await expect(page.getByRole("heading", { name: "今日飲食", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "白飯", exact: true })).toBeVisible();
+  await expect(alert).not.toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "白飯", exact: true })).toBeVisible();
+  expect(backend.records.size).toBe(1);
+  expect(backend.saves).toHaveLength(2);
 });
 
 test("a committed save with a lost response replays one mutation after reload", async ({ page, context }) => {
@@ -1325,8 +1369,10 @@ test("entitlement denial retains a manual meal locally until an explicit sync re
   await page.getByRole("button", { name: "手動加入食物", exact: true }).click();
   await page.getByRole("combobox", { name: "食物名稱", exact: true }).fill("白飯");
   await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "白飯", exact: true })).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: "未能儲存到雲端" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "新餐點草稿", exact: true })).toBeVisible();
   await expect(page.getByText(/白飯：這個 Email 尚未獲得試用權限/)).toBeVisible();
+  await expect(page.getByText("已儲存到本機，連線時會自動同步。")).not.toBeVisible();
   expect(backend.records.size).toBe(0);
   expect(backend.saves).toHaveLength(0);
   entitled = true;

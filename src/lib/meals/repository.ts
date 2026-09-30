@@ -113,19 +113,43 @@ export class MealRepository {
       if (currentUser() !== uid)
         throw new RepositoryError("login_required", 401);
       await changeSyncState(uid, (state) => {
-        if (state.jobs.some((job) => job.record.id === draft.id && job.error))
+        const mealJobs = state.jobs.filter((job) => job.record.id === draft.id);
+        if (mealJobs.some((job) => job.kind === "delete" || (job.error && job.kind !== "save")))
           throw new RepositoryError("conflict", 409);
-        const existing = state.jobs.some((job) => job.id === mutationId);
-        if (state.jobs.some((pending) => pending.record.id === draft.id && pending.kind === "delete") ||
-            (!existing && !hasCurrentMealVersion(state, draft.id, draft.version)))
-          throw new RepositoryError("conflict", 409);
-        if (!existing)
+        const existing = state.jobs.find((job) => job.id === mutationId);
+        if (existing) {
+          if (existing.kind !== "save" || existing.record.id !== draft.id)
+            throw new RepositoryError("conflict", 409);
+          // Same mutation after a rejection: reuse the command and clear the block.
+          if (existing.error) {
+            const index = state.jobs.findIndex((job) => job.id === existing.id);
+            state.jobs[index] = { ...existing, record, error: undefined };
+          }
+        } else if (mealJobs.some((job) => job.kind === "save" && job.error)) {
+          // An edited draft replaces the rejected save. One meal, one command.
+          if (mealJobs.some((job) => job.kind === "save" && !job.error))
+            throw new RepositoryError("conflict", 409);
+          const blocked = mealJobs.filter((job) => job.kind === "save" && job.error);
+          if (blocked.some((job) => job.expectedVersion !== draft.version))
+            throw new RepositoryError("conflict", 409);
+          const drop = new Set(blocked.map((job) => job.id));
+          state.jobs = state.jobs.filter((job) => !drop.has(job.id));
           state.jobs.push({
             id: mutationId,
             kind: "save",
             record,
             expectedVersion: draft.version,
           });
+        } else if (!hasCurrentMealVersion(state, draft.id, draft.version)) {
+          throw new RepositoryError("conflict", 409);
+        } else {
+          state.jobs.push({
+            id: mutationId,
+            kind: "save",
+            record,
+            expectedVersion: draft.version,
+          });
+        }
         visible = visibleMeals(state).find((meal) => meal.id === draft.id) ?? record;
         return state;
       });
@@ -175,11 +199,11 @@ export class MealRepository {
     await locked(uid, async () => {
       if (currentUser() !== uid) return;
       if (retry)
+        // Explicit retry resends the blocked command once, including conflict.
+        // Automatic sync leaves the error in place and does not post again.
         await changeSyncState(uid, (state) => ({
           ...state,
-          jobs: state.jobs.map((job) =>
-            job.error === "conflict" ? job : { ...job, error: undefined },
-          ),
+          jobs: state.jobs.map((job) => ({ ...job, error: undefined })),
         }));
       const blocked = new Set<string>();
       const jobs = (await changeSyncState(uid)).jobs;

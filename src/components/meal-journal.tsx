@@ -51,7 +51,28 @@ function errorText(error: unknown) {
         "未能連接雲端，修改仍保留於本機，稍後會自動重試。")
     : "未能完成操作，請檢查網絡後再試。已保留的修改不會被清除。";
 }
-type JournalNotice = string | { kind: "pending-sync"; message: string };
+type JournalNotice =
+  | string
+  | { kind: "pending-sync" | "blocked-save"; message: string };
+function commandFingerprint(draft: MealDraft) {
+  const next = { ...draft, photoPath: null, photo: undefined, calorieInput: undefined };
+  return JSON.stringify({
+    ...next,
+    analysisProvenance: next.analysisProvenance ?? undefined,
+    schemaVersion: undefined,
+    createdAt: undefined,
+    calorieInput: undefined,
+    photo: undefined,
+    pendingMutation: undefined,
+  });
+}
+function blockedSaveText(code: string) {
+  const detail = messages[code] ?? "同步未完成，修改仍保留於本機。";
+  return `未能儲存到雲端。${detail} 草稿仍在，可重試儲存。`;
+}
+function pendingSyncNotice(count: number): JournalNotice {
+  return { kind: "pending-sync", message: `已保留本機修改，尚有 ${count} 項待同步。` };
+}
 const oversizedPhotoNotice = "圖片像素超過 4000 萬，此瀏覽器未能壓縮。請選較低解像度的照片，或移除圖片後手動記錄。";
 const retryablePhotoNotice = "照片壓縮未完成，原相只保留於本次頁面。可重試或移除草稿圖片。";
 const photoRateLimitNotice = "照片處理稍忙，請約 10 秒後重試。原相只保留於本次頁面。";
@@ -209,11 +230,35 @@ export function MealJournal({
           setRecords(visibleMeals(state));
           setPending(state.jobs);
           setSyncedAt(state.syncedAt);
+          const activeDraft = current.current.draft;
+          const mutation = activeDraft?.pendingMutation;
+          const ownedJob = mutation
+            ? state.jobs.find((job) => job.id === mutation.id)
+            : undefined;
+          const acknowledged = !!activeDraft && !!mutation && !ownedJob &&
+            state.remote.some((record) =>
+              record.id === activeDraft.id && record.version > activeDraft.version) &&
+            commandFingerprint(activeDraft) === mutation.fingerprint;
+          if (acknowledged) {
+            setDraft(null);
+            setInitialDraft(undefined);
+            window.history.pushState(null, "", "#today");
+            setTab("today");
+            setAccount(false);
+          }
           setNotice((value) => {
-            if (typeof value === "string") return value;
-            return state.jobs.length === 0
-              ? ""
-              : { kind: "pending-sync", message: `已保留本機修改，尚有 ${state.jobs.length} 項待同步。` };
+            if (acknowledged)
+              return state.jobs.length === 0 ? "" : pendingSyncNotice(state.jobs.length);
+            if (ownedJob?.kind === "save" && ownedJob.error)
+              return { kind: "blocked-save", message: blockedSaveText(ownedJob.error) };
+            if (typeof value !== "object") return value;
+            if (value.kind === "blocked-save") {
+              const blocked = state.jobs.some((job) => job.kind === "save" && job.error);
+              return blocked ? value : state.jobs.length === 0
+                ? ""
+                : pendingSyncNotice(state.jobs.length);
+            }
+            return state.jobs.length === 0 ? "" : pendingSyncNotice(state.jobs.length);
           });
           const saved = await localMeals.listDrafts(id).catch(() => null);
           if (isCurrent() && saved) setSavedDrafts({ uid: id, items: saved });
@@ -647,34 +692,57 @@ export function MealJournal({
     refreshGeneration.current++;
     const id = userId;
     const scope = operationScope();
-    let next = draft;
+    const source = draft;
     try {
-      next = { ...next, photoPath: null, photo: undefined, calorieInput: undefined };
-      const fingerprint = JSON.stringify({
-        ...next,
-        // Legacy omission and explicit unknown metadata are the same command.
-        analysisProvenance: next.analysisProvenance ?? undefined,
-        schemaVersion: undefined,
-        createdAt: undefined,
-        calorieInput: undefined,
-        photo: undefined,
-        pendingMutation: undefined,
-      });
+      const fingerprint = commandFingerprint(source);
       const pendingMutation =
-        next.pendingMutation?.fingerprint === fingerprint
-          ? next.pendingMutation
+        source.pendingMutation?.fingerprint === fingerprint
+          ? source.pendingMutation
           : { fingerprint, id: crypto.randomUUID() };
-      next = { ...next, pendingMutation };
-      setDraft({ ...draft, pendingMutation });
-      const saved = await repository.save(next, pendingMutation.id, id);
+      const retained = { ...source, pendingMutation };
+      const command = { ...retained, photoPath: null, photo: undefined, calorieInput: undefined };
+      setDraft(retained);
+      await repository.save(command, pendingMutation.id, id);
       if (!scope.isCurrent()) return;
-      setRecords((value) => [
-        ...value.filter((record) => record.id !== saved.id),
-        saved,
-      ]);
+      if (navigator.onLine) {
+        try {
+          await repository.sync(id);
+        } catch (error) {
+          if (scope.isCurrent()) {
+            setSyncNotice(errorText(error));
+            if (error instanceof TypeError) setOnline(false);
+          }
+        }
+      }
+      if (!scope.isCurrent()) return;
+      const state = await repository.state(id);
+      if (!scope.isCurrent()) return;
+      const job = state.jobs.find((pending) => pending.id === pendingMutation.id);
+      const proved = !job && state.remote.some((record) =>
+        record.id === source.id && record.version > source.version);
+      setRecords(visibleMeals(state));
+      setPending(state.jobs);
+      setSyncedAt(state.syncedAt);
+      if (job?.error) {
+        setNotice({ kind: "blocked-save", message: blockedSaveText(job.error) });
+        await writes.current;
+        if (!scope.isCurrent()) return;
+        await localMeals.write(id, {
+          records: visibleMeals(state),
+          draft: retained,
+          syncedAt: state.syncedAt,
+        }, draftTabId());
+        return;
+      }
+      if (!job && !proved) {
+        setNotice("未能確認雲端已保存這餐。草稿仍保留，請再試。");
+        return;
+      }
       setDraft(null);
       setInitialDraft(undefined);
-      setNotice({ kind: "pending-sync", message: "已儲存到本機，連線時會自動同步。圖片不會保存到雲端。" });
+      setNotice(proved
+        ? ""
+        : { kind: "pending-sync", message: "已儲存到本機，連線時會自動同步。圖片不會保存到雲端。" });
       go("today");
       await writes.current;
       if (!scope.isCurrent()) return;
@@ -685,7 +753,6 @@ export function MealJournal({
       }, draftTabId());
       preparedFile.current = null;
       photoGeneration.current++;
-      void refresh();
     } catch (error) {
       if (!scope.isCurrent()) return;
       setNotice(errorText(error));
@@ -895,7 +962,12 @@ export function MealJournal({
     .sort((a, b) => `${b.date}${b.time}`.localeCompare(`${a.date}${a.time}`));
   const days = [...new Set(visible.map((record) => record.date))];
   const cloudRecordsUnknown = userId !== "guest" && !syncedAt;
-  const displayedNotice = syncNotice || (typeof notice === "string" ? notice : notice.message);
+  const blockedSaveNotice = typeof notice === "object" && notice.kind === "blocked-save"
+    ? notice.message
+    : "";
+  const displayedNotice = blockedSaveNotice
+    || syncNotice
+    || (typeof notice === "string" ? notice : notice.message);
   const visibleSavedDrafts = ready && savedDrafts.uid === userId
     ? savedDrafts.items : [];
   const ownDraftRevision = visibleSavedDrafts.find((saved) =>
@@ -931,8 +1003,18 @@ export function MealJournal({
         {!cloudConfigured() && <span> · 雲端尚未設定，無法登入或同步</span>}
       </div>
       {displayedNotice && (
-        <div className="journal-notice" role="status">
+        <div className="journal-notice" role={blockedSaveNotice ? "alert" : "status"}>
           <span>{displayedNotice}</span>
+          {blockedSaveNotice && (
+            <button
+              className="button button-secondary"
+              type="button"
+              disabled={!online || syncing || busy}
+              onClick={() => void refresh(true)}
+            >
+              重試儲存
+            </button>
+          )}
           <button aria-label="關閉訊息" onClick={() => { setNotice(""); setSyncNotice(""); }}>
             ×
           </button>

@@ -148,6 +148,44 @@ it("preserves an unrelated local storage error after a current empty durable sna
   expect(screen.getByText(storageNotice)).toBeVisible();
 });
 
+it("keeps a blocked cloud save in the editor and retries that same mutation", async () => {
+  cache.draft = { ...newDraft(), items: createEditableFoodItems(demoFoodAnalysis.foods) };
+  Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ online: true })));
+  fixture.sync.mockImplementation(async (_uid: string, retry?: boolean) => {
+    const job = state.jobs[0];
+    if (!job) return;
+    if (retry) {
+      state.remote = [{ ...job.record, version: job.record.version + 1 }];
+      state.jobs = [];
+      state.syncedAt = new Date().toISOString();
+      return;
+    }
+    if (!job.error) job.error = "invalid_request";
+  });
+  await start();
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "繼續草稿" })); });
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "儲存餐點" })); });
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent("未能儲存到雲端");
+  expect(alert).toHaveTextContent("請檢查食物名稱、份量及日期時間");
+  await waitFor(() => expect(screen.getByRole("button", { name: "重試儲存" })).toBeEnabled());
+  expect(screen.getByRole("heading", { name: "新餐點草稿" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "儲存餐點" })).toBeVisible();
+  expect(screen.queryByText(/已儲存到本機/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/尚有 \d+ 項待同步/)).not.toBeInTheDocument();
+  const mutationId = fixture.save.mock.calls[0][1];
+  await waitFor(() => expect(cache.draft?.pendingMutation?.id).toBe(mutationId));
+  expect(fixture.save).toHaveBeenCalledOnce();
+
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "重試儲存" })); });
+  await screen.findByRole("heading", { name: "今日飲食" });
+  await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  expect(fixture.save).toHaveBeenCalledOnce();
+  expect(fixture.sync).toHaveBeenCalledWith("notice-user", true);
+  await waitFor(() => expect(cache.draft).toBeNull());
+});
+
 it("does not claim an acknowledged delete is pending when another meal has a blocked save", async () => {
   state.remote = [record("已刪除餐點")];
   await start(); await removeMeal();

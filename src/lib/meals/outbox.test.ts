@@ -487,6 +487,79 @@ describe("durable offline meal outbox", () => {
     expect((await repository.list())[0]).toMatchObject({ schemaVersion: CURRENT_MEAL_SCHEMA_VERSION + 1, createdAt: future.createdAt });
     expect(fixture.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
+  it("keeps a rejected save blocked until one explicit retry replays its mutation", async () => {
+    const mutationId = crypto.randomUUID();
+    const saved = await repository.save(draft(), mutationId);
+    fixture.fetch
+      .mockResolvedValueOnce(Response.json({ error: { code: "invalid_request" } }, { status: 400 }))
+      .mockResolvedValueOnce(Response.json({ records: [], revision: "r1" }))
+      .mockResolvedValueOnce(Response.json({ revision: "r1" }));
+    await repository.sync();
+    await repository.sync();
+    expect((await repository.state()).jobs[0]).toMatchObject({ id: mutationId, error: "invalid_request" });
+    expect(fixture.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+
+    fixture.fetch
+      .mockResolvedValueOnce(Response.json({ record: { ...saved, version: 1 } }))
+      .mockResolvedValueOnce(Response.json({ records: [{ ...saved, version: 1 }], revision: "r2" }));
+    await repository.sync("a", true);
+    expect((await repository.state()).jobs).toHaveLength(0);
+    expect(fixture.fetch.mock.calls.filter(([, init]) => init?.method === "POST")
+      .map(([, init]) => JSON.parse(init.body).mutationId)).toEqual([mutationId, mutationId]);
+  });
+  it("replays a conflicted command once when sync is explicitly retried", async () => {
+    const mutationId = crypto.randomUUID();
+    const saved = await repository.save(draft(), mutationId);
+    fixture.fetch
+      .mockResolvedValueOnce(Response.json({ error: { code: "conflict" } }, { status: 409 }))
+      .mockResolvedValueOnce(Response.json({ records: [], revision: "r1" }))
+      .mockResolvedValueOnce(Response.json({ record: saved }))
+      .mockResolvedValueOnce(Response.json({ records: [saved], revision: "r2" }));
+    await repository.sync();
+    expect(fixture.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    await repository.sync("a", true);
+    expect((await repository.state()).jobs).toHaveLength(0);
+    expect(fixture.fetch.mock.calls.filter(([, init]) => init?.method === "POST")
+      .map(([, init]) => JSON.parse(init.body).mutationId)).toEqual([mutationId, mutationId]);
+  });
+  it("reuses one blocked save for the same mutation and replaces it when the draft changes", async () => {
+    const input = draft();
+    const mutationId = crypto.randomUUID();
+    await repository.save(input, mutationId);
+    await changeSyncState("a", (state) => ({
+      ...state,
+      jobs: state.jobs.map((job) => ({ ...job, error: "invalid_request" })),
+    }));
+    await repository.save(input, mutationId);
+    const reused = (await repository.state()).jobs;
+    expect(reused).toHaveLength(1);
+    expect(reused[0].id).toBe(mutationId);
+    expect(reused[0].error).toBeUndefined();
+
+    await changeSyncState("a", (state) => ({
+      ...state,
+      jobs: state.jobs.map((job) => ({ ...job, error: "invalid_request" })),
+    }));
+    const nextId = crypto.randomUUID();
+    await repository.save({ ...input, time: "18:05" }, nextId);
+    const jobs = (await repository.state()).jobs;
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]).toMatchObject({ id: nextId, expectedVersion: 0 });
+    expect(jobs[0].error).toBeUndefined();
+    expect(jobs[0].record.time).toBe("18:05");
+  });
+  it("still rejects a save when a delete for that meal is blocked", async () => {
+    const input = draft();
+    const saved = await repository.save(input, crypto.randomUUID());
+    await repository.delete(saved);
+    await changeSyncState("a", (state) => ({
+      ...state,
+      jobs: state.jobs.map((job) => job.kind === "delete" ? { ...job, error: "conflict" } : job),
+    }));
+    await expect(repository.save({ ...input, version: saved.version }, crypto.randomUUID()))
+      .rejects.toMatchObject({ code: "conflict", status: 409 });
+    expect((await repository.state()).jobs.map((job) => job.kind)).toEqual(["save", "delete"]);
+  });
 
   it("commits a paged cloud snapshot only after all pages share one revision", async () => {
     const first = await repository.save(draft(), crypto.randomUUID());
