@@ -364,7 +364,6 @@ function main() {
     const { described, container } = describeRevision(revision);
     requireEnv(container);
     if (!revisionReady(described)) throw new Error("Serving revision is not Ready; traffic was not changed.");
-    assertAccessEnvShape(container);
     if (envValue(container, "NEXT_PUBLIC_FIREBASE_PROJECT_ID") !== config.projectId) throw new Error("Firebase project does not match config; traffic was not changed.");
     if (firebaseFields().some(([name, expected]) => envValue(container, name) !== expected)) {
       throw new Error("Firebase configuration differs from config; traffic was not changed.");
@@ -374,6 +373,7 @@ function main() {
     const emails = envValue(container, "KCALCUE_ALLOWED_EMAILS");
     if (typeof emails !== "string" || emails.trim() === "") throw new Error("Serving allowlist is missing; traffic was not changed.");
     assertProductionProvider(described, container, { requireProvider: true, expectedImage: null });
+    assertAccessEnvShape(container);
     const runtime = accessRuntimeContract(described, container);
     return { revision, analysisEnabled: analysis === "true", image: container.image, emails, runtime };
   }
@@ -546,11 +546,11 @@ function main() {
     try {
       const created = describeRevision(revision);
       requireEnv(created.container);
-      assertAccessEnvShape(created.container);
       if (firebaseFields().some(([name, expected]) => envValue(created.container, name) !== expected)) {
         throw new Error("Firebase configuration differs from config; traffic was not changed.");
       }
       assertCandidate(revision, source.analysisEnabled, source.image);
+      assertAccessEnvShape(created.container);
       assertSameAccessRuntime(created.described, created.container, source.runtime);
       previewUrl = assertStagedTraffic(revision, source.revision, values["smoke-tag"]);
     } catch (error) {
@@ -566,11 +566,11 @@ function main() {
     if (values.revision === source.revision) throw new Error("Access candidate is already the serving revision; traffic was not changed.");
     const candidate = describeRevision(values.revision);
     requireEnv(candidate.container);
-    assertAccessEnvShape(candidate.container);
     if (firebaseFields().some(([name, expected]) => envValue(candidate.container, name) !== expected)) {
       throw new Error("Firebase configuration differs from config; traffic was not changed.");
     }
     assertCandidate(values.revision, source.analysisEnabled, source.image);
+    assertAccessEnvShape(candidate.container);
     assertSameAccessRuntime(candidate.described, candidate.container, source.runtime);
     gcloud(["run", "services", "update-traffic", "kcalcue", `--region=${config.region}`, `--to-revisions=${values.revision}=100`]);
     verifyTraffic(values.revision);
