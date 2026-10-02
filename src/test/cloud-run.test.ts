@@ -122,8 +122,9 @@ else if (matches('run', 'services', 'update') || matches('run', 'deploy')) {
   const gemini = (failure === 'gemini-candidate' && !isCurrent) || (failure === 'rollback-gemini' && isRollbackTarget);
   const mutated = Boolean(state.candidateEnv || state.secretFlag || state.envOverlay || state.image);
   const project = isRollbackTarget && failure === 'rollback-project-mismatch' || isCurrent && failure === 'serving-project-drift' ? 'other-project' : 'demo-kcalcue';
-  const emails = (isRollbackTarget && failure === 'rollback-allowed-mismatch') || (isCurrent && (failure === 'rollback-current-allowed-mismatch' || failure === 'allowed-mismatch'))
+  let emails = (isRollbackTarget && failure === 'rollback-allowed-mismatch') || (isCurrent && (failure === 'rollback-current-allowed-mismatch' || failure === 'allowed-mismatch'))
     ? 'other@example.com' : 'tester@example.com';
+  if (isCurrent && failure === 'serving-allowlist-equivalent') emails = 'Added-User@Example.com,TESTER@example.com';
   let analysis = state.enabled;
   if (failure === 'wrong-switch' || (isRollbackTarget && failure === 'rollback-switch-unknown')) analysis = 'wrong';
   else if (isCurrent && failure === 'missing-switch') analysis = undefined;
@@ -195,7 +196,34 @@ else if (matches('run', 'services', 'update') || matches('run', 'deploy')) {
   const readyState = isRollbackTarget && failure === 'rollback-not-ready' || isNew && failure === 'candidate-not-ready' || isCurrent && failure === 'serving-not-ready' ? 'False' : 'True';
   const status = { conditions: [{ type: 'Ready', status: readyState }] };
   if (!isCurrent && reportedDigest !== undefined) status.imageDigest = reportedDigest;
-  emit({ spec: { containers: [{ env, image: revisionImage }] }, status });
+  const runtimeDrift = prefix => failure === prefix;
+  const serviceAccountName = runtimeDrift(isCurrent ? 'serving-service-account-drift' : 'candidate-service-account-drift')
+    ? 'other-runtime@demo-kcalcue.iam.gserviceaccount.com'
+    : 'kcalcue-runtime@demo-kcalcue.iam.gserviceaccount.com';
+  const containerConcurrency = runtimeDrift(isCurrent ? 'serving-concurrency-drift' : 'candidate-concurrency-drift') ? 9 : 4;
+  const timeoutSeconds = runtimeDrift(isCurrent ? 'serving-timeout-drift' : 'candidate-timeout-drift') ? 300 : 120;
+  const cpu = runtimeDrift(isCurrent ? 'serving-cpu-drift' : 'candidate-cpu-drift') ? '2' : '1';
+  const memory = runtimeDrift(isCurrent ? 'serving-memory-drift' : 'candidate-memory-drift') ? '2Gi' : '1Gi';
+  emit({
+    metadata: { annotations: {
+      'autoscaling.knative.dev/minScale': '0',
+      'autoscaling.knative.dev/maxScale': '1',
+      'run.googleapis.com/cpu-throttling': 'true',
+      'run.googleapis.com/startup-cpu-boost': 'false',
+    } },
+    spec: {
+      serviceAccountName,
+      containerConcurrency,
+      timeoutSeconds,
+      containers: [{
+        env,
+        image: revisionImage,
+        ports: [{ containerPort: 8080 }],
+        resources: { limits: { cpu, memory } },
+      }],
+    },
+    status,
+  });
 } else if (matches('run', 'services', 'update-traffic')) {
   const remove = args.find(value => value.startsWith('--remove-tags='));
   if (remove) {
@@ -710,6 +738,10 @@ describe("allowlist-only access transition", () => {
     expect(deploy).toContain(`--image=${image}`);
     expect(deploy).toContain("--no-traffic");
     expect(deploy).toContain("--tag=rc-smoke");
+    expect(deploy).not.toContain("--allow-unauthenticated");
+    expect(deploy.some(value => value === "--min=0" || value === "--max=1")).toBe(false);
+    expect(deploy).toContain("--min-instances=0");
+    expect(deploy).toContain("--max-instances=1");
     expect(calls.some(call => call[0] === "artifacts")).toBe(false);
     expect(trafficChanged(calls)).toBe(false);
   });
@@ -721,10 +753,23 @@ describe("allowlist-only access transition", () => {
     expect(trafficChanged(calls)).toBe(false);
   });
 
-  it("treats allowlist case and order as the same set", () => {
+  it("normalizes a changed target allowlist without changing traffic", () => {
     const { result, calls } = run("access-stage", "", mixedCase);
     expect(result.status, result.stderr).toBe(0);
     expect(trafficChanged(calls)).toBe(false);
+  });
+
+  it("rejects a semantically unchanged allowlist before deploy", () => {
+    const sameCaseInsensitive = run("access-stage", "", { allowedEmails: ["TESTER@example.com"] });
+    expect(sameCaseInsensitive.result.status).toBe(1);
+    expect(sameCaseInsensitive.result.stderr).toContain("Target allowlist already matches");
+    expect(sameCaseInsensitive.calls.some(call => call[1] === "deploy")).toBe(false);
+
+    const sameOrderInsensitive = run("access-stage", "serving-allowlist-equivalent", added);
+    expect(sameOrderInsensitive.result.status).toBe(1);
+    expect(sameOrderInsensitive.result.stderr).toContain("Target allowlist already matches");
+    expect(sameOrderInsensitive.calls.some(call => call[1] === "deploy")).toBe(false);
+    expect(trafficChanged(sameOrderInsensitive.calls)).toBe(false);
   });
 
   it.each([
@@ -736,6 +781,11 @@ describe("allowlist-only access transition", () => {
     ["unknown-switch", "Existing analysis switch is unknown"],
     ["unpinned-image", "immutable project digest"],
     ["serving-not-ready", "Serving revision is not Ready"],
+    ["serving-service-account-drift", "runtime contract differs from the approved production runtime"],
+    ["serving-concurrency-drift", "runtime contract differs from the approved production runtime"],
+    ["serving-timeout-drift", "runtime contract differs from the approved production runtime"],
+    ["serving-cpu-drift", "runtime contract differs from the approved production runtime"],
+    ["serving-memory-drift", "runtime contract differs from the approved production runtime"],
     ["split-traffic", "Current serving revision is uncertain"],
   ])("stops access-stage before deploy on %s", (failure, message) => {
     const { result, calls } = run("access-stage", failure, added);
@@ -750,6 +800,11 @@ describe("allowlist-only access transition", () => {
     ["gemini-candidate", "Gemini RC configuration"],
     ["extra-secret", "declared production secret set"],
     ["candidate-not-ready", "Revision is not Ready"],
+    ["candidate-service-account-drift", "runtime contract differs from the approved production runtime"],
+    ["candidate-concurrency-drift", "runtime contract differs from the approved production runtime"],
+    ["candidate-timeout-drift", "runtime contract differs from the approved production runtime"],
+    ["candidate-cpu-drift", "runtime contract differs from the approved production runtime"],
+    ["candidate-memory-drift", "runtime contract differs from the approved production runtime"],
   ])("rejects an access candidate with %s before traffic changes", (failure, message) => {
     const { result, calls } = run("access-stage", failure, added);
     expect(result.status).toBe(1);
@@ -782,6 +837,8 @@ describe("allowlist-only access transition", () => {
     ["candidate-not-ready", "Revision is not Ready"],
     ["digest-mismatch", "image digest does not match the staged image"],
     ["gemini-candidate", "Gemini RC configuration"],
+    ["candidate-concurrency-drift", "runtime contract differs from the approved production runtime"],
+    ["candidate-memory-drift", "runtime contract differs from the approved production runtime"],
     ["split-traffic", "Current serving revision is uncertain"],
   ])("refuses access-promote on %s", (failure, message) => {
     const { result, calls } = run("access-promote", failure, added);
