@@ -164,10 +164,24 @@ else if (matches('run', 'services', 'update') || matches('run', 'deploy')) {
       } } };
     });
   }
-  emit({
-    spec: { containers: [{ env, image: revisionImage }] },
-    status: { conditions: [{ type: 'Ready', status: isRollbackTarget && failure === 'rollback-not-ready' ? 'False' : 'True' }] },
-  });
+  const repo = 'asia-east1-docker.pkg.dev/demo-kcalcue/kcalcue/web';
+  const digestA = 'sha256:' + 'a'.repeat(64);
+  const digestB = 'sha256:' + 'b'.repeat(64);
+  const reportedDigest = {
+    'status-digest-full': repo + '@' + digestA,
+    'status-digest-bare': digestA,
+    'status-digest-wrong': repo + '@' + digestB,
+    'status-digest-wrong-project': 'asia-east1-docker.pkg.dev/other-project/kcalcue/web@' + digestA,
+    'status-digest-wrong-repo': 'asia-east1-docker.pkg.dev/demo-kcalcue/other-repo/web@' + digestA,
+    'status-digest-other-registry': 'us-docker.pkg.dev/demo-kcalcue/kcalcue/web@' + digestA,
+    'status-digest-tag': repo + ':latest',
+    'status-digest-malformed': 'sha256:abc',
+    'status-digest-uppercase': 'sha256:' + 'A'.repeat(64),
+    'status-digest-non-string': 12,
+  }[failure];
+  const status = { conditions: [{ type: 'Ready', status: isRollbackTarget && failure === 'rollback-not-ready' ? 'False' : 'True' }] };
+  if (!isCurrent && reportedDigest !== undefined) status.imageDigest = reportedDigest;
+  emit({ spec: { containers: [{ env, image: revisionImage }] }, status });
 } else if (matches('run', 'services', 'update-traffic')) {
   const remove = args.find(value => value.startsWith('--remove-tags='));
   if (remove) {
@@ -666,5 +680,44 @@ describe("zero-traffic smoke tag", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("Smoke tag cleanup changed production traffic");
     expect(result.stdout).not.toContain("PASS");
+  });
+});
+
+describe("Cloud Run status.imageDigest normalization", () => {
+  it("accepts the full repository reference when the digest matches", () => {
+    const { result, calls } = run("stage", "status-digest-full");
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain(`image ${digest}`);
+    expect(trafficChanged(calls)).toBe(false);
+  });
+
+  it("accepts a bare sha256 digest when it matches the container image", () => {
+    const { result, calls } = run("stage", "status-digest-bare");
+    expect(result.status, result.stderr).toBe(0);
+    expect(trafficChanged(calls)).toBe(false);
+  });
+
+  it.each([
+    "status-digest-wrong",
+    "status-digest-wrong-project",
+    "status-digest-wrong-repo",
+    "status-digest-other-registry",
+    "status-digest-tag",
+    "status-digest-malformed",
+    "status-digest-uppercase",
+    "status-digest-non-string",
+  ])("rejects status.imageDigest %s before production traffic changes", failure => {
+    const { result, calls } = run("stage", failure);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("image digest does not match the staged image");
+    expect(result.stderr).toContain("traffic was not changed");
+    expect(trafficChanged(calls)).toBe(false);
+  });
+
+  it("allows a missing status.imageDigest when the container image matches the staged image", () => {
+    const { result, calls } = run("stage");
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain(`image ${digest}`);
+    expect(trafficChanged(calls)).toBe(false);
   });
 });

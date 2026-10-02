@@ -116,12 +116,21 @@ function main() {
       return name === "kcalcue-gemini" || name === "GEMINI_API_KEY";
     });
   }
+  function normalizeRevisionImageDigest(value, prefix) {
+    if (typeof value !== "string") return null;
+    if (/^sha256:[a-f0-9]{64}$/.test(value)) return value;
+    if (!value.startsWith(prefix)) return null;
+    const digest = value.slice(prefix.length);
+    return /^sha256:[a-f0-9]{64}$/.test(digest) ? digest : null;
+  }
   function assertPinnedImage(container, described, expectedImage) {
     const image = container?.image;
     const digest = typeof image === "string" && image.startsWith(imagePrefix) ? image.slice(imagePrefix.length) : "";
     if (!/^sha256:[a-f0-9]{64}$/.test(digest)) throw new Error("Revision image is not an immutable project digest; traffic was not changed.");
-    const statusDigest = described?.status?.imageDigest;
-    if (statusDigest != null && statusDigest !== digest) throw new Error("Revision image digest does not match the staged image; traffic was not changed.");
+    if (described?.status?.imageDigest != null) {
+      const statusDigest = normalizeRevisionImageDigest(described.status.imageDigest, imagePrefix);
+      if (statusDigest !== digest) throw new Error("Revision image digest does not match the staged image; traffic was not changed.");
+    }
     if (expectedImage != null && image !== expectedImage) throw new Error("Revision image digest does not match the staged image; traffic was not changed.");
   }
   function assertProductionSecrets(described, container) {

@@ -48,7 +48,7 @@ The approved analysis switch is read from the revision that currently serves 100
 
 After `stage` creates the candidate, the CLI reads that revision back and stops without `update-traffic` unless all of the following are true:
 
-- the image is the immutable Artifact Registry digest just resolved for the tag;
+- the image is the immutable Artifact Registry digest just resolved for the tag. `container.image` must be `asia-east1-docker.pkg.dev/<project>/kcalcue/web@sha256:<64 lowercase hex>`. When `status.imageDigest` is present, Cloud Run may report either that bare `sha256:` digest or the same full digest-pinned reference. The guard normalizes only those two forms for this exact repository, then requires the digests to be equal. A missing `status.imageDigest` stays acceptable when `container.image` already proves that identity. Any other reported form fails closed.
 - the revision is Ready;
 - the Firebase project and account allowlist match the private config;
 - `KCALCUE_ANALYSIS_ENABLED` matches the approved production switch;
