@@ -15,7 +15,7 @@ const image = `asia-east1-docker.pkg.dev/demo-kcalcue/kcalcue/web@${digest}`;
 // The fake service template is contaminated with Gemini. A revision describe
 // returns the deployed env/secret replacement, unless a failure mode forces
 // the candidate to stay contaminated or to carry the wrong digest.
-function run(action: "pause" | "resume" | "deploy" | "rollback" | "stage" | "promote" | "preflight", failure = "", options: { nutritionSecretVersion?: string } = {}) {
+function run(action: "pause" | "resume" | "deploy" | "rollback" | "stage" | "promote" | "preflight" | "untag", failure = "", options: { nutritionSecretVersion?: string; smokeTag?: string; omitSmokeTag?: boolean; existingSmokeTag?: boolean } = {}) {
   const directory = mkdtempSync(path.join(tmpdir(), "kcalcue-cloud-routing-test-"));
   temporary.push(directory);
   const executable = path.join(directory, "gcloud.mjs");
@@ -23,7 +23,8 @@ function run(action: "pause" | "resume" | "deploy" | "rollback" | "stage" | "pro
   const state = path.join(directory, "state.json");
   const config = path.join(directory, "config.json");
   writeFileSync(state, JSON.stringify({ enabled: action === "pause" ? "true" : "false", routed: false,
-    routedRevision: "kcalcue-00001-old", configuredEmails: null, candidateEnv: null, secretFlag: null, listedEnv: null }));
+    routedRevision: "kcalcue-00001-old", configuredEmails: null, candidateEnv: null, secretFlag: null, listedEnv: null,
+    smokeTag: null, removedTags: [] }));
   writeFileSync(config, JSON.stringify({
     projectId: "demo-kcalcue", region: "asia-east1", firebaseApiKey: "test-firebase-public-key",
     firebaseAuthDomain: "demo-kcalcue.firebaseapp.com", firebaseAppId: "1:123:web:abc",
@@ -109,6 +110,8 @@ else if (matches('run', 'services', 'update') || matches('run', 'deploy')) {
   if (secret) state.secretFlag = secret;
   const imageFlag = args.find(value => value.startsWith('--image='));
   if (imageFlag) state.image = imageFlag.slice('--image='.length);
+  const trafficTag = args.find(value => value.startsWith('--tag='));
+  if (trafficTag) state.smokeTag = trafficTag.slice('--tag='.length);
   writeFileSync(process.env.KCAL_TEST_STATE, JSON.stringify(state));
   emit(failure === 'invalid-revision' ? '' : 'kcalcue-00003-new');
 } else if (matches('run', 'revisions', 'describe')) {
@@ -166,21 +169,62 @@ else if (matches('run', 'services', 'update') || matches('run', 'deploy')) {
     status: { conditions: [{ type: 'Ready', status: isRollbackTarget && failure === 'rollback-not-ready' ? 'False' : 'True' }] },
   });
 } else if (matches('run', 'services', 'update-traffic')) {
-  state.routed = failure !== 'unchanged-traffic';
-  if (state.routed) state.routedRevision = args.find(value => value.startsWith('--to-revisions='))?.slice('--to-revisions='.length).split('=')[0];
+  const remove = args.find(value => value.startsWith('--remove-tags='));
+  if (remove) {
+    state.removedTags = [...(state.removedTags || []), remove.slice('--remove-tags='.length)];
+    if (failure === 'untag-moves-traffic') state.routedRevision = 'kcalcue-00004-moved';
+  } else {
+    state.routed = failure !== 'unchanged-traffic';
+    if (state.routed) state.routedRevision = args.find(value => value.startsWith('--to-revisions='))?.slice('--to-revisions='.length).split('=')[0];
+  }
   writeFileSync(process.env.KCAL_TEST_STATE, JSON.stringify(state));
 } else if (matches('run', 'services', 'describe')) {
-  const traffic = failure === 'new-service' && !state.routed ? [] : [{ revisionName: state.routedRevision, percent: 100 }];
-  emit({ status: { traffic, conditions: [{ type: 'Ready', status: 'True' }] } });
+  const removed = new Set(state.removedTags || []);
+  const serving = failure === 'new-service' && !state.routed ? [] : [{ revisionName: state.routedRevision, percent: 100 }];
+  const primary = failure === 'untag-missing' ? '' : (state.smokeTag || process.env.KCAL_TEST_EXISTING_SMOKE_TAG || '');
+  const tags = [];
+  const baseUrl = failure === 'project-number-url' ? 'https://kcalcue-123456789.asia-east1.run.app'
+    : failure === 'missing-service-url' ? undefined
+    : failure === 'malformed-service-url' ? 'not-a-url'
+    : failure === 'tagged-base-url' ? 'https://already---kcalcue-eoq7e27i6q-de.a.run.app'
+    : 'https://kcalcue-eoq7e27i6q-de.a.run.app';
+  let baseHost = 'kcalcue-eoq7e27i6q-de.a.run.app';
+  try { if (typeof baseUrl === 'string') baseHost = new URL(baseUrl).hostname; } catch {}
+  const add = (tag, revision, percent) => {
+    if (!tag || removed.has(tag)) return;
+    const derived = 'https://' + tag + '---' + baseHost;
+    const url = failure === 'missing-tagged-url' && tag === primary ? ''
+      : failure === 'wrong-service-url' && tag === primary ? 'https://' + tag + '---other-service-eoq7e27i6q-de.a.run.app'
+      : failure === 'wrong-tag-url' && tag === primary ? 'https://other-tag---' + baseHost
+      : failure === 'http-tagged-url' && tag === primary ? 'http://' + tag + '---' + baseHost
+      : failure === 'query-tagged-url' && tag === primary ? derived + '?next=1'
+      : failure === 'fragment-tagged-url' && tag === primary ? derived + '#part'
+      : derived;
+    tags.push({ revisionName: revision, tag, percent, url });
+  };
+  if (failure === 'unrelated-only') add('other-preview', 'kcalcue-00003-new', 0);
+  else {
+    const revision = failure === 'wrong-tag-target' ? 'kcalcue-00009-other' : 'kcalcue-00003-new';
+    add(primary, revision, failure === 'candidate-traffic' ? 25 : 0);
+    if (failure === 'duplicate-tag') add(primary, 'kcalcue-00008-dup', 0);
+    add('other-preview', 'kcalcue-00007-old', 0);
+  }
+  const status = { traffic: [...serving, ...tags], conditions: [{ type: 'Ready', status: 'True' }] };
+  if (baseUrl !== undefined) status.url = baseUrl;
+  emit({ status });
 } else { console.error('Unexpected fake gcloud invocation'); process.exit(2); }
 `, { mode: 0o700 });
+  const smokeTag = options.smokeTag ?? "rc-smoke";
   const result = spawnSync(process.execPath, ["scripts/cloud-run.mjs", action, "--config", config,
     ...(action === "deploy" || action === "stage" ? ["--tag", "trial-test"] : []),
+    ...(action === "stage" && !options.omitSmokeTag ? ["--smoke-tag", smokeTag] : []),
+    ...(action === "untag" && !options.omitSmokeTag ? ["--tag", smokeTag] : []),
     ...(action === "rollback" ? ["--revision", "kcalcue-00002-old"] : []),
     ...(action === "promote" && failure !== "missing-revision" ? ["--revision", "kcalcue-00003-new"] : [])], {
     cwd: process.cwd(), encoding: "utf8", env: { ...process.env, GCLOUD_BIN: executable,
       KCAL_TEST_TRACE: trace, KCAL_TEST_STATE: state, KCAL_TEST_FAILURE: failure,
-      KCAL_TEST_NUTRITION_VERSION: options.nutritionSecretVersion ?? "" },
+      KCAL_TEST_NUTRITION_VERSION: options.nutritionSecretVersion ?? "",
+      KCAL_TEST_EXISTING_SMOKE_TAG: action === "untag" || options.existingSmokeTag ? smokeTag : "" },
   });
   const calls = existsSync(trace)
     ? readFileSync(trace, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line) as string[])
@@ -189,6 +233,7 @@ else if (matches('run', 'services', 'update') || matches('run', 'deploy')) {
     enabled: string; configuredEmails: string | null; routed: boolean; routedRevision: string;
     candidateEnv: Record<string, string> | null; secretFlag: string | null;
     listedEnv: Array<{ name: string; value?: string; valueFrom?: { secretKeyRef: { name: string; key: string } } }> | null;
+    smokeTag: string | null; removedTags: string[];
   } };
 }
 
@@ -208,12 +253,13 @@ describe("Cloud Run stage and promote", () => {
   it("stages an OpenAI candidate from a Gemini-contaminated template without promoting it", () => {
     const { result, calls, finalState } = run("stage");
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain("PASS: staged kcalcue-00003-new at 0% traffic; production remains kcalcue-00001-old; analysis=false.");
+    expect(result.stdout).toContain(`PASS: staged kcalcue-00003-new at 0% production traffic; production remains kcalcue-00001-old at 100%; image ${digest}; smoke tag rc-smoke points to candidate; smoke URL: https://rc-smoke---kcalcue-eoq7e27i6q-de.a.run.app; analysis=false.`);
     expect(trafficChanged(calls)).toBe(false);
     expect(finalState.routed).toBe(false);
     expect(finalState.routedRevision).toBe("kcalcue-00001-old");
     const deploy = calls.find(call => call[0] === "run" && call[1] === "deploy") ?? [];
     expect(deploy).toContain("--no-traffic");
+    expect(deploy).toContain("--tag=rc-smoke");
     expect(deploy).toContain(`--image=${image}`);
     expect(deploy).toContain("--set-secrets=OPENAI_API_KEY=kcalcue-openai:1");
     expect(deploy.some(value => value.startsWith("--update-env-vars=") || value.startsWith("--update-secrets="))).toBe(false);
@@ -479,5 +525,146 @@ describe("declared production secrets", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("configured nutrition secret version is missing or not enabled");
     expect(calls.some(call => call[1] === "deploy" || call.includes("update-traffic"))).toBe(false);
+  });
+});
+
+describe("zero-traffic smoke tag", () => {
+  it("requires an explicit smoke tag before contacting Cloud Run", () => {
+    const { result, calls } = run("stage", "", { omitSmokeTag: true });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Provide a Cloud Run --smoke-tag");
+    expect(calls).toEqual([]);
+  });
+
+  it.each(["RC-Bad", "1abc", "latest", "rc-", "rc.smoke"])("rejects malformed smoke tag %s before any gcloud call", smokeTag => {
+    const { result, calls } = run("stage", "", { smokeTag });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("lowercase Cloud Run tag");
+    expect(calls).toEqual([]);
+  });
+
+  it("returns the tagged URL while leaving production traffic unchanged", () => {
+    const { result, calls, finalState } = run("stage");
+    expect(result.status, result.stderr).toBe(0);
+    const deploy = calls.find(call => call[1] === "deploy") ?? [];
+    expect(deploy).toContain("--no-traffic");
+    expect(deploy).toContain("--tag=rc-smoke");
+    expect(result.stdout).toContain("https://rc-smoke---kcalcue-eoq7e27i6q-de.a.run.app");
+    expect(result.stdout).toContain("smoke tag rc-smoke points to candidate");
+    expect(result.stdout).toContain(`image ${digest}`);
+    expect(result.stdout).toContain("production remains kcalcue-00001-old at 100%");
+    expect(finalState.routedRevision).toBe("kcalcue-00001-old");
+    expect(trafficChanged(calls)).toBe(false);
+  });
+
+  it("accepts a deterministic project-number URL derived from service.status.url", () => {
+    const { result, calls, finalState } = run("stage", "project-number-url");
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("https://rc-smoke---kcalcue-123456789.asia-east1.run.app");
+    expect(result.stdout).toContain("0% production traffic");
+    expect(result.stdout).toContain("production remains kcalcue-00001-old at 100%");
+    expect(finalState.routedRevision).toBe("kcalcue-00001-old");
+    expect(trafficChanged(calls)).toBe(false);
+  });
+
+  it.each([
+    ["wrong-service-url", "Smoke tag URL is absent or malformed"],
+    ["wrong-tag-url", "Smoke tag URL is absent or malformed"],
+    ["http-tagged-url", "Smoke tag URL is absent or malformed"],
+    ["query-tagged-url", "Smoke tag URL is absent or malformed"],
+    ["fragment-tagged-url", "Smoke tag URL is absent or malformed"],
+    ["missing-service-url", "Service URL is absent or malformed"],
+    ["malformed-service-url", "Service URL is absent or malformed"],
+    ["tagged-base-url", "Service URL is absent or malformed"],
+  ])("rejects a tagged URL that is not the service origin: %s", (failure, message) => {
+    const { result, calls } = run("stage", failure);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(message);
+    expect(result.stderr).toContain("traffic was not changed");
+    expect(trafficChanged(calls)).toBe(false);
+    expect(result.stdout).not.toContain("PASS");
+  });
+
+  it("fails when the requested tag points at another revision", () => {
+    const { result, calls } = run("stage", "wrong-tag-target");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Smoke tag points to another revision");
+    expect(result.stderr).toContain("operator cleanup");
+    expect(trafficChanged(calls)).toBe(false);
+  });
+
+  it("fails closed when the tagged URL is missing", () => {
+    const { result, calls } = run("stage", "missing-tagged-url");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Smoke tag URL is absent or malformed");
+    expect(trafficChanged(calls)).toBe(false);
+  });
+
+  it("fails when the smoke tag is assigned more than once", () => {
+    const { result, calls } = run("stage", "duplicate-tag");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Smoke tag state is ambiguous");
+    expect(trafficChanged(calls)).toBe(false);
+  });
+
+  it("fails when the candidate receives normal production traffic", () => {
+    const { result, calls } = run("stage", "candidate-traffic");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Candidate received production traffic");
+    expect(trafficChanged(calls)).toBe(false);
+  });
+
+  it("does not treat an unrelated tag as the requested smoke tag", () => {
+    const unrelated = run("stage", "unrelated-only");
+    expect(unrelated.result.status).toBe(1);
+    expect(unrelated.result.stderr).toContain("Smoke tag does not point to the candidate");
+    expect(trafficChanged(unrelated.calls)).toBe(false);
+    const tagged = run("stage");
+    expect(tagged.result.status, tagged.result.stderr).toBe(0);
+    expect(tagged.result.stdout).toContain("smoke tag rc-smoke points to candidate");
+  });
+
+  it("promotes by exact revision while a smoke tag is present", () => {
+    const { result, calls } = run("promote", "", { existingSmokeTag: true });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("PASS: kcalcue-00003-new receives 100% of traffic");
+    const traffic = calls.find(call => call.includes("update-traffic")) ?? [];
+    expect(traffic).toContain("--to-revisions=kcalcue-00003-new=100");
+    expect(traffic.some(arg => arg.includes("remove-tags") || arg.includes("to-tags") || arg.includes("set-tags") || arg.includes("smoke-tag"))).toBe(false);
+  });
+
+  it("removes only the requested smoke tag and preserves production traffic", () => {
+    const { result, calls, finalState } = run("untag");
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("PASS: removed smoke tag rc-smoke from kcalcue-00003-new; production remains kcalcue-00001-old at 100%.");
+    const traffic = calls.find(call => call.includes("update-traffic")) ?? [];
+    expect(traffic).toContain("--remove-tags=rc-smoke");
+    expect(traffic.some(arg => arg.startsWith("--to-revisions=") || arg.startsWith("--to-tags=") || arg.startsWith("--to-latest") || arg.startsWith("--set-tags=") || arg.startsWith("--clear-tags"))).toBe(false);
+    expect(calls.some(call => call.includes("delete"))).toBe(false);
+    expect(calls.at(-1)?.slice(0, 3)).toEqual(["run", "services", "describe"]);
+    expect(finalState.routedRevision).toBe("kcalcue-00001-old");
+    expect(finalState.removedTags).toEqual(["rc-smoke"]);
+  });
+
+  it.each(["duplicate-tag", "untag-missing"])("does not remove a smoke tag from an unsafe state: %s", failure => {
+    const { result, calls } = run("untag", failure);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/ambiguous|not found/);
+    expect(result.stderr).toContain("traffic was not changed");
+    expect(calls.some(call => call.includes("update-traffic"))).toBe(false);
+  });
+
+  it("rejects a malformed cleanup tag before any gcloud call", () => {
+    const { result, calls } = run("untag", "", { smokeTag: "RC-Bad" });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("lowercase Cloud Run tag");
+    expect(calls).toEqual([]);
+  });
+
+  it("reports failure when tag removal changes production traffic", () => {
+    const { result } = run("untag", "untag-moves-traffic");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Smoke tag cleanup changed production traffic");
+    expect(result.stdout).not.toContain("PASS");
   });
 });
