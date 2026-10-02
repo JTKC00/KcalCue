@@ -15,7 +15,7 @@ const image = `asia-east1-docker.pkg.dev/demo-kcalcue/kcalcue/web@${digest}`;
 // The fake service template is contaminated with Gemini. A revision describe
 // returns the deployed env/secret replacement, unless a failure mode forces
 // the candidate to stay contaminated or to carry the wrong digest.
-function run(action: "pause" | "resume" | "deploy" | "rollback" | "stage" | "promote" | "preflight" | "untag", failure = "", options: { nutritionSecretVersion?: string; smokeTag?: string; omitSmokeTag?: boolean; existingSmokeTag?: boolean } = {}) {
+function run(action: "pause" | "resume" | "deploy" | "rollback" | "stage" | "promote" | "preflight" | "untag" | "access-stage" | "access-promote", failure = "", options: { nutritionSecretVersion?: string; smokeTag?: string; omitSmokeTag?: boolean; existingSmokeTag?: boolean; allowedEmails?: string[]; revision?: string } = {}) {
   const directory = mkdtempSync(path.join(tmpdir(), "kcalcue-cloud-routing-test-"));
   temporary.push(directory);
   const executable = path.join(directory, "gcloud.mjs");
@@ -28,7 +28,7 @@ function run(action: "pause" | "resume" | "deploy" | "rollback" | "stage" | "pro
   writeFileSync(config, JSON.stringify({
     projectId: "demo-kcalcue", region: "asia-east1", firebaseApiKey: "test-firebase-public-key",
     firebaseAuthDomain: "demo-kcalcue.firebaseapp.com", firebaseAppId: "1:123:web:abc",
-    allowedEmails: ["tester@example.com"], openaiSecretVersion: "1",
+    allowedEmails: options.allowedEmails ?? ["tester@example.com"], openaiSecretVersion: "1",
     ...(options.nutritionSecretVersion ? { nutritionSecretVersion: options.nutritionSecretVersion } : {}),
   }));
   writeFileSync(executable, `#!/usr/bin/env node
@@ -121,9 +121,10 @@ else if (matches('run', 'services', 'update') || matches('run', 'deploy')) {
   const isNew = revision === 'kcalcue-00003-new';
   const gemini = (failure === 'gemini-candidate' && !isCurrent) || (failure === 'rollback-gemini' && isRollbackTarget);
   const mutated = Boolean(state.candidateEnv || state.secretFlag || state.envOverlay || state.image);
-  const project = isRollbackTarget && failure === 'rollback-project-mismatch' ? 'other-project' : 'demo-kcalcue';
-  const emails = (isRollbackTarget && failure === 'rollback-allowed-mismatch') || (isCurrent && (failure === 'rollback-current-allowed-mismatch' || failure === 'allowed-mismatch'))
+  const project = isRollbackTarget && failure === 'rollback-project-mismatch' || isCurrent && failure === 'serving-project-drift' ? 'other-project' : 'demo-kcalcue';
+  let emails = (isRollbackTarget && failure === 'rollback-allowed-mismatch') || (isCurrent && (failure === 'rollback-current-allowed-mismatch' || failure === 'allowed-mismatch'))
     ? 'other@example.com' : 'tester@example.com';
+  if (isCurrent && failure === 'serving-allowlist-equivalent') emails = 'Added-User@Example.com,TESTER@example.com';
   let analysis = state.enabled;
   if (failure === 'wrong-switch' || (isRollbackTarget && failure === 'rollback-switch-unknown')) analysis = 'wrong';
   else if (isCurrent && failure === 'missing-switch') analysis = undefined;
@@ -139,7 +140,10 @@ else if (matches('run', 'services', 'update') || matches('run', 'deploy')) {
   if (isNew && mutated && failure !== 'gemini-candidate' && failure !== 'digest-mismatch') env = deployedEnv();
   else env = [
     ...(analysis === undefined ? [] : [{ name: 'KCALCUE_ANALYSIS_ENABLED', value: analysis }]),
+    { name: 'NEXT_PUBLIC_FIREBASE_API_KEY', value: 'test-firebase-public-key' },
     { name: 'NEXT_PUBLIC_FIREBASE_PROJECT_ID', value: project },
+    { name: 'NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN', value: 'demo-kcalcue.firebaseapp.com' },
+    { name: 'NEXT_PUBLIC_FIREBASE_APP_ID', value: isCurrent && failure === 'serving-firebase-drift' ? '1:123:web:zzz' : '1:123:web:abc' },
     { name: 'KCALCUE_ALLOWED_EMAILS', value: emails },
     ...(failure === 'rollback-legacy-provider' && isRollbackTarget ? [] : [{ name: 'KCALCUE_VISION_PROVIDER', value: gemini ? 'gemini' : 'openai' }]),
     { name: 'OPENAI_MODEL', value: 'gpt-5.6-luna' },
@@ -154,6 +158,16 @@ else if (matches('run', 'services', 'update') || matches('run', 'deploy')) {
   if (!builtFromDeploy && nutritionVersion && !gemini && !(failure === 'rollback-omit-nutrition' && isRollbackTarget) && !env.some(entry => entry.name === 'NUTRITION_API_KEY')) {
     env.push({ name: 'NUTRITION_API_KEY', valueFrom: { secretKeyRef: { name: 'kcalcue-nutrition', key: nutritionVersion } } });
   }
+  if (isNew && !builtFromDeploy && process.env.KCAL_TEST_ACCESS_EMAILS) {
+    env = env.map(entry => entry.name === 'KCALCUE_ALLOWED_EMAILS' ? { name: entry.name, value: process.env.KCAL_TEST_ACCESS_EMAILS } : entry);
+  }
+  if (isCurrent && failure === 'serving-provider-drift') {
+    env = env.map(entry => entry.name === 'KCALCUE_VISION_PROVIDER' ? { name: entry.name, value: 'other' } : entry);
+  }
+  if (isCurrent && failure === 'serving-model-drift') {
+    env = env.map(entry => entry.name === 'OPENAI_MODEL' ? { name: entry.name, value: 'gpt-other' } : entry);
+  }
+  if (isCurrent && failure === 'serving-secret-drift') env.push({ name: 'OTHER_API_KEY', valueFrom: { secretKeyRef: { name: 'kcalcue-other', key: '1' } } });
   if (!isCurrent && failure === 'extra-secret') env.push({ name: 'OTHER_API_KEY', valueFrom: { secretKeyRef: { name: 'kcalcue-other', key: '1' } } });
   if (!isCurrent && (failure === 'wrong-nutrition-name' || failure === 'wrong-nutrition-version')) {
     env = env.map(entry => {
@@ -179,9 +193,37 @@ else if (matches('run', 'services', 'update') || matches('run', 'deploy')) {
     'status-digest-uppercase': 'sha256:' + 'A'.repeat(64),
     'status-digest-non-string': 12,
   }[failure];
-  const status = { conditions: [{ type: 'Ready', status: isRollbackTarget && failure === 'rollback-not-ready' ? 'False' : 'True' }] };
+  const readyState = isRollbackTarget && failure === 'rollback-not-ready' || isNew && failure === 'candidate-not-ready' || isCurrent && failure === 'serving-not-ready' ? 'False' : 'True';
+  const status = { conditions: [{ type: 'Ready', status: readyState }] };
   if (!isCurrent && reportedDigest !== undefined) status.imageDigest = reportedDigest;
-  emit({ spec: { containers: [{ env, image: revisionImage }] }, status });
+  const runtimeDrift = prefix => failure === prefix;
+  const serviceAccountName = runtimeDrift(isCurrent ? 'serving-service-account-drift' : 'candidate-service-account-drift')
+    ? 'other-runtime@demo-kcalcue.iam.gserviceaccount.com'
+    : 'kcalcue-runtime@demo-kcalcue.iam.gserviceaccount.com';
+  const containerConcurrency = runtimeDrift(isCurrent ? 'serving-concurrency-drift' : 'candidate-concurrency-drift') ? 9 : 4;
+  const timeoutSeconds = runtimeDrift(isCurrent ? 'serving-timeout-drift' : 'candidate-timeout-drift') ? 300 : 120;
+  const cpu = runtimeDrift(isCurrent ? 'serving-cpu-drift' : 'candidate-cpu-drift') ? '2' : '1';
+  const memory = runtimeDrift(isCurrent ? 'serving-memory-drift' : 'candidate-memory-drift') ? '2Gi' : '1Gi';
+  emit({
+    metadata: { annotations: {
+      'autoscaling.knative.dev/minScale': '0',
+      'autoscaling.knative.dev/maxScale': '1',
+      'run.googleapis.com/cpu-throttling': 'true',
+      'run.googleapis.com/startup-cpu-boost': 'false',
+    } },
+    spec: {
+      serviceAccountName,
+      containerConcurrency,
+      timeoutSeconds,
+      containers: [{
+        env,
+        image: revisionImage,
+        ports: [{ containerPort: 8080 }],
+        resources: { limits: { cpu, memory } },
+      }],
+    },
+    status,
+  });
 } else if (matches('run', 'services', 'update-traffic')) {
   const remove = args.find(value => value.startsWith('--remove-tags='));
   if (remove) {
@@ -194,7 +236,9 @@ else if (matches('run', 'services', 'update') || matches('run', 'deploy')) {
   writeFileSync(process.env.KCAL_TEST_STATE, JSON.stringify(state));
 } else if (matches('run', 'services', 'describe')) {
   const removed = new Set(state.removedTags || []);
-  const serving = failure === 'new-service' && !state.routed ? [] : [{ revisionName: state.routedRevision, percent: 100 }];
+  const serving = failure === 'split-traffic'
+    ? [{ revisionName: 'kcalcue-00001-old', percent: 50 }, { revisionName: 'kcalcue-00002-old', percent: 50 }]
+    : failure === 'new-service' && !state.routed ? [] : [{ revisionName: state.routedRevision, percent: 100 }];
   const primary = failure === 'untag-missing' ? '' : (state.smokeTag || process.env.KCAL_TEST_EXISTING_SMOKE_TAG || '');
   const tags = [];
   const baseUrl = failure === 'project-number-url' ? 'https://kcalcue-123456789.asia-east1.run.app'
@@ -234,11 +278,14 @@ else if (matches('run', 'services', 'update') || matches('run', 'deploy')) {
     ...(action === "stage" && !options.omitSmokeTag ? ["--smoke-tag", smokeTag] : []),
     ...(action === "untag" && !options.omitSmokeTag ? ["--tag", smokeTag] : []),
     ...(action === "rollback" ? ["--revision", "kcalcue-00002-old"] : []),
-    ...(action === "promote" && failure !== "missing-revision" ? ["--revision", "kcalcue-00003-new"] : [])], {
+    ...(action === "promote" && failure !== "missing-revision" ? ["--revision", "kcalcue-00003-new"] : []),
+    ...(action === "access-stage" && !options.omitSmokeTag ? ["--smoke-tag", smokeTag] : []),
+    ...(action === "access-promote" && failure !== "missing-revision" ? ["--revision", options.revision ?? "kcalcue-00003-new"] : [])], {
     cwd: process.cwd(), encoding: "utf8", env: { ...process.env, GCLOUD_BIN: executable,
       KCAL_TEST_TRACE: trace, KCAL_TEST_STATE: state, KCAL_TEST_FAILURE: failure,
       KCAL_TEST_NUTRITION_VERSION: options.nutritionSecretVersion ?? "",
-      KCAL_TEST_EXISTING_SMOKE_TAG: action === "untag" || options.existingSmokeTag ? smokeTag : "" },
+      KCAL_TEST_EXISTING_SMOKE_TAG: action === "untag" || options.existingSmokeTag ? smokeTag : "",
+      KCAL_TEST_ACCESS_EMAILS: options.allowedEmails?.join(",") ?? "" },
   });
   const calls = existsSync(trace)
     ? readFileSync(trace, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line) as string[])
@@ -674,6 +721,132 @@ describe("zero-traffic smoke tag", () => {
     expect(result.stderr).toContain("lowercase Cloud Run tag");
     expect(calls).toEqual([]);
   });
+
+describe("allowlist-only access transition", () => {
+  const added = { allowedEmails: ["added-user@example.com", "tester@example.com"] };
+  const removed = { allowedEmails: ["remaining-user@example.com"] };
+  const mixedCase = { allowedEmails: ["Zoe@Example.com", "ada@example.com"] };
+
+  it("stages an added account on the current production image without promoting it", () => {
+    const { result, calls, finalState } = run("access-stage", "", added);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("PASS: access-staged kcalcue-00003-new at 0% production traffic; production remains kcalcue-00001-old at 100%");
+    expect(result.stdout).toContain(`image ${digest}`);
+    expect(finalState.candidateEnv?.KCALCUE_ALLOWED_EMAILS).toBe("added-user@example.com,tester@example.com");
+    expect(finalState.routedRevision).toBe("kcalcue-00001-old");
+    const deploy = calls.find(call => call[1] === "deploy") ?? [];
+    expect(deploy).toContain(`--image=${image}`);
+    expect(deploy).toContain("--no-traffic");
+    expect(deploy).toContain("--tag=rc-smoke");
+    expect(deploy).not.toContain("--allow-unauthenticated");
+    expect(deploy.some(value => value === "--min=0" || value === "--max=1")).toBe(false);
+    expect(deploy).toContain("--min-instances=0");
+    expect(deploy).toContain("--max-instances=1");
+    expect(calls.some(call => call[0] === "artifacts")).toBe(false);
+    expect(trafficChanged(calls)).toBe(false);
+  });
+
+  it("stages removal of an account", () => {
+    const { result, finalState, calls } = run("access-stage", "", removed);
+    expect(result.status, result.stderr).toBe(0);
+    expect(finalState.candidateEnv?.KCALCUE_ALLOWED_EMAILS).toBe("remaining-user@example.com");
+    expect(trafficChanged(calls)).toBe(false);
+  });
+
+  it("normalizes a changed target allowlist without changing traffic", () => {
+    const { result, calls } = run("access-stage", "", mixedCase);
+    expect(result.status, result.stderr).toBe(0);
+    expect(trafficChanged(calls)).toBe(false);
+  });
+
+  it("rejects a semantically unchanged allowlist before deploy", () => {
+    const sameCaseInsensitive = run("access-stage", "", { allowedEmails: ["TESTER@example.com"] });
+    expect(sameCaseInsensitive.result.status).toBe(1);
+    expect(sameCaseInsensitive.result.stderr).toContain("Target allowlist already matches");
+    expect(sameCaseInsensitive.calls.some(call => call[1] === "deploy")).toBe(false);
+
+    const sameOrderInsensitive = run("access-stage", "serving-allowlist-equivalent", added);
+    expect(sameOrderInsensitive.result.status).toBe(1);
+    expect(sameOrderInsensitive.result.stderr).toContain("Target allowlist already matches");
+    expect(sameOrderInsensitive.calls.some(call => call[1] === "deploy")).toBe(false);
+    expect(trafficChanged(sameOrderInsensitive.calls)).toBe(false);
+  });
+
+  it.each([
+    ["serving-provider-drift", "Vision provider is not openai"],
+    ["serving-model-drift", "OpenAI model is not gpt-5.6-luna"],
+    ["serving-secret-drift", "declared production secret set"],
+    ["serving-project-drift", "Firebase project does not match config"],
+    ["serving-firebase-drift", "Firebase configuration differs from config"],
+    ["unknown-switch", "Existing analysis switch is unknown"],
+    ["unpinned-image", "immutable project digest"],
+    ["serving-not-ready", "Serving revision is not Ready"],
+    ["serving-service-account-drift", "runtime contract differs from the approved production runtime"],
+    ["serving-concurrency-drift", "runtime contract differs from the approved production runtime"],
+    ["serving-timeout-drift", "runtime contract differs from the approved production runtime"],
+    ["serving-cpu-drift", "runtime contract differs from the approved production runtime"],
+    ["serving-memory-drift", "runtime contract differs from the approved production runtime"],
+    ["split-traffic", "Current serving revision is uncertain"],
+  ])("stops access-stage before deploy on %s", (failure, message) => {
+    const { result, calls } = run("access-stage", failure, added);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(message);
+    expect(calls.some(call => call[1] === "deploy")).toBe(false);
+    expect(trafficChanged(calls)).toBe(false);
+  });
+
+  it.each([
+    ["digest-mismatch", "image digest does not match the staged image"],
+    ["gemini-candidate", "Gemini RC configuration"],
+    ["extra-secret", "declared production secret set"],
+    ["candidate-not-ready", "Revision is not Ready"],
+    ["candidate-service-account-drift", "runtime contract differs from the approved production runtime"],
+    ["candidate-concurrency-drift", "runtime contract differs from the approved production runtime"],
+    ["candidate-timeout-drift", "runtime contract differs from the approved production runtime"],
+    ["candidate-cpu-drift", "runtime contract differs from the approved production runtime"],
+    ["candidate-memory-drift", "runtime contract differs from the approved production runtime"],
+  ])("rejects an access candidate with %s before traffic changes", (failure, message) => {
+    const { result, calls } = run("access-stage", failure, added);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(message);
+    expect(trafficChanged(calls)).toBe(false);
+  });
+
+  it("promotes only the allowlist candidate and leaves the previous revision available", () => {
+    const { result, calls } = run("access-promote", "", added);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("PASS: kcalcue-00003-new receives 100% of traffic after allowlist transition; production was kcalcue-00001-old");
+    const traffic = calls.find(call => call.includes("update-traffic")) ?? [];
+    expect(traffic).toContain("--to-revisions=kcalcue-00003-new=100");
+    expect(calls.some(call => call.includes("delete"))).toBe(false);
+    expect(calls.at(-1)?.slice(0, 3)).toEqual(["run", "services", "describe"]);
+  });
+
+  it("rejects the current production revision and a different candidate before traffic changes", () => {
+    const current = run("access-promote", "", { ...added, revision: "kcalcue-00001-old" });
+    expect(current.result.status).toBe(1);
+    expect(current.result.stderr).toContain("already the serving revision");
+    expect(trafficChanged(current.calls)).toBe(false);
+    const wrong = run("access-promote", "", { ...added, revision: "kcalcue-00002-old" });
+    expect(wrong.result.status).toBe(1);
+    expect(wrong.result.stderr).toContain("Account allowlist does not match config");
+    expect(trafficChanged(wrong.calls)).toBe(false);
+  });
+
+  it.each([
+    ["candidate-not-ready", "Revision is not Ready"],
+    ["digest-mismatch", "image digest does not match the staged image"],
+    ["gemini-candidate", "Gemini RC configuration"],
+    ["candidate-concurrency-drift", "runtime contract differs from the approved production runtime"],
+    ["candidate-memory-drift", "runtime contract differs from the approved production runtime"],
+    ["split-traffic", "Current serving revision is uncertain"],
+  ])("refuses access-promote on %s", (failure, message) => {
+    const { result, calls } = run("access-promote", failure, added);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(message);
+    expect(calls.some(call => call.includes("update-traffic"))).toBe(false);
+  });
+});
 
   it("reports failure when tag removal changes production traffic", () => {
     const { result } = run("untag", "untag-moves-traffic");
