@@ -183,12 +183,23 @@ else if (matches('run', 'services', 'update') || matches('run', 'deploy')) {
   const serving = failure === 'new-service' && !state.routed ? [] : [{ revisionName: state.routedRevision, percent: 100 }];
   const primary = failure === 'untag-missing' ? '' : (state.smokeTag || process.env.KCAL_TEST_EXISTING_SMOKE_TAG || '');
   const tags = [];
+  const baseUrl = failure === 'project-number-url' ? 'https://kcalcue-123456789.asia-east1.run.app'
+    : failure === 'missing-service-url' ? undefined
+    : failure === 'malformed-service-url' ? 'not-a-url'
+    : failure === 'tagged-base-url' ? 'https://already---kcalcue-eoq7e27i6q-de.a.run.app'
+    : 'https://kcalcue-eoq7e27i6q-de.a.run.app';
+  let baseHost = 'kcalcue-eoq7e27i6q-de.a.run.app';
+  try { if (typeof baseUrl === 'string') baseHost = new URL(baseUrl).hostname; } catch {}
   const add = (tag, revision, percent) => {
     if (!tag || removed.has(tag)) return;
+    const derived = 'https://' + tag + '---' + baseHost;
     const url = failure === 'missing-tagged-url' && tag === primary ? ''
-      : failure === 'project-number-url' ? 'https://' + tag + '---kcalcue-123456789.asia-east1.run.app'
-      : failure === 'wrong-region-url' ? 'https://' + tag + '---kcalcue-hash.us-central1.a.run.app'
-      : 'https://' + tag + '---kcalcue-hash.asia-east1.a.run.app';
+      : failure === 'wrong-service-url' && tag === primary ? 'https://' + tag + '---other-service-eoq7e27i6q-de.a.run.app'
+      : failure === 'wrong-tag-url' && tag === primary ? 'https://other-tag---' + baseHost
+      : failure === 'http-tagged-url' && tag === primary ? 'http://' + tag + '---' + baseHost
+      : failure === 'query-tagged-url' && tag === primary ? derived + '?next=1'
+      : failure === 'fragment-tagged-url' && tag === primary ? derived + '#part'
+      : derived;
     tags.push({ revisionName: revision, tag, percent, url });
   };
   if (failure === 'unrelated-only') add('other-preview', 'kcalcue-00003-new', 0);
@@ -198,7 +209,9 @@ else if (matches('run', 'services', 'update') || matches('run', 'deploy')) {
     if (failure === 'duplicate-tag') add(primary, 'kcalcue-00008-dup', 0);
     add('other-preview', 'kcalcue-00007-old', 0);
   }
-  emit({ status: { traffic: [...serving, ...tags], conditions: [{ type: 'Ready', status: 'True' }] } });
+  const status = { traffic: [...serving, ...tags], conditions: [{ type: 'Ready', status: 'True' }] };
+  if (baseUrl !== undefined) status.url = baseUrl;
+  emit({ status });
 } else { console.error('Unexpected fake gcloud invocation'); process.exit(2); }
 `, { mode: 0o700 });
   const smokeTag = options.smokeTag ?? "rc-smoke";
@@ -240,7 +253,7 @@ describe("Cloud Run stage and promote", () => {
   it("stages an OpenAI candidate from a Gemini-contaminated template without promoting it", () => {
     const { result, calls, finalState } = run("stage");
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain(`PASS: staged kcalcue-00003-new at 0% production traffic; production remains kcalcue-00001-old at 100%; image ${digest}; smoke tag rc-smoke points to candidate; smoke URL: https://rc-smoke---kcalcue-hash.asia-east1.a.run.app; analysis=false.`);
+    expect(result.stdout).toContain(`PASS: staged kcalcue-00003-new at 0% production traffic; production remains kcalcue-00001-old at 100%; image ${digest}; smoke tag rc-smoke points to candidate; smoke URL: https://rc-smoke---kcalcue-eoq7e27i6q-de.a.run.app; analysis=false.`);
     expect(trafficChanged(calls)).toBe(false);
     expect(finalState.routed).toBe(false);
     expect(finalState.routedRevision).toBe("kcalcue-00001-old");
@@ -536,7 +549,7 @@ describe("zero-traffic smoke tag", () => {
     const deploy = calls.find(call => call[1] === "deploy") ?? [];
     expect(deploy).toContain("--no-traffic");
     expect(deploy).toContain("--tag=rc-smoke");
-    expect(result.stdout).toContain("https://rc-smoke---kcalcue-hash.asia-east1.a.run.app");
+    expect(result.stdout).toContain("https://rc-smoke---kcalcue-eoq7e27i6q-de.a.run.app");
     expect(result.stdout).toContain("smoke tag rc-smoke points to candidate");
     expect(result.stdout).toContain(`image ${digest}`);
     expect(result.stdout).toContain("production remains kcalcue-00001-old at 100%");
@@ -544,17 +557,32 @@ describe("zero-traffic smoke tag", () => {
     expect(trafficChanged(calls)).toBe(false);
   });
 
-  it("accepts a project-number Cloud Run hostname for this service and region", () => {
-    const { result } = run("stage", "project-number-url");
+  it("accepts a deterministic project-number URL derived from service.status.url", () => {
+    const { result, calls, finalState } = run("stage", "project-number-url");
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain("https://rc-smoke---kcalcue-123456789.asia-east1.run.app");
+    expect(result.stdout).toContain("0% production traffic");
+    expect(result.stdout).toContain("production remains kcalcue-00001-old at 100%");
+    expect(finalState.routedRevision).toBe("kcalcue-00001-old");
+    expect(trafficChanged(calls)).toBe(false);
   });
 
-  it("fails when the tagged URL is for a different region", () => {
-    const { result, calls } = run("stage", "wrong-region-url");
+  it.each([
+    ["wrong-service-url", "Smoke tag URL is absent or malformed"],
+    ["wrong-tag-url", "Smoke tag URL is absent or malformed"],
+    ["http-tagged-url", "Smoke tag URL is absent or malformed"],
+    ["query-tagged-url", "Smoke tag URL is absent or malformed"],
+    ["fragment-tagged-url", "Smoke tag URL is absent or malformed"],
+    ["missing-service-url", "Service URL is absent or malformed"],
+    ["malformed-service-url", "Service URL is absent or malformed"],
+    ["tagged-base-url", "Service URL is absent or malformed"],
+  ])("rejects a tagged URL that is not the service origin: %s", (failure, message) => {
+    const { result, calls } = run("stage", failure);
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("Smoke tag URL is absent or malformed");
+    expect(result.stderr).toContain(message);
+    expect(result.stderr).toContain("traffic was not changed");
     expect(trafficChanged(calls)).toBe(false);
+    expect(result.stdout).not.toContain("PASS");
   });
 
   it("fails when the requested tag points at another revision", () => {

@@ -195,21 +195,30 @@ function main() {
     }
     return entry.percent;
   }
-  function smokeUrl(value, smokeTag) {
-    let parsed;
-    try { parsed = new URL(value); } catch { parsed = null; }
-    const host = parsed?.hostname ?? "";
-    const prefix = `${smokeTag}---kcalcue-`;
-    const regionHost = new RegExp(`^(?:[a-z0-9-]+\\.${config.region}\\.a\\.run\\.app|\\d+\\.${config.region}\\.run\\.app)$`);
-    if (!parsed || parsed.protocol !== "https:" || parsed.username || parsed.password ||
-        (parsed.pathname !== "/" && parsed.pathname !== "") || parsed.search || parsed.hash ||
-        !host.startsWith(prefix) || !regionHost.test(host.slice(prefix.length))) {
-      throw new Error("Smoke tag URL is absent or malformed; traffic was not changed.");
-    }
+  function httpsOrigin(value) {
+    if (typeof value !== "string" || value.length === 0) return null;
+    try {
+      const parsed = new URL(value);
+      if (parsed.protocol !== "https:" || parsed.username || parsed.password ||
+          (parsed.pathname !== "/" && parsed.pathname !== "") || parsed.search || parsed.hash ||
+          !parsed.hostname.endsWith(".run.app") || parsed.hostname.length <= ".run.app".length) return null;
+      return parsed;
+    } catch { return null; }
+  }
+  // service.status.url is the only base. Its Cloud Run service identifier is opaque.
+  function serviceBase(service) {
+    const parsed = httpsOrigin(service?.status?.url);
+    if (!parsed || parsed.hostname.includes("---")) throw new Error("Service URL is absent or malformed; traffic was not changed.");
+    return parsed;
+  }
+  function smokeUrl(value, smokeTag, service) {
+    const expected = `https://${smokeTag}---${serviceBase(service).hostname}`;
+    const parsed = httpsOrigin(value);
+    if (!parsed || parsed.origin !== expected) throw new Error("Smoke tag URL is absent or malformed; traffic was not changed.");
     return parsed.origin;
   }
   function assertStagedTraffic(candidate, previous, smokeTag) {
-    const { traffic, serving } = productionTraffic();
+    const { service, traffic, serving } = productionTraffic();
     if (traffic.some(entry => entry?.revisionName === candidate && normalPercent(entry) > 0)) {
       throw new Error("Candidate received production traffic; traffic was not changed.");
     }
@@ -222,7 +231,7 @@ function main() {
     if (tagged.length === 0) throw new Error("Smoke tag does not point to the candidate; traffic was not changed.");
     if (tagged.length !== 1) throw new Error("Smoke tag state is ambiguous; traffic was not changed.");
     if (tagged[0].revisionName !== candidate) throw new Error("Smoke tag points to another revision; traffic was not changed.");
-    return smokeUrl(tagged[0].url, smokeTag);
+    return smokeUrl(tagged[0].url, smokeTag, service);
   }
   function tagIdentity(entries) {
     return entries.filter(entry => typeof entry?.tag === "string" && entry.tag.length > 0)
