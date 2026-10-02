@@ -291,11 +291,80 @@ function main() {
       : [];
     return ready.length === 1;
   }
+  function assertAccessEnvShape(container) {
+    const expectedNames = new Set([
+      "NEXT_PUBLIC_FIREBASE_API_KEY",
+      "NEXT_PUBLIC_FIREBASE_PROJECT_ID",
+      "NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN",
+      "NEXT_PUBLIC_FIREBASE_APP_ID",
+      "KCALCUE_ALLOWED_EMAILS",
+      "KCALCUE_ANALYSIS_ENABLED",
+      "OPENAI_MODEL",
+      "KCALCUE_VISION_PROVIDER",
+      ...declaredSecrets.map(secret => secret.envName),
+    ]);
+    if (container.env.length !== expectedNames.size ||
+        container.env.some(entry => !entry || typeof entry.name !== "string" || !expectedNames.has(entry.name)) ||
+        new Set(container.env.map(entry => entry.name)).size !== expectedNames.size) {
+      throw new Error("Revision environment contains undeclared or missing fields; traffic was not changed.");
+    }
+  }
+  function accessRuntimeContract(described, container) {
+    const annotations = described?.metadata?.annotations;
+    if (annotations != null && (typeof annotations !== "object" || Array.isArray(annotations))) {
+      throw new Error("Revision runtime contract is uncertain; traffic was not changed.");
+    }
+    const spec = described?.spec;
+    const limits = container?.resources?.limits;
+    const ports = container?.ports;
+    const cpu = limits?.cpu === "1000m" ? "1" : limits?.cpu;
+    const command = container?.command;
+    const args = container?.args;
+    const contract = {
+      serviceAccountName: spec?.serviceAccountName,
+      containerConcurrency: spec?.containerConcurrency,
+      timeoutSeconds: spec?.timeoutSeconds,
+      cpu,
+      memory: limits?.memory,
+      port: Array.isArray(ports) && ports.length === 1 ? ports[0]?.containerPort : undefined,
+      minScale: annotations?.["autoscaling.knative.dev/minScale"] ?? "0",
+      maxScale: annotations?.["autoscaling.knative.dev/maxScale"],
+      cpuThrottling: annotations?.["run.googleapis.com/cpu-throttling"] ?? "true",
+      startupCpuBoost: annotations?.["run.googleapis.com/startup-cpu-boost"] ?? "false",
+      command: command == null || Array.isArray(command) && command.length === 0 ? null : command,
+      args: args == null || Array.isArray(args) && args.length === 0 ? null : args,
+    };
+    const approved = {
+      serviceAccountName: `kcalcue-runtime@${config.projectId}.iam.gserviceaccount.com`,
+      containerConcurrency: 4,
+      timeoutSeconds: 120,
+      cpu: "1",
+      memory: "1Gi",
+      port: 8080,
+      minScale: "0",
+      maxScale: "1",
+      cpuThrottling: "true",
+      startupCpuBoost: "false",
+      command: null,
+      args: null,
+    };
+    if (JSON.stringify(contract) !== JSON.stringify(approved)) {
+      throw new Error("Revision runtime contract differs from the approved production runtime; traffic was not changed.");
+    }
+    return contract;
+  }
+  function assertSameAccessRuntime(described, container, expected) {
+    const actual = accessRuntimeContract(described, container);
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+      throw new Error("Access candidate runtime differs from the serving revision; traffic was not changed.");
+    }
+  }
   function readAccessSource() {
     const { revision } = requireSingleServing();
     const { described, container } = describeRevision(revision);
     requireEnv(container);
     if (!revisionReady(described)) throw new Error("Serving revision is not Ready; traffic was not changed.");
+    assertAccessEnvShape(container);
     if (envValue(container, "NEXT_PUBLIC_FIREBASE_PROJECT_ID") !== config.projectId) throw new Error("Firebase project does not match config; traffic was not changed.");
     if (firebaseFields().some(([name, expected]) => envValue(container, name) !== expected)) {
       throw new Error("Firebase configuration differs from config; traffic was not changed.");
@@ -305,7 +374,8 @@ function main() {
     const emails = envValue(container, "KCALCUE_ALLOWED_EMAILS");
     if (typeof emails !== "string" || emails.trim() === "") throw new Error("Serving allowlist is missing; traffic was not changed.");
     assertProductionProvider(described, container, { requireProvider: true, expectedImage: null });
-    return { revision, analysisEnabled: analysis === "true", image: container.image, emails };
+    const runtime = accessRuntimeContract(described, container);
+    return { revision, analysisEnabled: analysis === "true", image: container.image, emails, runtime };
   }
   function readServingState() {
     const services = JSON.parse(gcloud(["run", "services", "list", `--region=${config.region}`, "--filter=metadata.name=kcalcue", "--format=json"], true));
@@ -461,19 +531,27 @@ function main() {
   }
   if (action === "access-stage") {
     const source = readAccessSource();
+    if (normalizeEmails(source.emails) === expectedEmails()) {
+      throw new Error("Target allowlist already matches the serving revision; no access revision was created.");
+    }
     const revision = withRuntimeFile(source.analysisEnabled, envFile => gcloud(["run", "deploy", "kcalcue", `--image=${source.image}`,
-      `--region=${config.region}`, `--service-account=kcalcue-runtime@${config.projectId}.iam.gserviceaccount.com`,
-      "--allow-unauthenticated", "--no-traffic", "--port=8080", "--cpu=1", "--memory=1Gi", "--concurrency=4", "--timeout=120s",
-      "--min=0", "--max=1", "--min-instances=0", "--max-instances=1", "--cpu-throttling", "--no-cpu-boost",
+      `--region=${config.region}`, `--service-account=${source.runtime.serviceAccountName}`,
+      "--no-traffic", `--port=${source.runtime.port}`, `--cpu=${source.runtime.cpu}`, `--memory=${source.runtime.memory}`,
+      `--concurrency=${source.runtime.containerConcurrency}`, `--timeout=${source.runtime.timeoutSeconds}s`,
+      `--min-instances=${source.runtime.minScale}`, `--max-instances=${source.runtime.maxScale}`,
+      source.runtime.cpuThrottling === "true" ? "--cpu-throttling" : "--no-cpu-throttling",
+      source.runtime.startupCpuBoost === "true" ? "--cpu-boost" : "--no-cpu-boost",
       `--env-vars-file=${envFile}`, secretFlag, `--tag=${values["smoke-tag"]}`, "--format=value(status.latestCreatedRevisionName)"], true));
     let previewUrl;
     try {
       const created = describeRevision(revision);
       requireEnv(created.container);
+      assertAccessEnvShape(created.container);
       if (firebaseFields().some(([name, expected]) => envValue(created.container, name) !== expected)) {
         throw new Error("Firebase configuration differs from config; traffic was not changed.");
       }
       assertCandidate(revision, source.analysisEnabled, source.image);
+      assertSameAccessRuntime(created.described, created.container, source.runtime);
       previewUrl = assertStagedTraffic(revision, source.revision, values["smoke-tag"]);
     } catch (error) {
       const message = error instanceof Error && error.name === "Error" ? error.message : "Candidate verification failed; traffic was not changed.";
@@ -488,10 +566,12 @@ function main() {
     if (values.revision === source.revision) throw new Error("Access candidate is already the serving revision; traffic was not changed.");
     const candidate = describeRevision(values.revision);
     requireEnv(candidate.container);
+    assertAccessEnvShape(candidate.container);
     if (firebaseFields().some(([name, expected]) => envValue(candidate.container, name) !== expected)) {
       throw new Error("Firebase configuration differs from config; traffic was not changed.");
     }
     assertCandidate(values.revision, source.analysisEnabled, source.image);
+    assertSameAccessRuntime(candidate.described, candidate.container, source.runtime);
     gcloud(["run", "services", "update-traffic", "kcalcue", `--region=${config.region}`, `--to-revisions=${values.revision}=100`]);
     verifyTraffic(values.revision);
     console.log(`PASS: ${values.revision} receives 100% of traffic after allowlist transition; production was ${source.revision}; analysis=${source.analysisEnabled}.`);
