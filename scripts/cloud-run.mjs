@@ -11,12 +11,16 @@ const help = `Cloud Run private trial (explicit commands; staging never promotes
   node scripts/cloud-run.mjs stage --config /private/trial-config.json --tag <verified-tag> --smoke-tag <cloud-run-tag>
   node scripts/cloud-run.mjs promote --config /private/trial-config.json --revision <candidate-revision>
   node scripts/cloud-run.mjs untag --config /private/trial-config.json --tag <smoke-tag>
+  node scripts/cloud-run.mjs access-stage --config /private/trial-config.json --smoke-tag <cloud-run-tag>
+  node scripts/cloud-run.mjs access-promote --config /private/trial-config.json --revision <candidate-revision>
   node scripts/cloud-run.mjs rollback --config /private/trial-config.json --revision <previous-revision>
   node scripts/cloud-run.mjs pause --config /private/trial-config.json
   node scripts/cloud-run.mjs resume --config /private/trial-config.json
 stage creates a zero-traffic candidate, assigns --smoke-tag for a tagged preview URL, and does not call update-traffic.
 promote is separate and requires the exact candidate revision after inspection and approval. A smoke tag is not promotion authority.
 untag --tag removes only that smoke tag and preserves the current production traffic allocation.
+access-stage reuses the current production image and changes only the account allowlist, at zero traffic.
+access-promote requires that exact candidate revision. It is the only promotion that allows the serving allowlist to differ.
 deploy was split for safety and is rejected.
 Optional nutritionSecretVersion maps NUTRITION_API_KEY to kcalcue-nutrition:<version>. Omit it to keep the OpenAI secret only.
 Requires dedicated project label kcalcue=private-trial, authenticated gcloud, and docs/qa/cloud-run-release-guard.md setup.
@@ -31,7 +35,7 @@ const schema = z.object({
   openaiSecretVersion: z.string().regex(/^[1-9]\d*$/),
   nutritionSecretVersion: z.string().regex(/^[1-9]\d*$/).optional(),
 }).strict();
-const actions = ["preflight", "build", "stage", "promote", "untag", "rollback", "pause", "resume"];
+const actions = ["preflight", "build", "stage", "promote", "untag", "rollback", "pause", "resume", "access-stage", "access-promote"];
 const productionModel = "gpt-5.6-luna";
 const deployRetired = "deploy was split for safety and no longer stages and promotes in one step. Use stage to create a zero-traffic candidate, then promote --revision <candidate> after inspection and approval.";
 
@@ -56,7 +60,7 @@ function main() {
     if (typeof value !== "string" || value === "latest" || !smokeTagPattern.test(value)) throw new Error(smokeTagError);
   }
   if ((action === "build" || action === "stage") && !isTag(values.tag)) throw new Error("Provide a unique immutable --tag (not latest).");
-  if (action === "stage") {
+  if (action === "stage" || action === "access-stage") {
     if (values["smoke-tag"] === undefined) throw new Error("Provide a Cloud Run --smoke-tag for the zero-traffic candidate.");
     assertSmokeTag(values["smoke-tag"]);
   }
@@ -64,7 +68,7 @@ function main() {
     if (values.tag === undefined) throw new Error("Provide the smoke --tag to remove.");
     assertSmokeTag(values.tag);
   }
-  if (action === "promote" && !isRevision(values.revision)) throw new Error("Provide the verified candidate --revision.");
+  if ((action === "promote" || action === "access-promote") && !isRevision(values.revision)) throw new Error("Provide the verified candidate --revision.");
   if (action === "rollback" && !isRevision(values.revision)) throw new Error("Provide the previously verified --revision.");
   const executable = process.env.GCLOUD_BIN || "gcloud";
   function gcloud(args, capture = false) {
@@ -274,6 +278,35 @@ function main() {
     if (tagIdentity(after.traffic) !== othersBefore) throw new Error("Smoke tag cleanup changed other tags; inspect the service before continuing.");
     console.log(`PASS: removed smoke tag ${smokeTag} from ${tagged[0].revisionName}; production remains ${servingName} at 100%.`);
   }
+  function firebaseFields() {
+    return [
+      ["NEXT_PUBLIC_FIREBASE_API_KEY", config.firebaseApiKey],
+      ["NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN", config.firebaseAuthDomain],
+      ["NEXT_PUBLIC_FIREBASE_APP_ID", config.firebaseAppId],
+    ];
+  }
+  function revisionReady(described) {
+    const ready = Array.isArray(described?.status?.conditions)
+      ? described.status.conditions.filter(entry => entry?.type === "Ready" && entry?.status === "True")
+      : [];
+    return ready.length === 1;
+  }
+  function readAccessSource() {
+    const { revision } = requireSingleServing();
+    const { described, container } = describeRevision(revision);
+    requireEnv(container);
+    if (!revisionReady(described)) throw new Error("Serving revision is not Ready; traffic was not changed.");
+    if (envValue(container, "NEXT_PUBLIC_FIREBASE_PROJECT_ID") !== config.projectId) throw new Error("Firebase project does not match config; traffic was not changed.");
+    if (firebaseFields().some(([name, expected]) => envValue(container, name) !== expected)) {
+      throw new Error("Firebase configuration differs from config; traffic was not changed.");
+    }
+    const analysis = envValue(container, "KCALCUE_ANALYSIS_ENABLED");
+    if (analysis !== "true" && analysis !== "false") throw new Error("Existing analysis switch is unknown; traffic was not changed.");
+    const emails = envValue(container, "KCALCUE_ALLOWED_EMAILS");
+    if (typeof emails !== "string" || emails.trim() === "") throw new Error("Serving allowlist is missing; traffic was not changed.");
+    assertProductionProvider(described, container, { requireProvider: true, expectedImage: null });
+    return { revision, analysisEnabled: analysis === "true", image: container.image, emails };
+  }
   function readServingState() {
     const services = JSON.parse(gcloud(["run", "services", "list", `--region=${config.region}`, "--filter=metadata.name=kcalcue", "--format=json"], true));
     if (!Array.isArray(services) || services.length > 1) throw new Error("Expected at most one KcalCue service; deployment stopped.");
@@ -424,6 +457,44 @@ function main() {
   }
   if (action === "untag") {
     removeSmokeTag(values.tag);
+    return;
+  }
+  if (action === "access-stage") {
+    const source = readAccessSource();
+    const revision = withRuntimeFile(source.analysisEnabled, envFile => gcloud(["run", "deploy", "kcalcue", `--image=${source.image}`,
+      `--region=${config.region}`, `--service-account=kcalcue-runtime@${config.projectId}.iam.gserviceaccount.com`,
+      "--allow-unauthenticated", "--no-traffic", "--port=8080", "--cpu=1", "--memory=1Gi", "--concurrency=4", "--timeout=120s",
+      "--min=0", "--max=1", "--min-instances=0", "--max-instances=1", "--cpu-throttling", "--no-cpu-boost",
+      `--env-vars-file=${envFile}`, secretFlag, `--tag=${values["smoke-tag"]}`, "--format=value(status.latestCreatedRevisionName)"], true));
+    let previewUrl;
+    try {
+      const created = describeRevision(revision);
+      requireEnv(created.container);
+      if (firebaseFields().some(([name, expected]) => envValue(created.container, name) !== expected)) {
+        throw new Error("Firebase configuration differs from config; traffic was not changed.");
+      }
+      assertCandidate(revision, source.analysisEnabled, source.image);
+      previewUrl = assertStagedTraffic(revision, source.revision, values["smoke-tag"]);
+    } catch (error) {
+      const message = error instanceof Error && error.name === "Error" ? error.message : "Candidate verification failed; traffic was not changed.";
+      throw new Error(`${message} The unverified candidate may remain for operator cleanup.`);
+    }
+    const digest = source.image.slice(source.image.lastIndexOf("@") + 1);
+    console.log(`PASS: access-staged ${revision} at 0% production traffic; production remains ${source.revision} at 100%; image ${digest}; smoke tag ${values["smoke-tag"]} points to candidate; smoke URL: ${previewUrl}; analysis=${source.analysisEnabled}.`);
+    return;
+  }
+  if (action === "access-promote") {
+    const source = readAccessSource();
+    if (values.revision === source.revision) throw new Error("Access candidate is already the serving revision; traffic was not changed.");
+    const candidate = describeRevision(values.revision);
+    requireEnv(candidate.container);
+    if (firebaseFields().some(([name, expected]) => envValue(candidate.container, name) !== expected)) {
+      throw new Error("Firebase configuration differs from config; traffic was not changed.");
+    }
+    assertCandidate(values.revision, source.analysisEnabled, source.image);
+    gcloud(["run", "services", "update-traffic", "kcalcue", `--region=${config.region}`, `--to-revisions=${values.revision}=100`]);
+    verifyTraffic(values.revision);
+    console.log(`PASS: ${values.revision} receives 100% of traffic after allowlist transition; production was ${source.revision}; analysis=${source.analysisEnabled}.`);
     return;
   }
   const serving = readServingState();
