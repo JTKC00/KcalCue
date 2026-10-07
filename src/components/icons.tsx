@@ -117,3 +117,43 @@ export function CheckIcon(props: IconProps) {
     </BaseIcon>
   );
 }
+
+
+export function HomeIcon(props: IconProps) {
+  return (
+    <BaseIcon {...props}>
+      <path d="m4 10 8-6 8 6" />
+      <path d="M6.5 9.5V20h11V9.5" />
+      <path d="M10 20v-6h4v6" />
+    </BaseIcon>
+  );
+}
+
+export function HistoryIcon(props: IconProps) {
+  return (
+    <BaseIcon {...props}>
+      <path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.5" />
+      <path d="M4 4v4.5h4.5" />
+      <path d="M12 8v4l2.5 1.5" />
+    </BaseIcon>
+  );
+}
+
+export function JournalIcon(props: IconProps) {
+  return (
+    <BaseIcon {...props}>
+      <path d="M6 3.5h10a2 2 0 0 1 2 2V20H8a2 2 0 0 1-2-2V3.5Z" />
+      <path d="M8 3.5V18a2 2 0 0 0 2 2" />
+      <path d="M11 8h4M11 12h4" />
+    </BaseIcon>
+  );
+}
+
+export function UserIcon(props: IconProps) {
+  return (
+    <BaseIcon {...props}>
+      <circle cx="12" cy="8" r="3.2" />
+      <path d="M5.5 20c.6-3.6 3-5.5 6.5-5.5s5.9 1.9 6.5 5.5" />
+    </BaseIcon>
+  );
+}

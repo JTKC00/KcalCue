@@ -30,6 +30,7 @@ import { CalorieCorrectionInput } from "./calorie-correction-input";
 import { PrivateMealPhoto } from "./private-meal-photo";
 import { dayCalories, mealCalories, sameCalorieBasis } from "@/lib/meals/calories";
 import { MAX_JOURNAL_NOTE_CODE_POINTS, journalNoteCodePoints, normalizeJournalNote } from "@/lib/meals/journal-note";
+import { CameraIcon, HistoryIcon, HomeIcon, JournalIcon, PlusIcon, UserIcon } from "./icons";
 
 const repository = new MealRepository();
 const messages: Record<string, string> = {
@@ -89,6 +90,41 @@ function mealCalorieLabel(record: MealRecord) {
   if (calories.source === "user") return `手動記錄：${calories.range.min} kcal`;
   const range = roundRange(calories.range, 5);
   return `${calories.coverage === "complete" ? "估算" : "已知部分"}：約 ${range.min}–${range.max} kcal`;
+}
+
+const mealStamp: Record<MealRecord["mealType"], string> = {
+  breakfast: "🥣",
+  lunch: "🥗",
+  dinner: "🍲",
+  snack: "🍎",
+};
+
+function FoodStampCluster({ variant = "today" }: { variant?: "today" | "new" | "empty" }) {
+  const stamps = variant === "new"
+    ? ["🍅", "🍙", "🥛", "🥕"]
+    : variant === "empty"
+      ? ["🍞", "🍵", "🍎"]
+      : ["🍎", "🍞", "🥕", "☕"];
+  return (
+    <div className={`food-stamp-cluster food-stamp-${variant}`} aria-hidden="true">
+      {stamps.map((stamp, index) => (
+        <span key={`${variant}-${index}`} className={`food-stamp food-stamp-${index + 1}`}>
+          {stamp}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function journalDateLabel(date: string) {
+  const parsed = new Date(`${date}T12:00:00`);
+  return Number.isNaN(parsed.getTime())
+    ? date
+    : parsed.toLocaleDateString("zh-HK", {
+      month: "long",
+      day: "numeric",
+      weekday: "long",
+    });
 }
 
 function OriginalAnalysisDetails({ record }: { record: MealRecord }) {
@@ -986,15 +1022,26 @@ export function MealJournal({
     ? journalNoteCodePoints(normalizeJournalNote(draft.journalNote ?? "") ?? "")
     : 0;
   const journalNoteTooLong = journalNoteLength > MAX_JOURNAL_NOTE_CODE_POINTS;
+  const todayLabel = journalDateLabel(today);
+  const syncTone = !online
+    ? "is-offline"
+    : ready && syncedAt
+      ? "is-synced"
+      : "is-syncing";
 
   return (
     <div className="journal-shell">
       <header className="journal-header">
-        <a className="brand" href="#today">
-          KcalCue
+        <a className="journal-brand" href="#today" aria-label="KcalCue 今日">
+          <span className="journal-brand-mark" aria-hidden="true" />
+          <span>
+            <strong>KcalCue</strong>
+            <small>每日飲食小記</small>
+          </span>
         </a>
         <button
-          className="button button-ghost"
+          className="button button-ghost journal-account-button"
+          aria-label="帳戶與安裝"
           disabled={busy}
           onClick={() => {
             setInitialDraft(draft ?? undefined);
@@ -1002,16 +1049,20 @@ export function MealJournal({
             setAccount((value) => !value);
           }}
         >
-          帳戶與安裝
+          <UserIcon />
+          <span>帳戶</span>
         </button>
       </header>
-      <div className="journal-status" role="status">
-        {online
-          ? ready && syncedAt
-            ? `上次同步：${new Date(syncedAt).toLocaleString("zh-HK")}`
-            : "連線中 · 尚未同步"
-          : "離線中 · 可新增、修改及刪除，重連後自動同步"}
-        {!cloudConfigured() && <span> · 雲端尚未設定，無法登入或同步</span>}
+      <div className={`journal-status ${syncTone}`} role="status">
+        <span className="journal-status-dot" aria-hidden="true" />
+        <span>
+          {online
+            ? ready && syncedAt
+              ? `已同步 · ${new Date(syncedAt).toLocaleString("zh-HK")}`
+              : "連線中 · 尚未同步"
+            : "離線中 · 修改會保留，重連後自動同步"}
+          {!cloudConfigured() && <span> · 雲端尚未設定</span>}
+        </span>
       </div>
       {displayedNotice && (
         <div className="journal-notice" role={blockedSaveNotice ? "alert" : "status"}>
@@ -1160,36 +1211,71 @@ export function MealJournal({
         </main>
       ) : !ready ? (
         <main className="journal-main" aria-busy="true">
-          正在讀取記錄…
+          <section className="journal-card journal-loading-card">
+            <span className="journal-loading-mark" aria-hidden="true">🥣</span>
+            <div>
+              <p className="eyebrow">準備你嘅日誌</p>
+              <h1>正在讀取記錄…</h1>
+              <p>餐點同草稿會喺準備好之後出現。</p>
+            </div>
+          </section>
         </main>
       ) : tab === "new" ? (
         <div className="journal-editor">
           {!draft ? (
             <main className="journal-main journal-new-start">
-              <p className="eyebrow">營養日誌</p>
-              <h1>記低新一餐</h1>
-              <p>
-                唔一定要影相。你可以直接手動記低食物同份量，或者用相片 AI 幫你起草，再由你確認。
-              </p>
-              <div className="journal-entry-actions">
+              <section className="journal-card journal-start-hero">
+                <FoodStampCluster variant="new" />
+                <div className="journal-start-copy">
+                  <p className="eyebrow">今日想記低啲咩？</p>
+                  <h1>記低新一餐</h1>
+                  <p>
+                    唔一定要影相。直接記低食物同份量就得；想快啲開始，亦可以用 AI 相片幫你起草。
+                  </p>
+                </div>
+              </section>
+              <div className="journal-entry-grid" aria-label="新增餐點方式">
                 <button
-                  className="button button-primary"
+                  className="journal-entry-card is-primary"
+                  aria-label="手動記一餐"
                   onClick={() => start(true)}
                 >
-                  手動記一餐
+                  <span className="journal-entry-icon"><JournalIcon /></span>
+                  <span>
+                    <strong>手動記一餐</strong>
+                    <small>最直接 · 唔需要相片</small>
+                  </span>
                 </button>
                 <button
-                  className="button button-secondary"
+                  className="journal-entry-card"
+                  aria-label="用相片 AI 辨識"
                   onClick={() => start()}
                 >
-                  用相片 AI 辨識
+                  <span className="journal-entry-icon"><CameraIcon /></span>
+                  <span>
+                    <strong>用相片 AI 辨識</strong>
+                    <small>先起草，再由你逐項確認</small>
+                  </span>
                 </button>
               </div>
             </main>
           ) : (
             <>
-              <section className="journal-card meal-metadata">
-                <h1>{draft.version ? "修正餐點" : "新餐點草稿"}</h1>
+              <section className="journal-card meal-metadata editor-card">
+                <div className="editor-heading">
+                  <div>
+                    <p className="eyebrow">{draft.version ? "編輯日誌" : "新增日誌"}</p>
+                    <h1>{draft.version ? "修正餐點" : "新餐點草稿"}</h1>
+                    <p>先記低時間同餐次；食物、份量同營養可以逐項調整。</p>
+                  </div>
+                  <span className={`editor-mode-chip ${draft.mode === "live" ? "is-ai" : "is-manual"}`}>
+                    {draft.mode === "live" ? "AI 起草" : "手動記錄"}
+                  </span>
+                </div>
+                <div className="editor-section-label">
+                  <span>時間與餐次</span>
+                  <small>按 {draft.timezone} 記錄</small>
+                </div>
                 <div className="metadata-grid">
                   <label>
                     日期
@@ -1235,19 +1321,28 @@ export function MealJournal({
                     </select>
                   </label>
                 </div>
-                <p>
-                  按 {draft.timezone} 記錄 ·{" "}
+                <p className="editor-card-footnote">
                   {draft.mode === "demo"
                     ? "示範結果不加入每日統計"
-                    : "確認後才加入每日記錄"}
+                    : "確認後先會加入每日記錄"}
                 </p>
+              </section>
+              <section className="journal-card journal-note-card">
+                <div className="journal-note-card-heading">
+                  <span className="journal-note-icon" aria-hidden="true">✎</span>
+                  <div>
+                    <p className="eyebrow">留低少少背景</p>
+                    <h2>餐點備註 <small>選填</small></h2>
+                  </div>
+                </div>
                 <div className="journal-note-field">
-                  <label htmlFor="meal-journal-note">餐點備註（選填）</label>
+                  <label className="sr-only" htmlFor="meal-journal-note">餐點備註（選填）</label>
                   <textarea
                     id="meal-journal-note"
                     disabled={busy}
                     rows={4}
                     value={draft.journalNote ?? ""}
+                    aria-label="餐點備註（選填）"
                     aria-invalid={journalNoteTooLong || undefined}
                     aria-describedby="meal-journal-note-help meal-journal-note-count"
                     onChange={(e) =>
@@ -1388,32 +1483,44 @@ export function MealJournal({
           )}
         </div>
       ) : (
-        <main className="journal-main">
-          <div className="journal-title">
-            <div>
-              <p className="eyebrow">一餐一餐，慢慢記低</p>
+        <main className={`journal-main journal-main-${tab}`}>
+          <section className={`journal-title journal-hero-card ${tab === "history" ? "is-history" : ""}`}>
+            {tab === "today" && <FoodStampCluster variant="today" />}
+            <div className="journal-heading-copy">
+              <p className="eyebrow">{tab === "today" ? "一餐一餐，慢慢記低" : "翻返你記低過嘅每一餐"}</p>
               <h1>{tab === "today" ? "今日飲食" : "歷史記錄"}</h1>
+              <p className="journal-date-line">
+                {tab === "today" ? todayLabel : "按日回顧、查看備註，同埋修正已保存嘅餐點。"}
+              </p>
             </div>
             <div className="journal-title-actions">
               <button
-                className="button button-primary"
+                className="button button-primary journal-quick-action is-primary"
+                aria-label="＋ 手動記餐"
                 disabled={busy}
                 onClick={() => start(true)}
               >
-                ＋ 手動記餐
+                <span className="journal-quick-icon"><PlusIcon /></span>
+                <span><strong>手動記餐</strong><small>最快記低</small></span>
               </button>
               <button
-                className="button button-secondary"
+                className="button button-secondary journal-quick-action"
+                aria-label="AI 相片辨識"
                 disabled={busy}
                 onClick={() => start()}
               >
-                AI 相片辨識
+                <span className="journal-quick-icon"><CameraIcon /></span>
+                <span><strong>AI 相片辨識</strong><small>相片起草</small></span>
               </button>
             </div>
-          </div>
+          </section>
           {draft && (
             <section className="journal-card draft-banner">
-              <span>有一份未儲存草稿</span>
+              <span className="draft-banner-icon" aria-hidden="true"><JournalIcon /></span>
+              <div>
+                <strong>有一份未儲存草稿</strong>
+                <small>你可以返去繼續，唔使由頭再記。</small>
+              </div>
               <button
                 className="button button-secondary"
                 onClick={() => openDraft(draft)}
@@ -1444,38 +1551,46 @@ export function MealJournal({
             </p>
           )}
           {tab === "today" && !visible.length && !cloudRecordsUnknown && (
-            <div className="day-summary journal-card" role="region" aria-label="今日摘要">
+            <div className="day-summary journal-card today-summary is-empty" role="region" aria-label="今日摘要">
               <div><span>今日餐數</span><strong>0</strong><small>餐</small></div>
               <div><span>卡路里</span><strong>0</strong><small>kcal</small></div>
             </div>
           )}
           {!visible.length && (
             <section className="journal-card empty-journal">
-              <h2>{cloudRecordsUnknown
-                ? tab === "today" ? "尚未確認今日記錄" : "尚未確認歷史記錄"
-                : tab === "today" ? "今日未有記錄" : "未有餐點記錄"}</h2>
-              <p>
-                {cloudRecordsUnknown
-                  ? "尚未成功讀取雲端餐點，不能確認是否沒有記錄。可先記低一餐，連線後再同步。"
-                  : <>
-                    {tab === "today" &&
-                      records.some((record) => record.mode !== "demo" && record.date < today) &&
-                      "之前的餐點可在歷史記錄查看。"}
-                    手動記低食物同份量，或者用相片 AI 幫你起草。
-                    {!email && "登入後可以跨裝置同步。"}
-                  </>}
-              </p>
+              <FoodStampCluster variant="empty" />
+              <div className="empty-journal-copy">
+                <p className="eyebrow">{cloudRecordsUnknown ? "仲未讀完雲端" : "今日由第一餐開始"}</p>
+                <h2>{cloudRecordsUnknown
+                  ? tab === "today" ? "尚未確認今日記錄" : "尚未確認歷史記錄"
+                  : tab === "today" ? "今日未有記錄" : "未有餐點記錄"}</h2>
+                <p>
+                  {cloudRecordsUnknown
+                    ? "尚未成功讀取雲端餐點，不能確認是否沒有記錄。可先記低一餐，連線後再同步。"
+                    : <>
+                      {tab === "today" &&
+                        records.some((record) => record.mode !== "demo" && record.date < today) &&
+                        "之前的餐點可在歷史記錄查看。"}
+                      手動記低食物同份量，或者用相片 AI 幫你起草。
+                      {!email && "登入後可以跨裝置同步。"}
+                    </>}
+                </p>
+              </div>
               <div className="journal-entry-actions">
                 <button
                   className="button button-primary"
+                  aria-label="手動記一餐"
                   onClick={() => start(true)}
                 >
+                  <JournalIcon />
                   手動記一餐
                 </button>
                 <button
                   className="button button-secondary"
+                  aria-label="用相片 AI 辨識"
                   onClick={() => start()}
                 >
+                  <CameraIcon />
                   用相片 AI 辨識
                 </button>
               </div>
@@ -1497,8 +1612,11 @@ export function MealJournal({
             const MealNameHeading = tab === "today" ? "h4" : "h3";
             return (
               <section className="journal-day" key={date}>
-                <h2>{date}</h2>
-                <div className="day-summary journal-card" role="region" aria-label={tab === "today" ? "今日摘要" : `${date} 摘要`}>
+                <div className="journal-day-heading">
+                  <h2>{journalDateLabel(date)}</h2>
+                  <span>{date}</span>
+                </div>
+                <div className={`day-summary journal-card ${tab === "today" ? "today-summary" : "history-summary"}`} role="region" aria-label={tab === "today" ? "今日摘要" : `${date} 摘要`}>
                   <div><span>{tab === "today" ? "今日餐數" : "餐數"}</span><strong>{calories.mealCount}</strong><small>餐</small></div>
                   <div>
                     <span>{calorieRange && calories.partialCount + calories.unknownCount > 0 ? "已知部分卡路里" : "卡路里"}</span>
@@ -1545,11 +1663,14 @@ export function MealJournal({
                     <div className="meal-list">
                       {group.records.map((record) => (
                         <article className="journal-card meal-row" key={record.id}>
-                          <div>
-                            <p>
-                              {record.time} · {mealTypes[record.mealType]}
-                            </p>
-                            {tab === "history" && <p className="meal-current-note">目前記錄</p>}
+                          <span className="meal-stamp" aria-hidden="true">
+                            {mealStamp[record.mealType]}
+                          </span>
+                          <div className="meal-row-content">
+                            <div className="meal-meta-line">
+                              <p>{record.time} · {mealTypes[record.mealType]}</p>
+                              {tab === "history" && <span className="meal-current-note">已保存</span>}
+                            </div>
                             <MealNameHeading>
                               {record.items
                                 .map((item) => item.displayName)
@@ -1606,6 +1727,8 @@ export function MealJournal({
         ].map(([key, label]) => (
           <button
             key={key}
+            className={key === "new" ? "journal-nav-add" : undefined}
+            aria-label={label}
             disabled={busy}
             aria-current={!account && tab === key ? "page" : undefined}
             onClick={() => {
@@ -1613,7 +1736,10 @@ export function MealJournal({
               else go(key);
             }}
           >
-            {label}
+            <span className="journal-nav-icon" aria-hidden="true">
+              {key === "today" ? <HomeIcon /> : key === "new" ? <PlusIcon /> : <HistoryIcon />}
+            </span>
+            <span className="journal-nav-label">{label}</span>
           </button>
         ))}
       </nav>

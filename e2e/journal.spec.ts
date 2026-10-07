@@ -231,6 +231,28 @@ async function rice(page: Page) {
     .fill("白飯");
 }
 
+test("journal visual refresh keeps mobile and desktop hierarchy usable", async ({ browser, page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "今日飲食", exact: true })).toBeVisible();
+  await expect(page.locator(".journal-hero-card")).toBeVisible();
+  await expect(page.locator(".food-stamp-cluster").first()).toHaveAttribute("aria-hidden", "true");
+  await expect(page.getByRole("button", { name: "＋ 手動記餐", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "AI 相片辨識", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "新增", exact: true })).toHaveClass(/journal-nav-add/);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+
+  const desktop = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  try {
+    const wide = await desktop.newPage();
+    await wide.goto("/");
+    await expect(wide.getByRole("heading", { name: "今日飲食", exact: true })).toBeVisible();
+    await expect(wide.locator(".journal-title-actions")).toBeVisible();
+    expect(await wide.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+  } finally {
+    await desktop.close();
+  }
+});
+
 test("mobile journal-first manual note saves, reloads and stays plain text without AI", async ({ page, context }) => {
   const backend = cloud();
   await backend.install(context);
@@ -929,7 +951,7 @@ test("PWA shell restores a guest draft offline", async ({ page, context }) => {
   await page.getByRole("button", { name: "今日", exact: true }).click();
   await context.setOffline(true);
   await page.reload();
-  await expect(page.getByText(/離線中 · 可新增、修改及刪除/)).toBeVisible();
+  await expect(page.getByText(/離線中 · 修改會保留，重連後自動同步/)).toBeVisible();
   await page.getByRole("button", { name: "繼續草稿", exact: true }).click();
   await expect(
     page.getByRole("combobox", { name: "食物名稱", exact: true }),
