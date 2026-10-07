@@ -5,6 +5,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createEditableFoodItems } from "@/lib/domain/editable-meal";
 import { demoFoodAnalysis } from "@/lib/providers/food-vision/demo";
 import { newDraft, type MealDraft, type MealRecord } from "@/lib/meals/types";
+import { normalizeJournalNote } from "@/lib/meals/journal-note";
+import { provenance } from "@/test/provenance-fixture";
 import { visibleMeals, type SyncState } from "@/lib/meals/outbox";
 import type { LocalMeals } from "@/lib/meals/cache";
 
@@ -148,8 +150,18 @@ it("preserves an unrelated local storage error after a current empty durable sna
   expect(screen.getByText(storageNotice)).toBeVisible();
 });
 
-it("keeps a blocked cloud save in the editor and retries that same mutation", async () => {
-  cache.draft = { ...newDraft(), items: createEditableFoodItems(demoFoodAnalysis.foods) };
+it("keeps a blocked cloud save journal note and retries that same mutation", async () => {
+  const items = createEditableFoodItems(demoFoodAnalysis.foods);
+  cache.draft = {
+    ...newDraft(),
+    mode: "live",
+    analysis: demoFoodAnalysis,
+    analysisProvenance: provenance,
+    items,
+    originalItems: structuredClone(items),
+    calorieCorrection: { kcal: 650, source: "user" },
+    journalNote: "舊備註",
+  };
   Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
   vi.stubGlobal("fetch", vi.fn(async () => Response.json({ online: true })));
   fixture.sync.mockImplementation(async (_uid: string, retry?: boolean) => {
@@ -165,6 +177,9 @@ it("keeps a blocked cloud save in the editor and retries that same mutation", as
   });
   await start();
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "繼續草稿" })); });
+  const note = screen.getByLabelText("餐點備註（選填）");
+  expect(note).toHaveValue("舊備註");
+  fireEvent.change(note, { target: { value: "更新後備註" } });
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "儲存餐點" })); });
   const alert = await screen.findByRole("alert");
   expect(alert).toHaveTextContent("未能儲存到雲端");
@@ -175,7 +190,14 @@ it("keeps a blocked cloud save in the editor and retries that same mutation", as
   expect(screen.queryByText(/已儲存到本機/)).not.toBeInTheDocument();
   expect(screen.queryByText(/尚有 \d+ 項待同步/)).not.toBeInTheDocument();
   const mutationId = fixture.save.mock.calls[0][1];
+  const submitted = fixture.save.mock.calls[0][0] as MealDraft;
+  expect(submitted.journalNote).toBe("更新後備註");
+  expect(submitted.calorieCorrection).toEqual({ kcal: 650, source: "user" });
+  expect(submitted.analysis).toEqual(demoFoodAnalysis);
+  expect(submitted.analysisProvenance).toEqual(provenance);
+  expect(submitted.originalItems).toEqual(items);
   await waitFor(() => expect(cache.draft?.pendingMutation?.id).toBe(mutationId));
+  expect(cache.draft?.journalNote).toBe("更新後備註");
   expect(fixture.save).toHaveBeenCalledOnce();
 
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "重試儲存" })); });
@@ -184,6 +206,37 @@ it("keeps a blocked cloud save in the editor and retries that same mutation", as
   expect(fixture.save).toHaveBeenCalledOnce();
   expect(fixture.sync).toHaveBeenCalledWith("notice-user", true);
   await waitFor(() => expect(cache.draft).toBeNull());
+  expect(screen.getByText("更新後備註")).toBeVisible();
+});
+
+it("sends an explicit journal-note clear through the existing save path", async () => {
+  const meal = record("有備註餐點");
+  meal.journalNote = "要清除嘅備註";
+  state.remote = [meal];
+  fixture.save.mockImplementationOnce(async (draft: MealDraft, mutationId: string, userId: string) => {
+    const saved: MealRecord = {
+      ...draft,
+      mutationId,
+      userId,
+      journalNote: "journalNote" in draft
+        ? normalizeJournalNote(draft.journalNote ?? "")
+        : meal.journalNote,
+      updatedAt: new Date().toISOString(),
+    };
+    state.jobs.push({ id: mutationId, kind: "save", record: saved, expectedVersion: draft.version });
+    return saved;
+  });
+
+  await start();
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "查看／修正" })); });
+  const note = screen.getByLabelText("餐點備註（選填）");
+  expect(note).toHaveValue("要清除嘅備註");
+  fireEvent.change(note, { target: { value: "" } });
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "離線儲存餐點" })); });
+
+  expect((fixture.save.mock.calls[0][0] as MealDraft).journalNote).toBe("");
+  expect(state.jobs[0].record.journalNote).toBeNull();
+  expect(screen.queryByText("要清除嘅備註")).not.toBeInTheDocument();
 });
 
 it("does not claim an acknowledged delete is pending when another meal has a blocked save", async () => {

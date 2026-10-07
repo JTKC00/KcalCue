@@ -76,7 +76,7 @@ describe("ResultView coverage copy", () => {
     );
 
     expect(screen.getByText("HEIC 相片已選擇")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "分析另一餐" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "記另一餐" })).toBeInTheDocument();
   });
 
   it("explains partial coverage instead of hiding the meal total", () => {

@@ -15,6 +15,7 @@ const fixture = vi.hoisted(() => ({
   sync: vi.fn(),
   syncedAt: {} as Record<string, string | null>,
   cachedSyncedAt: null as string | null,
+  cachedDraft: null as MealRecord | null,
   uid: "a",
 }));
 vi.mock("@/lib/firebase/client", () => ({
@@ -41,7 +42,7 @@ vi.mock("@/lib/meals/cache", () => ({
   draftTabId: () => "test-tab",
   prepareDraftTabId: async () => "test-tab",
   localMeals: {
-    read: async () => ({ records: [], draft: null, syncedAt: fixture.cachedSyncedAt }),
+    read: async () => ({ records: [], draft: fixture.cachedDraft, syncedAt: fixture.cachedSyncedAt }),
     write: fixture.write,
     writeSnapshot: async () => {},
     clear: async () => {},
@@ -54,10 +55,15 @@ vi.mock("@/lib/meals/photo", async (original) => ({
   preparePhoto: fixture.preparePhoto,
 }));
 vi.mock("./kcalcue-app", () => ({
-  KcalCueApp: ({ onPhotoSelected }: { onPhotoSelected: (file: File) => void }) => (
-    <button type="button" onClick={() => onPhotoSelected(new File(["photo"], "meal.jpg"))}>
-      選擇測試照片
-    </button>
+  KcalCueApp: ({ onPhotoSelected, manual }: {
+    onPhotoSelected: (file: File) => void;
+    manual?: boolean;
+  }) => (
+    <div data-testid="mock-kcalcue-app" data-manual={manual ? "true" : "false"}>
+      <button type="button" onClick={() => onPhotoSelected(new File(["photo"], "meal.jpg"))}>
+        選擇測試照片
+      </button>
+    </div>
   ),
 }));
 vi.mock("./pwa-controls", () => ({ PwaControls: () => null }));
@@ -71,6 +77,7 @@ beforeEach(() => {
   fixture.sync.mockReset();
   fixture.syncedAt = {};
   fixture.cachedSyncedAt = null;
+  fixture.cachedDraft = null;
   fixture.uid = "a";
   localStorage.clear();
   window.history.replaceState(null, "", "#today");
@@ -80,12 +87,110 @@ beforeEach(() => {
   });
 });
 afterEach(cleanup);
+
+it("makes manual journal entry the primary action while keeping AI photo entry secondary", async () => {
+  fixture.list.mockResolvedValue([]);
+  fixture.syncedAt.a = "2026-10-07T00:00:00.000Z";
+  render(<MealJournal initialProviderMode="live" />);
+  await act(async () => fixture.callback!({ uid: "a", email: "a@example.com" }));
+
+  const manualButton = screen.getByRole("button", { name: "＋ 手動記餐" });
+  const aiButton = screen.getByRole("button", { name: "AI 相片辨識" });
+  expect(manualButton).toHaveClass("button-primary");
+  expect(aiButton).toHaveClass("button-secondary");
+
+  fireEvent.click(manualButton);
+  expect(await screen.findByTestId("mock-kcalcue-app")).toHaveAttribute("data-manual", "true");
+  expect(screen.getByLabelText("餐點備註（選填）")).toBeVisible();
+});
+
+it("counts normalized journal-note code points and blocks values above 500", async () => {
+  fixture.list.mockResolvedValue([]);
+  fixture.cachedDraft = {
+    ...newDraft(),
+    userId: "a",
+    updatedAt: "2026-10-07T00:00:00.000Z",
+    mutationId: crypto.randomUUID(),
+    items: createEditableFoodItems(demoFoodAnalysis.foods),
+  } as MealRecord;
+  render(<MealJournal initialProviderMode="live" />);
+  await act(async () => fixture.callback!({ uid: "a", email: "a@example.com" }));
+  fireEvent.click(await screen.findByRole("button", { name: "繼續草稿" }));
+
+  const note = screen.getByLabelText("餐點備註（選填）");
+  await act(async () => {
+    fireEvent.change(note, { target: { value: "  " + "🧸".repeat(500) + "  " } });
+  });
+  expect(screen.getByText("500/500")).toBeVisible();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+  await act(async () => {
+    fireEvent.change(note, { target: { value: "🧸".repeat(501) } });
+  });
+  expect(screen.getByText("501/500")).toBeVisible();
+  expect(screen.getByRole("alert")).toHaveTextContent("已超出 500 個字元");
+  expect(screen.getByRole("button", { name: "離線儲存餐點" })).toBeDisabled();
+});
+
+it("starts manual entry from the History primary action too", async () => {
+  fixture.list.mockResolvedValue([]);
+  fixture.syncedAt.a = "2026-10-07T00:00:00.000Z";
+  render(<MealJournal initialProviderMode="live" />);
+  await act(async () => fixture.callback!({ uid: "a", email: "a@example.com" }));
+  fireEvent.click(screen.getByRole("button", { name: "歷史" }));
+  fireEvent.click(screen.getByRole("button", { name: "＋ 手動記餐" }));
+  expect(await screen.findByTestId("mock-kcalcue-app")).toHaveAttribute("data-manual", "true");
+});
+
+it("opens a legacy meal without a journal note as a blank optional field", async () => {
+  const item = createEditableFoodItems([demoFoodAnalysis.foods[0]])[0];
+  const legacy: MealRecord = {
+    ...newDraft(),
+    userId: "a",
+    version: 1,
+    mutationId: crypto.randomUUID(),
+    updatedAt: "2026-10-07T00:00:00.000Z",
+    items: [{ ...item, displayName: "舊餐點" }],
+  };
+  delete (legacy as Partial<MealRecord>).journalNote;
+  fixture.list.mockResolvedValue([legacy]);
+
+  render(<MealJournal initialProviderMode="live" />);
+  await act(async () => fixture.callback!({ uid: "a", email: "a@example.com" }));
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "查看／修正" }));
+  });
+  expect(screen.getByLabelText("餐點備註（選填）")).toHaveValue("");
+});
+
+it("renders saved journal notes as plain text with line breaks rather than HTML", async () => {
+  const item = createEditableFoodItems([demoFoodAnalysis.foods[0]])[0];
+  const record: MealRecord = {
+    ...newDraft(),
+    userId: "a",
+    version: 1,
+    mutationId: crypto.randomUUID(),
+    updatedAt: "2026-10-07T00:00:00.000Z",
+    items: [{ ...item, displayName: "午餐" }],
+    journalNote: "<b>雞皮冇食</b>\n醬汁另上",
+  };
+  fixture.list.mockResolvedValue([record]);
+  render(<MealJournal initialProviderMode="live" />);
+  await act(async () => fixture.callback!({ uid: "a", email: "a@example.com" }));
+
+  const note = screen.getByText((content) => content.includes("<b>雞皮冇食</b>"));
+  const box = note.closest(".meal-journal-note");
+  expect(box).not.toBeNull();
+  expect(box).toHaveTextContent("<b>雞皮冇食</b>");
+  expect(box).toHaveTextContent("醬汁另上");
+  expect(box?.querySelector("b")).toBeNull();
+});
 it("offers a lower-resolution image instead of futile retry after a pixel-limit rejection", async () => {
   fixture.list.mockResolvedValue([]);
   fixture.preparePhoto.mockRejectedValue(new PhotoPreparationError("image_dimensions_too_large"));
   render(<MealJournal initialProviderMode="live" />);
   await act(async () => fixture.callback!({ uid: "a", email: "a@example.com" }));
-  fireEvent.click(screen.getByRole("button", { name: "＋ 新增餐點" }));
+  fireEvent.click(screen.getByRole("button", { name: "AI 相片辨識" }));
   fireEvent.click(screen.getByRole("button", { name: "選擇測試照片" }));
 
   expect(await screen.findByText(/圖片像素超過 4000 萬/)).toBeVisible();
@@ -98,7 +203,7 @@ it("still offers retry for a transient photo preparation failure", async () => {
   fixture.preparePhoto.mockRejectedValue(new PhotoPreparationError("photo_failed"));
   render(<MealJournal initialProviderMode="live" />);
   await act(async () => fixture.callback!({ uid: "a", email: "a@example.com" }));
-  fireEvent.click(screen.getByRole("button", { name: "＋ 新增餐點" }));
+  fireEvent.click(screen.getByRole("button", { name: "AI 相片辨識" }));
   fireEvent.click(screen.getByRole("button", { name: "選擇測試照片" }));
 
   expect(await screen.findByText(/照片壓縮未完成/)).toBeVisible();
@@ -110,7 +215,7 @@ it("shows a delayed retry when photo preparation is rate limited", async () => {
   fixture.preparePhoto.mockRejectedValue(new PhotoPreparationError("photo_rate_limited"));
   render(<MealJournal initialProviderMode="live" />);
   await act(async () => fixture.callback!({ uid: "a", email: "a@example.com" }));
-  fireEvent.click(screen.getByRole("button", { name: "＋ 新增餐點" }));
+  fireEvent.click(screen.getByRole("button", { name: "AI 相片辨識" }));
   fireEvent.click(screen.getByRole("button", { name: "選擇測試照片" }));
 
   expect(await screen.findByText(/照片處理稍忙，請約 10 秒後重試/)).toBeVisible();
@@ -124,7 +229,7 @@ it("does not retain the previous draft photo when a valid replacement fails prep
     .mockRejectedValueOnce(new PhotoPreparationError("photo_failed"));
   render(<MealJournal initialProviderMode="live" />);
   await act(async () => fixture.callback!({ uid: "a", email: "a@example.com" }));
-  fireEvent.click(screen.getByRole("button", { name: "＋ 新增餐點" }));
+  fireEvent.click(screen.getByRole("button", { name: "AI 相片辨識" }));
   fireEvent.click(screen.getByRole("button", { name: "選擇測試照片" }));
   await waitFor(() => expect(fixture.write.mock.calls.some(([, state]) =>
     state.draft?.photo === previous,
@@ -141,7 +246,7 @@ it("clears the pixel-limit notice after selecting a smaller photo", async () => 
     .mockResolvedValueOnce(new Blob(["compressed"], { type: "image/jpeg" }));
   render(<MealJournal initialProviderMode="live" />);
   await act(async () => fixture.callback!({ uid: "a", email: "a@example.com" }));
-  fireEvent.click(screen.getByRole("button", { name: "＋ 新增餐點" }));
+  fireEvent.click(screen.getByRole("button", { name: "AI 相片辨識" }));
   fireEvent.click(screen.getByRole("button", { name: "選擇測試照片" }));
   expect(await screen.findByText(/圖片像素超過 4000 萬/)).toBeVisible();
 

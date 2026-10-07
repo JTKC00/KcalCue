@@ -200,6 +200,45 @@ it("reads a private photo only in History and removes its URL on account change"
   expect(screen.queryByRole("img", { name: "餐點附圖" })).not.toBeInTheDocument();
 });
 
+it("persists a journal note in the scoped draft cache and restores it after remount", async () => {
+  const meal = {
+    ...newDraft(),
+    items: createEditableFoodItems(demoFoodAnalysis.foods),
+    journalNote: "初稿備註",
+  };
+  caches.set("a", { ...emptyCache(), draft: meal });
+
+  render(<MealJournal initialProviderMode="live" />);
+  await signIn("a");
+  fireEvent.click(await screen.findByRole("button", { name: "繼續草稿" }));
+  const note = screen.getByLabelText("餐點備註（選填）");
+  expect(note).toHaveValue("初稿備註");
+  fireEvent.change(note, { target: { value: "更新後草稿備註" } });
+  await waitFor(() => expect(caches.get("a")?.draft?.journalNote).toBe("更新後草稿備註"));
+
+  cleanup();
+  history.replaceState(null, "", "/#today");
+  render(<MealJournal initialProviderMode="live" />);
+  await signIn("a");
+  fireEvent.click(await screen.findByRole("button", { name: "繼續草稿" }));
+  expect(screen.getByLabelText("餐點備註（選填）")).toHaveValue("更新後草稿備註");
+});
+
+it("does not expose the previous account journal note while another account loads", async () => {
+  const privateMeal = { ...record("a", "private-a"), journalNote: "只屬於 A 嘅私人備註" };
+  states.set("a", { ...emptySync(), remote: [privateMeal], syncedAt: "2026-10-07T00:00:00.000Z" });
+  states.set("b", { ...emptySync(), remote: [], syncedAt: "2026-10-07T00:00:00.000Z" });
+
+  render(<MealJournal initialProviderMode="live" />);
+  await signIn("a");
+  expect(await screen.findByText("只屬於 A 嘅私人備註")).toBeVisible();
+
+  await signIn("b");
+  await screen.findByRole("heading", { name: "今日未有記錄" });
+  expect(screen.queryByText("只屬於 A 嘅私人備註")).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "private-a" })).not.toBeInTheDocument();
+});
+
 it("does not offer another account a failed photo retry or retain its source file", async () => {
   caches.set("a", { ...emptyCache(), draft: newDraft() });
   caches.set("b", { ...emptyCache(), draft: newDraft() });
