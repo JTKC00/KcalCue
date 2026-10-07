@@ -1212,7 +1212,7 @@ export function MealJournal({
       ) : !ready ? (
         <main className="journal-main" aria-busy="true">
           <section className="journal-card journal-loading-card">
-            <span className="journal-loading-mark" aria-hidden="true">🥣</span>
+            <span className="journal-loading-mark" aria-hidden="true"><JournalIcon /></span>
             <div>
               <p className="eyebrow">準備你嘅日誌</p>
               <h1>正在讀取記錄…</h1>
@@ -1329,7 +1329,7 @@ export function MealJournal({
               </section>
               <section className="journal-card journal-note-card">
                 <div className="journal-note-card-heading">
-                  <span className="journal-note-icon" aria-hidden="true">✎</span>
+                  <span className="journal-note-icon" aria-hidden="true"><JournalIcon /></span>
                   <div>
                     <p className="eyebrow">留低少少背景</p>
                     <h2>餐點備註 <small>選填</small></h2>
