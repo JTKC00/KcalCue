@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
 import type { Firestore } from "firebase-admin/firestore";
 import { HttpError } from "@/lib/server/auth";
-import { CURRENT_MEAL_SCHEMA_VERSION, photoRefSchema, type PhotoRef } from "@/lib/meals/types";
+import {
+  CURRENT_MEAL_SCHEMA_VERSION, NULLABLE_PORTION_MEAL_SCHEMA_VERSION,
+  photoRefSchema, type PhotoRef,
+} from "@/lib/meals/types";
 import { mealCollection, checkedAttachedPhotoAsset } from "./meals";
 import { MAX_PHOTO_JPEG_BYTES, photoAssetRef } from "./photo-assets";
 import { isExactPhotoGeneration, type ExactPhotoObjectStore } from "./photo-object-store";
@@ -12,7 +15,9 @@ export async function attachedPhotoForOwner(db: Firestore, uid: string, mealId: 
     throw new HttpError(404, "photo_not_found");
   const ref: PhotoRef | null | undefined = meal.record.photoRef;
   if (ref == null) throw new HttpError(404, "photo_not_found");
-  if ((meal.record.schemaVersion !== 4 && meal.record.schemaVersion !== CURRENT_MEAL_SCHEMA_VERSION) ||
+  if ((meal.record.schemaVersion !== 4 &&
+       meal.record.schemaVersion !== NULLABLE_PORTION_MEAL_SCHEMA_VERSION &&
+       meal.record.schemaVersion !== CURRENT_MEAL_SCHEMA_VERSION) ||
       !photoRefSchema.safeParse(ref).success)
     throw new HttpError(503, "photo_unavailable");
   const asset = checkedAttachedPhotoAsset(

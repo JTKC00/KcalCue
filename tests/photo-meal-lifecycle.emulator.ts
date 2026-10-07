@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { deleteApp, initializeApp } from "firebase-admin/app";
-import { getFirestore, Timestamp } from "firebase-admin/firestore";
+import { FieldValue, getFirestore, Timestamp } from "firebase-admin/firestore";
 import { accountPath } from "@/lib/firebase/admin";
 import { demoFoodAnalysis } from "@/lib/providers/food-vision/demo";
 import { createEditableFoodItems } from "@/lib/domain/editable-meal";
@@ -66,7 +66,7 @@ afterAll(async () => {
 });
 
 describe("private meal photo transaction lifecycle", () => {
-  it("attaches, preserves on an old-client edit, replaces, removes and keeps schema 5 sticky", async () => {
+  it("attaches, preserves on an old-client edit, replaces, removes and upgrades to the current schema", async () => {
     const uid = `owner-${crypto.randomUUID()}`;
     asUid(uid);
     const first = body();
@@ -87,10 +87,13 @@ describe("private meal photo transaction lifecycle", () => {
     expect((await mealCollection(db, uid).doc(first.id).get()).updateTime?.isEqual(beforeRetry.updateTime!)).toBe(true);
     // Simulate a real version-4 photo record written before nullable portions
     // existed. Its exact asset must remain readable and survive an edit.
-    await mealCollection(db, uid).doc(first.id).update({ "record.schemaVersion": 4 });
+    await mealCollection(db, uid).doc(first.id).update({
+      "record.schemaVersion": 4, "record.journalNote": FieldValue.delete(),
+    });
     expect((await attachedPhotoForOwner(db, uid, first.id)).ref).toEqual(attached.photoRef);
     const oldClientEdit = { ...attached, schemaVersion: 4, mutationId: crypto.randomUUID(), time: "20:00" };
     delete (oldClientEdit as { photoRef?: unknown }).photoRef;
+    delete (oldClientEdit as { journalNote?: unknown }).journalNote;
     const preserved = (await (await post(oldClientEdit)).json()).record as MealRecord;
     expect(preserved.schemaVersion).toBe(CURRENT_MEAL_SCHEMA_VERSION);
     expect(preserved.photoRef).toEqual(attached.photoRef);

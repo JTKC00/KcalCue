@@ -83,13 +83,14 @@ export class MealRepository {
       photoPath: null,
     });
     if (!parsed.success) throw new RepositoryError("invalid_request", 400);
-    const { calorieCorrection, ...input } = parsed.data;
+    const { calorieCorrection, journalNote, ...input } = parsed.data;
     const record: MealRecord = {
       ...input,
       analysisProvenance: input.analysis ? readAnalysisProvenance(input.analysisProvenance, input.mode) : null,
       ...(calorieCorrection === undefined ? {} : {
         calorieCorrection: resolveCalorieCorrection(calorieCorrection, input.items),
       }),
+      ...(journalNote === undefined ? {} : { journalNote }),
       // Read-only cloud metadata may travel with an existing draft. A new
       // offline meal has no server creation time until its first acknowledgement.
       ...(draft.version === 0 || draft.schemaVersion === undefined ? {} : { schemaVersion: draft.schemaVersion }),

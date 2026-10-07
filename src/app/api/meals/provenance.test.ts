@@ -28,7 +28,7 @@ function request(body: unknown) {
 beforeEach(() => {
   fixture.auth.mockReset().mockResolvedValue({ db: {}, user: { id: "verified-user" } });
   fixture.previous.mockReset().mockResolvedValue(undefined);
-  fixture.commit.mockReset().mockImplementation(async (_db, _uid, record) => ({ ...record, schemaVersion: CURRENT_MEAL_SCHEMA_VERSION }));
+  fixture.commit.mockReset().mockImplementation(async (_db, _uid, record) => ({ ...record, schemaVersion: CURRENT_MEAL_SCHEMA_VERSION, photoRef: record.photoRef ?? null, journalNote: record.journalNote ?? null }));
 });
 
 describe("meal analysis provenance boundary", () => {
@@ -67,6 +67,34 @@ describe("meal analysis provenance boundary", () => {
     expect(saved.originalItems).toEqual(previous.originalItems);
     expect(saved.calorieCorrection).toEqual({ kcal: 723, source: "user" });
   });
+  it("keeps provenance and original AI evidence unchanged on a note-only edit", async () => {
+    const previous = {
+      ...input(),
+      version: 1,
+      journalNote: "舊備註",
+      originalItems: createEditableFoodItems(demoFoodAnalysis.foods),
+      userId: "verified-user",
+      schemaVersion: CURRENT_MEAL_SCHEMA_VERSION,
+      photoRef: null,
+      updatedAt: "2026-09-26T10:01:00Z",
+    };
+    fixture.previous.mockResolvedValue({ record: previous, deleted: false });
+    const response = await POST(request({
+      ...previous,
+      mutationId: crypto.randomUUID(),
+      journalNote: "新備註",
+      analysis: null,
+      originalItems: [],
+      analysisProvenance: null,
+    }));
+    expect(response.status).toBe(200);
+    const saved = (await response.json()).record;
+    expect(saved.journalNote).toBe("新備註");
+    expect(saved.analysis).toEqual(previous.analysis);
+    expect(saved.originalItems).toEqual(previous.originalItems);
+    expect(saved.analysisProvenance).toEqual(previous.analysisProvenance);
+  });
+
   it("returns the same provenance for an acknowledged retry without rewriting or refreshing its time", async () => {
     const previous = { ...input(), version: 1, userId: "verified-user", updatedAt: "2026-09-26T10:01:00Z" };
     fixture.previous.mockResolvedValue({ record: previous, deleted: false });

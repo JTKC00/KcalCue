@@ -9,6 +9,7 @@ import { analysisProvenanceMetadataSchema, type AnalysisProvenance } from "@/lib
 import { NutritionService } from "@/lib/nutrition/service";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { calorieCorrectionInputSchema, type MealCalorieCorrection } from "./calories";
+import { journalNoteInputSchema } from "./journal-note";
 export type { MealCalorieCorrection } from "./calories";
 
 export const mealTypes = {
@@ -17,9 +18,11 @@ export const mealTypes = {
   dinner: "晚餐",
   snack: "小食",
 } as const;
-// Version 5 permits an explicitly unknown personal portion. Older writers
-// reject this version, preventing them from erasing that distinction.
-export const CURRENT_MEAL_SCHEMA_VERSION = 5;
+// Version 5 permits an explicitly unknown personal portion. Version 6 adds
+// the protected journal-note field. Older writers reject unknown versions so
+// they cannot erase either distinction during rollback or stale-tab writes.
+export const NULLABLE_PORTION_MEAL_SCHEMA_VERSION = 5;
+export const CURRENT_MEAL_SCHEMA_VERSION = 6;
 export const photoRefSchema = z.strictObject({
   attachmentId: z.uuid(),
   generation: z.string().regex(/^[1-9][0-9]{0,31}$/),
@@ -46,6 +49,7 @@ export interface MealDraft {
   items: EditableFoodItem[];
   originalItems: EditableFoodItem[];
   calorieCorrection?: MealCalorieCorrection | null;
+  journalNote?: string | null;
   calorieInput?: string;
   version: number;
   readonly schemaVersion?: number;
@@ -104,6 +108,7 @@ export const mealInputSchema = z.object({
   analysis: foodAnalysisSchema.nullable(),
   analysisProvenance: analysisProvenanceMetadataSchema.nullable().optional(),
   calorieCorrection: calorieCorrectionInputSchema.nullable().optional(),
+  journalNote: journalNoteInputSchema.optional(),
   items: z
     .array(
       observedFoodSchema.safeExtend({

@@ -515,6 +515,74 @@ describe("Firebase meal API against real Firestore emulator", () => {
     expect(copy.analysisProvenance).toEqual(provenance);
     expect(copy.analysis).toEqual(saved.analysis);
   });
+  it("round-trips journal notes, preserves legacy omission, clears explicitly and upgrades schema 5", async () => {
+    const createdResponse = await POST(request({
+      ...input(),
+      journalNote: "  同朋友食\r\n少醬  ",
+    }));
+    expect(createdResponse.status).toBe(200);
+    const created = (await createdResponse.json()).record as MealRecord;
+    expect(created).toMatchObject({
+      schemaVersion: CURRENT_MEAL_SCHEMA_VERSION,
+      photoRef: null,
+      journalNote: "同朋友食\n少醬",
+    });
+
+    const sameMutationChanged = await POST(request({
+      ...created,
+      journalNote: "重用 mutation 改內容",
+    }));
+    expect(sameMutationChanged.status).toBe(409);
+    expect(await sameMutationChanged.json()).toEqual({ error: { code: "conflict" } });
+    expect((await mealCollection(db, uid).doc(created.id).get()).data()?.record.journalNote)
+      .toBe("同朋友食\n少醬");
+
+    const { journalNote: _omitted, ...oldClientEdit } = created;
+    void _omitted;
+    const preservedResponse = await POST(request({
+      ...oldClientEdit,
+      mutationId: crypto.randomUUID(),
+      time: "18:01",
+    }));
+    expect(preservedResponse.status).toBe(200);
+    const preserved = (await preservedResponse.json()).record as MealRecord;
+    expect(preserved.journalNote).toBe("同朋友食\n少醬");
+
+    const clearedResponse = await POST(request({
+      ...preserved,
+      mutationId: crypto.randomUUID(),
+      journalNote: null,
+    }));
+    expect(clearedResponse.status).toBe(200);
+    const cleared = (await clearedResponse.json()).record as MealRecord;
+    expect(cleared.journalNote).toBeNull();
+
+    const legacy5 = await seedLegacy({
+      schemaVersion: 5,
+      photoRef: null,
+      journalNote: undefined,
+    });
+    const upgradedResponse = await POST(request({
+      ...legacy5,
+      mutationId: crypto.randomUUID(),
+    }));
+    expect(upgradedResponse.status).toBe(200);
+    const upgraded = (await upgradedResponse.json()).record as MealRecord;
+    expect(upgraded.schemaVersion).toBe(CURRENT_MEAL_SCHEMA_VERSION);
+    expect(upgraded.journalNote).toBeNull();
+    expect(upgraded.photoRef).toBeNull();
+
+    const beforeTooLong = await mealCollection(db, uid).doc(upgraded.id).get();
+    const tooLong = await POST(request({
+      ...upgraded,
+      mutationId: crypto.randomUUID(),
+      journalNote: "🧸".repeat(501),
+    }));
+    expect(tooLong.status).toBe(400);
+    const afterTooLong = await mealCollection(db, uid).doc(upgraded.id).get();
+    expect(afterTooLong.updateTime?.isEqual(beforeTooLong.updateTime!)).toBe(true);
+  });
+
   it("keeps legacy provenance absent on read and unknown on an edit that tries to backfill it", async () => {
     const legacy = await seedLegacy({ schemaVersion: 2, mode: "live", analysis: demoFoodAnalysis, analysisProvenance: undefined });
     const before = await mealCollection(db, uid).doc(legacy.id).get();

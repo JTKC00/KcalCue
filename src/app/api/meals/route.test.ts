@@ -25,7 +25,7 @@ import { claimMealLookupAttempt, releaseMealLookupAttempt } from "@/lib/server/m
 import { copy } from "@/content/zh-HK";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import type { NutritionMatch } from "@/lib/nutrition/types";
-import type { MealRecord } from "@/lib/meals/types";
+import { CURRENT_MEAL_SCHEMA_VERSION, type MealRecord } from "@/lib/meals/types";
 import { HttpError } from "@/lib/server/auth";
 import { GET, POST } from "./route";
 
@@ -269,6 +269,77 @@ describe("POST /api/meals bounded input", () => {
       expect(fetchMock).not.toHaveBeenCalled();
     },
   );
+
+  it("does not repeat nutrition lookup work for a note-only edit", async () => {
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const item = {
+      ...meal.items[0],
+      id: "unknown",
+      displayName: "mystery food",
+      normalizedName: "mystery food",
+      identityLevel: "ingredient" as const,
+      unit: "g" as const,
+    };
+    const unresolved = new LocalNutritionProvider().resolve(item);
+    expect(unresolved.includedInTotal).toBe(false);
+    const previous: MealRecord = {
+      ...(meal as unknown as MealRecord),
+      mode: "live",
+      version: 1,
+      mutationId: "33333333-3333-4333-8333-333333333333",
+      userId: "qa-user",
+      updatedAt: "2026-10-07T00:00:00.000Z",
+      schemaVersion: CURRENT_MEAL_SCHEMA_VERSION,
+      createdAt: "2026-10-07T00:00:00.000Z",
+      photoRef: null,
+      journalNote: "舊備註",
+      analysisProvenance: null,
+      originalItems: [item],
+      items: [{ ...item, nutritionMatch: unresolved }],
+    };
+    vi.mocked(previousMeal).mockResolvedValue({
+      deleted: false,
+      version: 1,
+      mutationId: previous.mutationId,
+      record: previous,
+    });
+
+    const response = await POST(jsonRequest(JSON.stringify({
+      ...meal,
+      mode: "live",
+      version: 1,
+      mutationId: "44444444-4444-4444-8444-444444444444",
+      items: [item],
+      journalNote: "新備註",
+    })));
+
+    expect(response.status).toBe(200);
+    expect(reserveHourlyUsdaCall).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    const candidate = vi.mocked(commitMeal).mock.calls[0][2] as MealRecord;
+    expect(candidate.journalNote).toBe("新備註");
+    expect(candidate.items[0].nutritionMatch).toEqual(unresolved);
+  });
+
+  it("changes the durable mutation fingerprint when only the journal note changes", async () => {
+    const first = await POST(jsonRequest(JSON.stringify({
+      ...meal, journalNote: "第一版",
+    })));
+    expect(first.status).toBe(200);
+    const firstFingerprint = vi.mocked(claimMealLookupAttempt).mock.calls.at(-1)?.[1].fingerprint;
+
+    const second = await POST(jsonRequest(JSON.stringify({
+      ...meal, journalNote: "第二版",
+    })));
+    expect(second.status).toBe(200);
+    const secondFingerprint = vi.mocked(claimMealLookupAttempt).mock.calls.at(-1)?.[1].fingerprint;
+
+    expect(firstFingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(secondFingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(secondFingerprint).not.toBe(firstFingerprint);
+  });
 
   it("keeps a concurrent same-mutation save retryable before any USDA request", async () => {
     vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");

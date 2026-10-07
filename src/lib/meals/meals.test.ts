@@ -149,6 +149,18 @@ describe("meal records and local drafts", () => {
     await localMeals.clear(uid);
     expect(await localMeals.listDrafts(uid)).toEqual([]);
   });
+  it("round-trips journal-note draft state without inventing it for legacy drafts", async () => {
+    const uid = "journal-note-cache";
+    const noted = { ...newDraft(), journalNote: "午餐後散步" };
+    await localMeals.write(uid, { records: [], draft: noted, syncedAt: null });
+    expect((await localMeals.read(uid)).draft?.journalNote).toBe("午餐後散步");
+
+    const legacy = newDraft();
+    await localMeals.write(uid, { records: [], draft: legacy, syncedAt: null });
+    expect((await localMeals.read(uid)).draft).not.toHaveProperty("journalNote");
+    await localMeals.clear(uid);
+  });
+
   it("preserves read-only metadata with draft photos without treating it as writable input", async () => {
     const draft = {
       ...newDraft(), version: 3, schemaVersion: 1,
