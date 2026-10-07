@@ -239,6 +239,8 @@ test("journal visual refresh keeps mobile and desktop hierarchy usable", async (
   await expect(page.getByRole("button", { name: "＋ 手動記餐", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "AI 相片辨識", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "新增", exact: true })).toHaveClass(/journal-nav-add/);
+  await expect(page.getByText("未記錄", { exact: true })).toBeVisible();
+  await expect(page.getByText("未知不代表零", { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
 
   const desktop = await browser.newContext({ viewport: { width: 1280, height: 900 } });
@@ -1137,7 +1139,7 @@ test("real photo preview with mocked analysis supports correction, reload, histo
   await expect(page.locator(".journal-notice")).not.toBeVisible();
   await page.reload();
   await expect(page.getByRole("heading", { name: "今日未有記錄", exact: true })).toBeVisible();
-  await expect(todayCalories).toHaveText("0");
+  await expect(todayCalories).toHaveText("未記錄");
   expect(errors).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
 });
@@ -1551,7 +1553,7 @@ test.describe("Today across local midnight", () => {
 
     await page.clock.setFixedTime(new Date(nearMidnight.getTime() + 20_000));
     await expect(page.getByRole("heading", { name: "今日未有記錄", exact: true })).toBeVisible();
-    await expect(todayCalories).toHaveText("0");
+    await expect(todayCalories).toHaveText("未記錄");
     await expect(page.getByText(/之前的餐點可在歷史記錄查看/)).toBeVisible();
     await page.getByRole("button", { name: "歷史", exact: true }).click();
     await expect(page.getByRole("heading", { name: "白飯", exact: true })).toBeVisible();

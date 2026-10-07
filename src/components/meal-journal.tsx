@@ -1553,7 +1553,7 @@ export function MealJournal({
           {tab === "today" && !visible.length && !cloudRecordsUnknown && (
             <div className="day-summary journal-card today-summary is-empty" role="region" aria-label="今日摘要">
               <div><span>今日餐數</span><strong>0</strong><small>餐</small></div>
-              <div><span>卡路里</span><strong>0</strong><small>kcal</small></div>
+              <div><span>卡路里</span><strong>未記錄</strong><small>未知不代表零</small></div>
             </div>
           )}
           {!visible.length && (
