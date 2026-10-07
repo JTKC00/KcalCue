@@ -48,7 +48,7 @@ Rules:
 
 Meal cards also use one small decorative meal-type stamp. The accompanying text still provides the actual meal type.
 
-The current implementation intentionally keeps these lightweight and local to the journal UI. A later brand-asset pass can replace the glyph artwork without changing layout or semantics.
+The current implementation uses KcalCue-owned lightweight line-SVG food marks rather than platform emoji, so the decorative language remains consistent across iOS, Android, Windows and desktop browsers. They stay local to the journal UI and can be refined later without changing layout or semantics.
 
 ## Today
 

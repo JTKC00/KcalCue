@@ -30,7 +30,7 @@ import { CalorieCorrectionInput } from "./calorie-correction-input";
 import { PrivateMealPhoto } from "./private-meal-photo";
 import { dayCalories, mealCalories, sameCalorieBasis } from "@/lib/meals/calories";
 import { MAX_JOURNAL_NOTE_CODE_POINTS, journalNoteCodePoints, normalizeJournalNote } from "@/lib/meals/journal-note";
-import { CameraIcon, HistoryIcon, HomeIcon, JournalIcon, PlusIcon, UserIcon } from "./icons";
+import { CameraIcon, FoodStampIcon, HistoryIcon, HomeIcon, JournalIcon, PlusIcon, UserIcon, type FoodStampKind } from "./icons";
 
 const repository = new MealRepository();
 const messages: Record<string, string> = {
@@ -92,24 +92,24 @@ function mealCalorieLabel(record: MealRecord) {
   return `${calories.coverage === "complete" ? "估算" : "已知部分"}：約 ${range.min}–${range.max} kcal`;
 }
 
-const mealStamp: Record<MealRecord["mealType"], string> = {
-  breakfast: "🥣",
-  lunch: "🥗",
-  dinner: "🍲",
-  snack: "🍎",
+const mealStamp: Record<MealRecord["mealType"], FoodStampKind> = {
+  breakfast: "bowl",
+  lunch: "salad",
+  dinner: "soup",
+  snack: "apple",
 };
 
 function FoodStampCluster({ variant = "today" }: { variant?: "today" | "new" | "empty" }) {
-  const stamps = variant === "new"
-    ? ["🍅", "🍙", "🥛", "🥕"]
+  const stamps: FoodStampKind[] = variant === "new"
+    ? ["tomato", "rice", "milk", "carrot"]
     : variant === "empty"
-      ? ["🍞", "🍵", "🍎"]
-      : ["🍎", "🍞", "🥕", "☕"];
+      ? ["bread", "tea", "apple"]
+      : ["apple", "bread", "carrot", "cup"];
   return (
     <div className={`food-stamp-cluster food-stamp-${variant}`} aria-hidden="true">
       {stamps.map((stamp, index) => (
         <span key={`${variant}-${index}`} className={`food-stamp food-stamp-${index + 1}`}>
-          {stamp}
+          <FoodStampIcon kind={stamp} />
         </span>
       ))}
     </div>
@@ -1664,7 +1664,7 @@ export function MealJournal({
                       {group.records.map((record) => (
                         <article className="journal-card meal-row" key={record.id}>
                           <span className="meal-stamp" aria-hidden="true">
-                            {mealStamp[record.mealType]}
+                            <FoodStampIcon kind={mealStamp[record.mealType]} />
                           </span>
                           <div className="meal-row-content">
                             <div className="meal-meta-line">

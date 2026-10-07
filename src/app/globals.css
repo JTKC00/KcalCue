@@ -2519,14 +2519,19 @@ svg {
 .save-bar {
   position: sticky;
   z-index: 35;
-  bottom: calc(88px + env(safe-area-inset-bottom));
+  bottom: calc(92px + env(safe-area-inset-bottom));
+  width: min(calc(100% - 24px), 620px);
+  margin: 20px auto 0;
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
   justify-content: center;
-  padding: 12px 16px;
-  border-top: 1px solid var(--journal-border);
-  background: rgba(246, 241, 232, .96);
+  padding: 10px;
+  border: 1px solid rgba(190, 201, 190, .92);
+  border-radius: 20px;
+  background: rgba(255, 253, 248, .97);
+  box-shadow: 0 12px 30px rgba(35, 68, 53, .13);
+  backdrop-filter: blur(12px);
 }
 .save-bar button { flex: 1; max-width: 270px; }
 .save-review-note {
@@ -2637,7 +2642,7 @@ svg {
   .journal-quick-icon svg { width: 17px; height: 17px; }
   .journal-quick-action strong { font-size: .78rem; }
   .journal-quick-action small { display: none; }
-  .food-stamp { width: 52px; height: 52px; font-size: 1.45rem; }
+  .food-stamp { width: 52px; height: 52px; }\n  .food-stamp svg { width: 26px; height: 26px; }
   .food-stamp-new .food-stamp-2,
   .food-stamp-new .food-stamp-4,
   .food-stamp-empty .food-stamp-2 { display: none; }
@@ -2656,9 +2661,9 @@ svg {
     font-size: .78rem;
   }
   .meal-row { padding: 15px; gap: 10px; }
-  .meal-stamp { width: 38px; height: 38px; border-radius: 12px; font-size: 1.15rem; }
+  .meal-stamp { width: 38px; height: 38px; border-radius: 12px; }\n  .meal-stamp svg { width: 20px; height: 20px; }
   .journal-note-meta { flex-direction: column; gap: 4px; }
   .editor-section-label { align-items: flex-start; flex-direction: column; gap: 2px; }
   .metadata-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
-  .save-bar { bottom: calc(82px + env(safe-area-inset-bottom)); }
+  .save-bar { bottom: calc(88px + env(safe-area-inset-bottom)); }
 }
