@@ -59,5 +59,3 @@ Final visual inspection confirmed:
 - the editor save controls use a compact floating tray above the navigation rather than a full-width heavy strip;
 - the floating save tray and bottom navigation remain visually distinct on mobile and desktop;
 - no decorative food mark carries meaning that is absent from text.
-
-A later visual pass moves the journal primary from deep sage to muted terracotta on warm cream. Success stays a small green sync dot. Warning and error stay amber and red. Desktop journal columns are 760px.

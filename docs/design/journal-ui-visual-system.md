@@ -18,23 +18,20 @@ AI remains an optional accelerator. Manual logging is still the primary action.
 
 ## Design tokens
 
-The journal shell owns a small local token set so the refresh does not unexpectedly restyle unrelated KcalCue surfaces. Inside the shell, inherited app tokens (`--green`, `--ink`, `--paper`, `--content`) follow this palette, so the embedded editor does not keep a sage primary.
+The journal shell owns a small local token set so the refresh does not unexpectedly restyle unrelated KcalCue surfaces.
 
 Core palette:
 
-- page: warm cream `#f7f1e6`;
-- surface: off-white `#fffdf9`;
-- soft surface: warm neutral `#f4ece3`;
-- warm surface: pale peach `#fbe8d6`;
-- primary: muted terracotta `#a15b42`, pressed `#7d4330`, wash `#f3e2d6`;
-- accent: warm clay `#94523c`, wash `#f6e3d6`;
-- text: dark warm brown `#2f261f`, soft `#5e4b40`, muted `#7a6358`;
-- success: restrained green `#4f7d5c`, used only for the synced status dot;
-- warning `#8b6224` on `#fff0d7`;
-- error `#8f2d32`, kept redder than the terracotta primary;
+- page: warm cream;
+- surface: off-white;
+- soft surface: pale sage;
+- warm surface: pale peach;
+- primary: deep sage green;
+- accent: muted terracotta;
+- text: dark green-charcoal;
 - warning / error remain clearly differentiated and never rely on colour alone.
 
-Desktop content columns use `--journal-column: 760px`. Layout tokens use a restrained radius and a light warm-brown shadow scale rather than a separate one-off value for every card.
+Layout tokens use a restrained radius and shadow scale rather than a separate one-off value for every card.
 
 ## Cartoon food stamps
 
@@ -57,7 +54,7 @@ The current implementation uses KcalCue-owned lightweight line-SVG food marks ra
 
 Today uses:
 
-- a warm peach-cream hero card;
+- a warm hero card;
 - clear date context;
 - one strong manual-entry action;
 - one secondary AI-photo action;
@@ -92,11 +89,11 @@ This refresh does not implement the later J1c search/filter expansion.
 
 The bottom navigation is a floating app-style bar:
 
-- quieter Today and History tabs;
-- a slightly stronger terracotta Add action in the centre;
-- no green floating island.
+- Today;
+- central Add action;
+- History.
 
-The Add action remains the visual centre and continues to start manual logging. Side tabs use a light peach wash only for the current page.
+The Add action remains the visual centre and continues to start manual logging.
 
 A future Insights destination must not appear until J2 exists.
 
