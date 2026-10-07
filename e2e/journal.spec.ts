@@ -225,11 +225,36 @@ async function login(page: Page) {
   await expect.poll(() => page.url()).not.toContain("oobCode");
 }
 async function rice(page: Page) {
-  await page.getByRole("button", { name: "手動記一餐", exact: true }).click();
+  await page.getByRole("button", { name: "＋ 手動記餐", exact: true }).click();
   await page
     .getByRole("combobox", { name: "食物名稱", exact: true })
     .fill("白飯");
 }
+
+test("journal visual refresh keeps the warm app shell readable on mobile and desktop", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "今日飲食", exact: true })).toBeVisible();
+
+  const hero = page.locator(".journal-overview-hero");
+  await expect(hero).toBeVisible();
+  await expect(hero.locator(".journal-food-stamps")).toHaveAttribute("aria-hidden", "true");
+  await expect(page.getByRole("button", { name: "新增", exact: true })).toHaveClass(/journal-nav-add/);
+  await expect(page.locator(".journal-nav")).toBeVisible();
+
+  let width = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    innerWidth: window.innerWidth,
+  }));
+  expect(width.scrollWidth).toBeLessThanOrEqual(width.innerWidth);
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(hero).toBeVisible();
+  width = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    innerWidth: window.innerWidth,
+  }));
+  expect(width.scrollWidth).toBeLessThanOrEqual(width.innerWidth);
+});
 
 test("mobile journal-first manual note saves, reloads and stays plain text without AI", async ({ page, context }) => {
   const backend = cloud();
@@ -1115,7 +1140,7 @@ test("real photo preview with mocked analysis supports correction, reload, histo
   await expect(page.locator(".journal-notice")).not.toBeVisible();
   await page.reload();
   await expect(page.getByRole("heading", { name: "今日未有記錄", exact: true })).toBeVisible();
-  await expect(todayCalories).toHaveText("0");
+  await expect(todayCalories).toHaveText("未記錄");
   expect(errors).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
 });
@@ -1529,7 +1554,7 @@ test.describe("Today across local midnight", () => {
 
     await page.clock.setFixedTime(new Date(nearMidnight.getTime() + 20_000));
     await expect(page.getByRole("heading", { name: "今日未有記錄", exact: true })).toBeVisible();
-    await expect(todayCalories).toHaveText("0");
+    await expect(todayCalories).toHaveText("未記錄");
     await expect(page.getByText(/之前的餐點可在歷史記錄查看/)).toBeVisible();
     await page.getByRole("button", { name: "歷史", exact: true }).click();
     await expect(page.getByRole("heading", { name: "白飯", exact: true })).toBeVisible();

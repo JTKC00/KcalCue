@@ -316,7 +316,7 @@ it("does not present manual food or missing legacy analysis as AI output", async
   expect(malformedArticle).toHaveTextContent("這筆舊紀錄沒有可核實的原始 AI 分析");
   expect(malformedArticle).not.toHaveTextContent("undefined");
 });
-it("shows an explicit zero-meal and zero-kcal Today summary", async () => {
+it("shows zero meals without pretending an unrecorded day has zero kcal", async () => {
   fixture.list.mockResolvedValue([]);
   fixture.syncedAt.a = "2026-09-27T12:00:00.000Z";
   render(<MealJournal initialProviderMode="demo" />);
@@ -325,7 +325,8 @@ it("shows an explicit zero-meal and zero-kcal Today summary", async () => {
   });
   const summary = await screen.findByLabelText("今日摘要");
   expect(summary).toHaveTextContent("今日餐數0餐");
-  expect(summary).toHaveTextContent("卡路里0kcal");
+  expect(summary).toHaveTextContent("卡路里未記錄");
+  expect(summary).toHaveTextContent("未知不代表零");
 });
 
 it("does not present an unverified first cloud load as zero meals or empty history", async () => {
@@ -412,7 +413,8 @@ it("keeps Today meal count and kcal aligned as records change", async () => {
   fixture.list.mockResolvedValue([]);
   act(() => window.dispatchEvent(new Event("kcalcue-sync")));
   await waitFor(() => expect(screen.getByLabelText("今日摘要")).toHaveTextContent("今日餐數0餐"));
-  expect(screen.getByLabelText("今日摘要")).toHaveTextContent("卡路里0kcal");
+  expect(screen.getByLabelText("今日摘要")).toHaveTextContent("卡路里未記錄");
+  expect(screen.getByLabelText("今日摘要")).toHaveTextContent("未知不代表零");
 });
 
 it("groups Today meals by breakfast, lunch, dinner and snack without changing the daily total", async () => {
