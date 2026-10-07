@@ -4,7 +4,8 @@ import { z } from "zod";
 import { authenticated, apiError, HttpError } from "@/lib/server/auth";
 import { mealInputSchema, type MealRecord } from "@/lib/meals/types";
 import { readAnalysisProvenance } from "@/lib/domain/analysis-provenance";
-import { resolveCalorieCorrection } from "@/lib/meals/calories";
+import { resolveCalorieCorrection, sameCalorieBasis } from "@/lib/meals/calories";
+import { resolveJournalNote } from "@/lib/meals/journal-note";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import {
   listMeals,
@@ -135,23 +136,35 @@ export async function POST(request: Request) {
     const existing = await previousMeal(db, user.id, input.id);
     const previous = existing?.record;
     if (existing?.deleted) throw new HttpError(409, "conflict");
-    if (previous?.mutationId === input.mutationId)
+    if (previous?.mutationId === input.mutationId) {
+      const committedNote = previous.journalNote ?? null;
+      if (resolveJournalNote(input.journalNote, committedNote) !== committedNote)
+        throw new HttpError(409, "conflict");
       return Response.json(
         { record: previous },
         { headers: { "Cache-Control": "no-store" } },
       );
+    }
     assertWritableMealSchema(previous);
     if ((previous?.version ?? 0) !== input.version)
       throw new HttpError(409, "conflict");
     if (input.photoPath) throw new HttpError(400, "photos_not_stored");
-    const { photoAction, ...mealInput } = input;
+    const { photoAction, journalNote, ...mealInput } = input;
     const local = new LocalNutritionProvider();
     const key = getNutritionApiKey();
     const usda = key ? new UsdaNutritionClient(key, async () =>
       (await reserveHourlyUsdaCall(db, user.id)).allowed, user.id) : null;
+    const reusePreviousNutrition =
+      journalNote !== undefined &&
+      !!previous &&
+      input.mode === previous.mode &&
+      sameCalorieBasis(input.items, previous.items);
+    const previousItems = new Map(previous?.items.map((item) => [item.id, item]) ?? []);
     const initialItems = input.items.map((item) => {
       if (!hasKnownPortion(item)) return { ...item, nutritionMatch: null };
-      const old = previous?.items.find((food) => food.id === item.id);
+      const old = previousItems.get(item.id);
+      if (reusePreviousNutrition && old)
+        return { ...item, nutritionMatch: old.nutritionMatch ?? null };
       const match =
         old &&
         hasKnownPortion(old) && canReuseNutritionMatchForNameEdit(old, item, old.nutritionMatch)
@@ -160,6 +173,7 @@ export async function POST(request: Request) {
       return { ...item, nutritionMatch: match };
     });
     const needsRemote = (item: typeof initialItems[number]) =>
+      !reusePreviousNutrition &&
       hasKnownPortion(item) && item.nutritionMatch !== null &&
       !item.nutritionMatch.includedInTotal &&
       supportsUsdaPortionUnit(item.unit) &&
@@ -220,6 +234,7 @@ export async function POST(request: Request) {
       const record: Omit<MealRecord, "updatedAt"> = {
         ...mealInput,
         calorieCorrection: resolveCalorieCorrection(input.calorieCorrection, input.items, previous),
+        journalNote: resolveJournalNote(journalNote, previous?.journalNote),
         items,
         analysis,
         analysisProvenance: previous

@@ -2,11 +2,12 @@ import type { Firestore } from "firebase-admin/firestore";
 import { FieldPath, Timestamp } from "firebase-admin/firestore";
 import { z } from "zod";
 import {
-  CURRENT_MEAL_SCHEMA_VERSION, photoRefSchema,
+  CURRENT_MEAL_SCHEMA_VERSION, NULLABLE_PORTION_MEAL_SCHEMA_VERSION, photoRefSchema,
   type MealRecord, type PhotoAction, type PhotoRef,
 } from "@/lib/meals/types";
 import { accountPath } from "./admin";
 import { HttpError } from "@/lib/server/auth";
+import { resolveJournalNote, storedJournalNoteSchema } from "@/lib/meals/journal-note";
 import {
   PHOTO_SCHEMA_VERSION, PHOTO_PIPELINE_VERSION,
   MAX_PHOTO_INPUT_BYTES, MAX_PHOTO_JPEG_BYTES,
@@ -30,16 +31,28 @@ function validAssetMetadata(data: FirebaseFirestore.DocumentData) {
 }
 
 export function assertWritableMealSchema(
-  record: { schemaVersion?: unknown; photoRef?: unknown } | undefined,
+  record: { schemaVersion?: unknown; photoRef?: unknown; journalNote?: unknown } | undefined,
 ) {
   const version = record?.schemaVersion;
-  if (version === PHOTO_SCHEMA_VERSION || version === CURRENT_MEAL_SCHEMA_VERSION) {
-    // Both versions retain the explicit photo field after removal. Version 5
-    // additionally protects nullable portions from older numeric-only writers.
+  if (
+    version === PHOTO_SCHEMA_VERSION ||
+    version === NULLABLE_PORTION_MEAL_SCHEMA_VERSION ||
+    version === CURRENT_MEAL_SCHEMA_VERSION
+  ) {
+    // Versions 4+ retain the explicit photo field after removal. Version 5
+    // additionally protects nullable portions. Version 6 also protects the
+    // journal note so an older writer cannot erase it.
     if (!record || !("photoRef" in record) ||
         record.photoRef !== null &&
         !photoRefSchema.safeParse(record.photoRef).success)
       throw new HttpError(409, "unsupported_schema");
+    if (version === CURRENT_MEAL_SCHEMA_VERSION) {
+      if (!("journalNote" in record) ||
+          !storedJournalNoteSchema.safeParse(record.journalNote).success)
+        throw new HttpError(409, "unsupported_schema");
+    } else if ("journalNote" in record) {
+      throw new HttpError(409, "unsupported_schema");
+    }
     return;
   }
   if (
@@ -50,7 +63,8 @@ export function assertWritableMealSchema(
     version !== 3
   )
     throw new HttpError(409, "unsupported_schema");
-  if (record && "photoRef" in record) throw new HttpError(409, "unsupported_schema");
+  if (record && ("photoRef" in record || "journalNote" in record))
+    throw new HttpError(409, "unsupported_schema");
 }
 
 export function checkedAttachedPhotoAsset(data: FirebaseFirestore.DocumentData | undefined,
@@ -190,6 +204,10 @@ export async function commitMeal(
       ...mealFields,
       schemaVersion: CURRENT_MEAL_SCHEMA_VERSION,
       photoRef: nextPhotoRef,
+      journalNote: resolveJournalNote(
+        record.journalNote,
+        previous?.record?.journalNote,
+      ),
       // A legacy record's first cloud write cannot be reconstructed from its
       // last edit or client meal date. Only new documents receive a timestamp.
       createdAt: previous

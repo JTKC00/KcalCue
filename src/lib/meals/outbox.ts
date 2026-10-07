@@ -90,6 +90,11 @@ export function visibleMeals(state: SyncState) {
           ? previous.analysisProvenance ?? null
           : job.record.analysis ? readAnalysisProvenance(job.record.analysisProvenance, job.record.mode) : null,
         calorieCorrection: resolveCalorieCorrection(job.record.calorieCorrection, job.record.items, previous),
+        ...("journalNote" in job.record
+          ? { journalNote: job.record.journalNote ?? null }
+          : previous && "journalNote" in previous
+            ? { journalNote: previous.journalNote ?? null }
+            : {}),
         ...(confirmed ? {
           schemaVersion: confirmed.schemaVersion,
           createdAt: confirmed.createdAt,

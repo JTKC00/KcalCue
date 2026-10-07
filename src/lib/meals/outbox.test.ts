@@ -651,6 +651,92 @@ describe("durable offline meal outbox", () => {
     expect(await repository.list()).toEqual([]);
   });
 
+  it("preserves a confirmed journal note under a legacy pending edit that omits the field", async () => {
+    const saved = await repository.save(draft(), crypto.randomUUID());
+    const confirmed = {
+      ...saved,
+      schemaVersion: CURRENT_MEAL_SCHEMA_VERSION,
+      photoRef: null,
+      journalNote: "已確認備註",
+      createdAt: "2026-10-07T01:00:00.000Z",
+    };
+    const mutationId = crypto.randomUUID();
+    const { journalNote: _note, ...legacyPending } = {
+      ...confirmed,
+      mutationId,
+      version: confirmed.version + 1,
+      time: "18:00",
+    };
+    void _note;
+    await changeSyncState("a", () => ({
+      remote: [confirmed],
+      syncedAt: null,
+      jobs: [{ id: mutationId, kind: "save", record: legacyPending, expectedVersion: confirmed.version }],
+    }));
+    expect((await repository.list())[0].journalNote).toBe("已確認備註");
+    expect((await repository.state()).jobs[0].record).not.toHaveProperty("journalNote");
+
+    fixture.fetch.mockRejectedValueOnce(new TypeError("offline"));
+    await expect(repository.sync()).rejects.toThrow();
+    const command = JSON.parse(fixture.fetch.mock.calls[0][1].body);
+    expect(command).not.toHaveProperty("journalNote");
+  });
+
+  it("lets an explicit pending null clear a confirmed journal note without rewriting the queued command", async () => {
+    const saved = await repository.save(draft(), crypto.randomUUID());
+    const confirmed = {
+      ...saved,
+      schemaVersion: CURRENT_MEAL_SCHEMA_VERSION,
+      photoRef: null,
+      journalNote: "會被清除",
+      createdAt: "2026-10-07T01:00:00.000Z",
+    };
+    const mutationId = crypto.randomUUID();
+    const pending = {
+      ...confirmed,
+      mutationId,
+      version: confirmed.version + 1,
+      journalNote: null,
+    };
+    await changeSyncState("a", () => ({
+      remote: [confirmed],
+      syncedAt: null,
+      jobs: [{ id: mutationId, kind: "save", record: pending, expectedVersion: confirmed.version }],
+    }));
+    expect((await repository.list())[0].journalNote).toBeNull();
+    expect((await repository.state()).jobs[0].record.journalNote).toBeNull();
+  });
+
+  it("keeps a journal-note edit through offline restart, lost acknowledgement and retry", async () => {
+    const mutationId = crypto.randomUUID();
+    const saved = await repository.save({
+      ...draft(),
+      journalNote: "  第一行\r\n第二行  ",
+    }, mutationId);
+    expect(saved.journalNote).toBe("第一行\n第二行");
+    expect((await repository.state()).jobs[0].record.journalNote).toBe("第一行\n第二行");
+
+    fixture.fetch.mockRejectedValueOnce(new TypeError("acknowledgement lost"));
+    await expect(repository.sync()).rejects.toThrow();
+    const cloud = {
+      ...saved,
+      schemaVersion: CURRENT_MEAL_SCHEMA_VERSION,
+      photoRef: null,
+      journalNote: saved.journalNote ?? null,
+      createdAt: "2026-10-07T01:00:00.000Z",
+    };
+    fixture.fetch.mockResolvedValueOnce(Response.json({ record: cloud }))
+      .mockResolvedValueOnce(Response.json({ records: [cloud], revision: "journal-next" }));
+    await new MealRepository().sync();
+    expect(await repository.list()).toEqual([cloud]);
+    const commands = fixture.fetch.mock.calls
+      .filter(([, init]) => init?.method === "POST")
+      .map(([, init]) => JSON.parse(init.body));
+    expect(commands).toHaveLength(2);
+    expect(commands.map((body) => body.mutationId)).toEqual([mutationId, mutationId]);
+    expect(commands.every((body) => body.journalNote === "第一行\n第二行")).toBe(true);
+  });
+
   it.each(["same", "changed", "clear"])("overlays legacy pending %s intent without rewriting its payload or mutation", async (mode) => {
     const saved = await repository.save({ ...draft(), calorieCorrection: { kcal: 650, source: "user" } }, crypto.randomUUID());
     const mutationId = crypto.randomUUID();
