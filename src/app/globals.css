@@ -1791,6 +1791,7 @@ svg {
 .journal-main { width: min(100% - 32px, 1000px); margin: 32px auto; }
 .journal-title { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 .journal-title h1 { font-size: clamp(1.8rem, 4vw, 2.8rem); margin: 6px 0; }
+.journal-title-actions, .journal-entry-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .journal-card { background: #fffdf8; border: 1px solid #dce2d7; border-radius: 20px; padding: 24px; margin-bottom: 18px; }
 .journal-card h2 { margin-top: 0; }
 .journal-card p { line-height: 1.6; }
@@ -1799,7 +1800,8 @@ svg {
 .journal-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .journal-shell button { min-height: 44px; cursor: pointer; }
 .journal-shell button:disabled { cursor: not-allowed; opacity: .55; }
-.journal-shell input, .journal-shell select { font-size: 16px; min-height: 44px; max-width: 100%; border: 1px solid #a9b8a8; border-radius: 10px; padding: 10px; background: #fff; color: #223b2e; }
+.journal-shell input, .journal-shell select, .journal-shell textarea { font-size: 16px; min-height: 44px; max-width: 100%; border: 1px solid #a9b8a8; border-radius: 10px; padding: 10px; background: #fff; color: #223b2e; }
+.journal-shell textarea { width: 100%; resize: vertical; line-height: 1.5; }
 .journal-shell label { display: flex; flex-direction: column; gap: 8px; font-weight: 600; }
 .journal-shell :focus-visible { outline: 3px solid #b55f3d; outline-offset: 3px; }
 .journal-nav { position: fixed; z-index: 40; bottom: 0; left: 0; right: 0; display: flex; justify-content: center; gap: 8px; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid #dce2d7; background: #fffdf8; }
@@ -1817,6 +1819,9 @@ svg {
 .meal-row h3, .meal-row h4 { overflow-wrap: anywhere; margin: 8px 0 14px; }
 .meal-row .meal-calories { margin: 0 0 16px; font-weight: 700; color: #244d38; }
 .meal-row .meal-current-note { margin: 8px 0 0; }
+.meal-journal-note { margin: -4px 0 14px; padding: 10px 12px; border-left: 3px solid #9caf9e; background: #f5f8f2; border-radius: 8px; display: grid; gap: 4px; }
+.meal-journal-note strong { color: #244d38; font-size: .8rem; }
+.meal-journal-note span { white-space: pre-wrap; overflow-wrap: anywhere; color: #405f4b; line-height: 1.55; }
 .meal-photo { width: min(100%, 240px); margin: 0 0 16px; }
 .meal-photo img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 12px; }
 .meal-photo figcaption, .meal-photo-status, .meal-photo-error { color: #5c6e60; font-size: .85rem; }
@@ -1843,6 +1848,12 @@ svg {
 .date-filter { margin: 20px 0; max-width: 320px; }
 .meal-metadata, .journal-editor > .journal-card { width: min(100% - 32px, 1060px); margin: 24px auto; }
 .metadata-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.journal-note-field { margin-top: 18px; display: grid; gap: 8px; }
+.journal-note-meta { display: flex; justify-content: space-between; gap: 16px; color: #5c6e60; font-size: .8rem; font-weight: 400; }
+.journal-note-meta > span:first-child { flex: 1; }
+.journal-note-meta .is-error, .journal-note-error { color: #973e27; }
+.journal-note-error { font-size: .85rem; font-weight: 600; }
+.journal-new-start > p:not(.eyebrow) { max-width: 660px; line-height: 1.65; color: #506653; }
 .editor-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
 .journal-editor { padding-bottom: 90px; }
 .save-bar { position: sticky; z-index: 35; bottom: calc(68px + env(safe-area-inset-bottom)); display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; padding: 14px 16px; background: #fffdf8; border-top: 1px solid #dce2d7; }
@@ -1854,8 +1865,10 @@ svg {
 @media (max-width: 600px) {
   .journal-card { padding: 18px; }
   .journal-header { padding: 12px 16px; }
-  .journal-title { align-items: flex-start; }
-  .journal-title > button { padding-inline: 14px; }
+  .journal-title { align-items: flex-start; flex-direction: column; }
+  .journal-title-actions { width: 100%; }
+  .journal-title-actions .button { flex: 1; }
+  .journal-note-meta { flex-direction: column; gap: 4px; }
   .day-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 14px; }
   .metadata-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .metadata-grid label:last-child { grid-column: 1 / -1; }

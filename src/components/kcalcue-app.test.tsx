@@ -169,7 +169,7 @@ describe("KcalCueApp analysis cancel", () => {
     await user.click(screen.getByRole("button", { name: /開始分析/ }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(screen.getByText("AI 分析結果")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "分析另一餐" }));
+    await user.click(screen.getByRole("button", { name: "記另一餐" }));
     await act(async () => { completeNutrition(Response.json({ matches: [] })); });
     expect(screen.getByRole("heading", { name: /一張相/ })).toBeInTheDocument();
     expect(screen.queryByText("食物明細")).not.toBeInTheDocument();

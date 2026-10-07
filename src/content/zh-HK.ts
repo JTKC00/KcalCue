@@ -32,7 +32,7 @@ export const copy = {
   retry: "再試一次",
   manualInput: "手動加入食物",
   useDemo: "改用示範餐",
-  newMeal: "分析另一餐",
+  newMeal: "記另一餐",
   foodBreakdown: "食物明細",
   foodBreakdownBody: "修正名稱、份量或單位，總數會即時更新。",
   uncertaintyTitle: "主要不確定因素",

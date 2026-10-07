@@ -231,6 +231,50 @@ async function rice(page: Page) {
     .fill("白飯");
 }
 
+test("mobile journal-first manual note saves, reloads and stays plain text without AI", async ({ page, context }) => {
+  const backend = cloud();
+  await backend.install(context);
+  let analyses = 0;
+  await page.route("**/api/analyze", async (route) => {
+    analyses++;
+    await route.fulfill({ status: 500, json: { error: { code: "unexpected_ai_call" } } });
+  });
+
+  await page.goto("/");
+  await login(page);
+
+  const manual = page.getByRole("button", { name: "＋ 手動記餐", exact: true });
+  const photo = page.getByRole("button", { name: "AI 相片辨識", exact: true });
+  await expect(manual).toBeVisible();
+  await expect(photo).toBeVisible();
+  await manual.click();
+
+  await page.getByRole("combobox", { name: "食物名稱", exact: true }).fill("白飯");
+  const note = page.getByRole("textbox", { name: "餐點備註（選填）", exact: true });
+  await note.fill("  <b>雞皮冇食</b>\n醬汁另上 🧸  ");
+  await expect(page.getByText("18/500", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+
+  await expect.poll(() => backend.records.size).toBe(1);
+  expect(analyses).toBe(0);
+  expect(backend.saves).toHaveLength(1);
+  expect(backend.saves[0].journalNote).toBe("<b>雞皮冇食</b>\n醬汁另上 🧸");
+
+  const todayNote = page.locator(".meal-journal-note");
+  await expect(todayNote).toContainText("<b>雞皮冇食</b>");
+  await expect(todayNote).toContainText("醬汁另上 🧸");
+  await expect(todayNote.locator("b")).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "白飯", exact: true })).toBeVisible();
+  await expect(page.locator(".meal-journal-note")).toContainText("醬汁另上 🧸");
+
+  await page.getByRole("button", { name: "歷史", exact: true }).click();
+  await expect(page.locator(".meal-journal-note")).toContainText("<b>雞皮冇食</b>");
+  await expect(page.locator(".meal-journal-note b")).toHaveCount(0);
+  expect(analyses).toBe(0);
+});
+
 test("a fresh mobile session assembles every paged meal before showing Today and History", async ({ browser, page, context }) => {
   const backend = cloud();
   await backend.install(context);
@@ -296,7 +340,7 @@ test("a second tab's background refresh cannot erase an unsaved draft", async ({
   await expect(other.getByText("tester@example.com", { exact: true })).toBeVisible();
   await other.getByRole("button", { name: "今日", exact: true }).click();
 
-  await page.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
   await page.getByRole("button", { name: "手動加入食物", exact: true }).click();
   await page.getByRole("combobox", { name: "食物名稱", exact: true }).fill("白飯");
   const cached = () => page.evaluate(async (uid) => {
@@ -334,7 +378,7 @@ test("a second tab's background refresh cannot erase an unsaved draft", async ({
   await page.close();
   const reopened = await context.newPage();
   await reopened.goto("/");
-  await reopened.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await reopened.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
   await expect(reopened.getByRole("combobox", { name: "食物名稱", exact: true })).toHaveValue("白飯");
   expect(backend.saves).toHaveLength(0);
   await reopened.close();
@@ -346,7 +390,7 @@ test("a popup with cloned session storage gets its own draft identity", async ({
   await backend.install(context);
   await page.goto("/");
   await login(page);
-  await page.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
   await page.getByRole("button", { name: "手動加入食物", exact: true }).click();
   await page.getByRole("combobox", { name: "食物名稱", exact: true }).fill("白飯");
   const originalId = await page.evaluate(() => sessionStorage.getItem("kcalcue-draft-tab"));
@@ -362,7 +406,7 @@ test("a popup with cloned session storage gets its own draft identity", async ({
   expect(popupId).not.toBe(originalId);
 
   await popup.getByRole("button", { name: "今日", exact: true }).click();
-  await popup.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await popup.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
   await expect(popup.getByRole("combobox", { name: "食物名稱", exact: true })).toHaveValue("白飯");
   await popup.getByRole("combobox", { name: "食物名稱", exact: true }).fill("香蕉");
   await expect(page.getByRole("combobox", { name: "食物名稱", exact: true })).toHaveValue("白飯");
@@ -379,7 +423,7 @@ test("a stale tab cannot replace the latest draft and its fork stays recoverable
   await backend.install(context);
   await page.goto("/");
   await login(page);
-  await page.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
   await page.getByRole("button", { name: "手動加入食物", exact: true }).click();
   const firstName = page.getByRole("combobox", { name: "食物名稱", exact: true });
   await firstName.fill("白飯");
@@ -406,12 +450,12 @@ test("a stale tab cannot replace the latest draft and its fork stays recoverable
   await stale.getByRole("button", { name: "今日", exact: true }).click();
   await firstName.fill("香蕉");
   await expect.poll(legacyName).toBe("香蕉");
-  await stale.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await stale.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
   await expect(stale.getByRole("combobox", { name: "食物名稱", exact: true })).toHaveValue("白飯");
   const recovered = await context.newPage();
   await recovered.goto("/");
   await expect(recovered.getByRole("region", { name: "其他未儲存草稿" })).toContainText("白飯");
-  await recovered.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await recovered.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
   await expect(recovered.getByRole("combobox", { name: "食物名稱", exact: true })).toHaveValue("香蕉");
   recovered.once("dialog", (dialog) => dialog.accept());
   await recovered.getByRole("region", { name: "其他未儲存草稿" })
@@ -419,7 +463,7 @@ test("a stale tab cannot replace the latest draft and its fork stays recoverable
   await expect(recovered.getByRole("combobox", { name: "食物名稱", exact: true })).toHaveValue("白飯");
   const afterRecovery = await context.newPage();
   await afterRecovery.goto("/");
-  await afterRecovery.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await afterRecovery.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
   await expect(afterRecovery.getByRole("combobox", { name: "食物名稱", exact: true })).toHaveValue("白飯");
   expect(backend.saves).toHaveLength(0);
   await afterRecovery.close();
@@ -553,7 +597,7 @@ test("correcting an AI dish to banana survives cloud save, reload and history ed
 
   await page.goto("/");
   await login(page);
-  await page.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
   const png = await sharp({
     create: { width: 80, height: 60, channels: 3, background: "yellow" },
   }).png().toBuffer();
@@ -622,14 +666,13 @@ test("another meal from History starts a fresh draft without changing the saved 
   await page.getByRole("button", { name: "查看／修正", exact: true }).click();
   await expect(page.getByRole("heading", { name: "修正餐點", exact: true })).toBeVisible();
   page.once("dialog", (dialog) => dialog.dismiss());
-  await page.getByRole("button", { name: "分析另一餐", exact: true }).click();
+  await page.getByRole("button", { name: "記另一餐", exact: true }).click();
   await expect(page.getByRole("heading", { name: "修正餐點", exact: true })).toBeVisible();
   expect(backend.records.size).toBe(1);
 
   page.once("dialog", (dialog) => dialog.accept());
-  await page.getByRole("button", { name: "分析另一餐", exact: true }).click();
+  await page.getByRole("button", { name: "記另一餐", exact: true }).click();
   await expect(page.getByRole("heading", { name: "新餐點草稿", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "手動加入食物", exact: true }).click();
   await page.getByRole("combobox", { name: "食物名稱", exact: true }).fill("香蕉");
   await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
   await expect.poll(() => backend.records.size).toBe(2);
@@ -953,7 +996,7 @@ test("saving a meal never uploads or persists its source image", async ({
     )
       uploads.push(request.url());
   });
-  await page.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
   const png = await sharp({
     create: { width: 80, height: 60, channels: 3, background: "green" },
   })
@@ -1008,7 +1051,7 @@ test("real photo preview with mocked analysis supports correction, reload, histo
   });
   await page.goto("/");
   await login(page);
-  await page.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
   await page.locator('input[type="file"]').nth(1).setInputFiles(path.join(testInfo.project.testDir, "fixtures/hk-milk-tea.jpg"));
   await expect(page.getByRole("img", { name: "已選擇的餐點相片預覽" })).toBeVisible();
   // The server is intentionally in demo mode; only this response is mocked live.
@@ -1098,7 +1141,7 @@ test("mobile real-photo flow preserves an unknown serving through save and reloa
   } } }));
   await page.goto("/");
   await login(page);
-  await page.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
   await page.locator('input[type="file"]').nth(1).setInputFiles(path.join(testInfo.project.testDir, "fixtures/hk-milk-tea.jpg"));
   await page.getByRole("button", { name: "開始分析", exact: true }).click();
   await expect(page.getByRole("heading", { name: "暫未能計算" })).toBeVisible();
@@ -1147,7 +1190,7 @@ test("a slow nutrition lookup keeps the completed AI result editable without ano
   });
   await page.goto("/");
   await login(page);
-  await page.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
   await page.locator('input[type="file"]').nth(1).setInputFiles(
     path.join(testInfo.project.testDir, "fixtures/hk-milk-tea.jpg"),
   );
@@ -1192,7 +1235,7 @@ test("AI failure keeps the selected photo and a double tap starts one new analys
   });
   await page.goto("/");
   await login(page);
-  await page.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
   await page.locator('input[type="file"]').nth(1).setInputFiles(
     path.join(testInfo.project.testDir, "fixtures/hk-milk-tea.jpg"),
   );
@@ -1242,7 +1285,7 @@ test("rejecting a replacement cannot restore an earlier photo after its preparat
   });
   await page.goto("/");
   await login(page);
-  await page.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
   const input = page.locator('input[type="file"]').nth(1);
   await input.setInputFiles(path.join(testInfo.project.testDir, "fixtures/hk-milk-tea.jpg"));
   await expect.poll(() => page.evaluate(() =>
@@ -1312,7 +1355,7 @@ test("refresh during an unfinished analysis restores the durable photo draft", a
   });
   await page.goto("/");
   await login(page);
-  await page.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
   await page.locator('input[type="file"]').nth(1).setInputFiles(
     path.join(testInfo.project.testDir, "fixtures/hk-milk-tea.jpg"),
   );
@@ -1359,7 +1402,7 @@ test("entitlement denial retains a manual meal locally until an explicit sync re
   });
   await page.goto("/");
   await login(page);
-  await page.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
   await page.locator('input[type="file"]').nth(1).setInputFiles(
     path.join(testInfo.project.testDir, "fixtures/hk-milk-tea.jpg"),
   );
@@ -1399,7 +1442,7 @@ test("unreadable photo preparation can be retried or removed without blocking a 
   });
   await page.goto("/");
   await login(page);
-  await page.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
   await page.locator('input[type="file"]').nth(1).setInputFiles({
     name: "unreadable.heic", mimeType: "image/heic", buffer: Buffer.from([1, 2, 3, 4]),
   });
@@ -1442,7 +1485,7 @@ test("analysis timeout leaves the photo available for a later retry", async ({ p
   });
   await page.goto("/");
   await login(page);
-  await page.getByRole("button", { name: "＋ 新增餐點", exact: true }).click();
+  await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
   await page.locator('input[type="file"]').nth(1).setInputFiles(
     path.join(testInfo.project.testDir, "fixtures/hk-milk-tea.jpg"),
   );

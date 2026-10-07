@@ -29,6 +29,7 @@ import { PwaControls } from "./pwa-controls";
 import { CalorieCorrectionInput } from "./calorie-correction-input";
 import { PrivateMealPhoto } from "./private-meal-photo";
 import { dayCalories, mealCalories, sameCalorieBasis } from "@/lib/meals/calories";
+import { MAX_JOURNAL_NOTE_CODE_POINTS, journalNoteCodePoints, normalizeJournalNote } from "@/lib/meals/journal-note";
 
 const repository = new MealRepository();
 const messages: Record<string, string> = {
@@ -670,8 +671,14 @@ export function MealJournal({
 
   async function save() {
     if (!draft || busyRef.current) return;
-    const invalid = document.querySelector<HTMLInputElement>(
-      ".journal-editor input:invalid",
+    const noteLength = journalNoteCodePoints(normalizeJournalNote(draft.journalNote ?? "") ?? "");
+    if (noteLength > MAX_JOURNAL_NOTE_CODE_POINTS) {
+      setNotice("餐點備註最多 " + MAX_JOURNAL_NOTE_CODE_POINTS + " 個字元，請縮短後再儲存。");
+      document.querySelector<HTMLTextAreaElement>("#meal-journal-note")?.focus();
+      return;
+    }
+    const invalid = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+      ".journal-editor input:invalid, .journal-editor textarea:invalid",
     );
     if (invalid) {
       invalid.reportValidity();
@@ -975,6 +982,10 @@ export function MealJournal({
   const otherDrafts = [...new Map(visibleSavedDrafts
     .filter((saved) => saved.revision !== ownDraftRevision)
     .map((saved) => [saved.revision, saved])).values()];
+  const journalNoteLength = draft
+    ? journalNoteCodePoints(normalizeJournalNote(draft.journalNote ?? "") ?? "")
+    : 0;
+  const journalNoteTooLong = journalNoteLength > MAX_JOURNAL_NOTE_CODE_POINTS;
 
   return (
     <div className="journal-shell">
@@ -1154,17 +1165,26 @@ export function MealJournal({
       ) : tab === "new" ? (
         <div className="journal-editor">
           {!draft ? (
-            <main className="journal-main">
+            <main className="journal-main journal-new-start">
+              <p className="eyebrow">營養日誌</p>
               <h1>記低新一餐</h1>
-              <button className="button button-primary" onClick={() => start()}>
-                拍照／上傳
-              </button>
-              <button
-                className="button button-secondary"
-                onClick={() => start(true)}
-              >
-                手動輸入
-              </button>
+              <p>
+                唔一定要影相。你可以直接手動記低食物同份量，或者用相片 AI 幫你起草，再由你確認。
+              </p>
+              <div className="journal-entry-actions">
+                <button
+                  className="button button-primary"
+                  onClick={() => start(true)}
+                >
+                  手動記一餐
+                </button>
+                <button
+                  className="button button-secondary"
+                  onClick={() => start()}
+                >
+                  用相片 AI 辨識
+                </button>
+              </div>
             </main>
           ) : (
             <>
@@ -1221,6 +1241,39 @@ export function MealJournal({
                     ? "示範結果不加入每日統計"
                     : "確認後才加入每日記錄"}
                 </p>
+                <div className="journal-note-field">
+                  <label htmlFor="meal-journal-note">餐點備註（選填）</label>
+                  <textarea
+                    id="meal-journal-note"
+                    disabled={busy}
+                    rows={4}
+                    value={draft.journalNote ?? ""}
+                    aria-invalid={journalNoteTooLong || undefined}
+                    aria-describedby="meal-journal-note-help meal-journal-note-count"
+                    onChange={(e) =>
+                      setDraft((value) =>
+                        value ? { ...value, journalNote: e.target.value } : value,
+                      )
+                    }
+                    placeholder="例如：同朋友食午餐、雞皮冇食、醬汁另上"
+                  />
+                  <span className="journal-note-meta">
+                    <span id="meal-journal-note-help">
+                      備註只作記錄；要改營養數值，請另外修改食物或份量。
+                    </span>
+                    <span
+                      id="meal-journal-note-count"
+                      className={journalNoteTooLong ? "is-error" : undefined}
+                    >
+                      {journalNoteLength}/{MAX_JOURNAL_NOTE_CODE_POINTS}
+                    </span>
+                  </span>
+                  {journalNoteTooLong && (
+                    <span className="journal-note-error" role="alert">
+                      已超出 {MAX_JOURNAL_NOTE_CODE_POINTS} 個字元，請縮短後再儲存。
+                    </span>
+                  )}
+                </div>
               </section>
               {draft.items.length > 0 && draft.mode !== "demo" && (
                 <CalorieCorrectionInput
@@ -1246,7 +1299,7 @@ export function MealJournal({
                     if (busyRef.current ||
                         !confirm("放棄這份草稿並開啟另一餐？已儲存的記錄不會改變。"))
                       return;
-                    openDraft(newDraft());
+                    openDraft(newDraft(), true);
                   }}
                 />
               </fieldset>
@@ -1324,7 +1377,7 @@ export function MealJournal({
                   className="button button-primary"
                   aria-describedby={draft.mode === "live" ? "save-review-note" : undefined}
                   disabled={
-                    busy || !draft.items.length || draft.mode === "demo"
+                    busy || !draft.items.length || draft.mode === "demo" || journalNoteTooLong
                   }
                   onClick={() => void save()}
                 >
@@ -1341,13 +1394,22 @@ export function MealJournal({
               <p className="eyebrow">一餐一餐，慢慢記低</p>
               <h1>{tab === "today" ? "今日飲食" : "歷史記錄"}</h1>
             </div>
-            <button
-              className="button button-primary"
-              disabled={busy}
-              onClick={() => start()}
-            >
-              ＋ 新增餐點
-            </button>
+            <div className="journal-title-actions">
+              <button
+                className="button button-primary"
+                disabled={busy}
+                onClick={() => start(true)}
+              >
+                ＋ 手動記餐
+              </button>
+              <button
+                className="button button-secondary"
+                disabled={busy}
+                onClick={() => start()}
+              >
+                AI 相片辨識
+              </button>
+            </div>
           </div>
           {draft && (
             <section className="journal-card draft-banner">
@@ -1399,16 +1461,24 @@ export function MealJournal({
                     {tab === "today" &&
                       records.some((record) => record.mode !== "demo" && record.date < today) &&
                       "之前的餐點可在歷史記錄查看。"}
-                    拍張相，或者手動記低你的一餐。
+                    手動記低食物同份量，或者用相片 AI 幫你起草。
                     {!email && "登入後可以跨裝置同步。"}
                   </>}
               </p>
-              <button
-                className="button button-secondary"
-                onClick={() => start(true)}
-              >
-                手動記一餐
-              </button>
+              <div className="journal-entry-actions">
+                <button
+                  className="button button-primary"
+                  onClick={() => start(true)}
+                >
+                  手動記一餐
+                </button>
+                <button
+                  className="button button-secondary"
+                  onClick={() => start()}
+                >
+                  用相片 AI 辨識
+                </button>
+              </div>
             </section>
           )}
           {days.map((date) => {
@@ -1485,6 +1555,12 @@ export function MealJournal({
                                 .map((item) => item.displayName)
                                 .join("、")}
                             </MealNameHeading>
+                            {!!record.journalNote?.trim() && (
+                              <div className="meal-journal-note">
+                                <strong>備註</strong>
+                                <span>{record.journalNote}</span>
+                              </div>
+                            )}
                             <p className="meal-calories">{mealCalorieLabel(record)}</p>
                             {tab === "history" && userId !== "guest" && record.photoRef && (
                               <PrivateMealPhoto
@@ -1533,7 +1609,7 @@ export function MealJournal({
             disabled={busy}
             aria-current={!account && tab === key ? "page" : undefined}
             onClick={() => {
-              if (key === "new") start();
+              if (key === "new") start(true);
               else go(key);
             }}
           >
