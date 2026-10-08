@@ -864,7 +864,7 @@ function formatPilotSections(report: NutritionCoverageReport): string[] {
     "",
     "胡麻醬沙律和油醋汁沙律維持不計算，原因碼是 `DISH_KNOWN_NO_PROFILE`。使用者句子說明還沒有營養 profile。醬量足以把 R 推過 3，而且不在這五個試點家族，所以這次不加模板。",
     "",
-    "名稱是牛奶、鮮奶、全脂奶、低脂奶、fresh milk、skim milk 或 low-fat milk，或者這些標籤只多了溫度或分量字（熱、凍、暫、大、細、hot、iced、cold、warm、a glass of），而備註、可見食材或不確定原因指向燕麥奶、豆漿或杏仁奶時，不配對 whole-milk。`POST /api/meals` 和 `POST /api/nutrition/resolve` 也不把該項交給 USDA live lookup。牛奶布甸、奶茶、milk tea、牛奶麥片不會因為名稱裡有牛奶就當成牛奶；杏仁片和黃豆也不是植物奶。沒有植物奶或低脂證據時，鮮奶和 fresh milk 配對本地全脂奶，所以沒有 USDA key 的 Demo 仍可計算。這是香港鮮奶通常是全脂的產品預設；若那杯其實是沒有標明的低脂奶，熱量可能高估約三成。名稱本身是低脂奶、脫脂奶、skim milk 或 low-fat milk 時不配全脂奶，沒有植物奶證據時仍可交給 USDA。燕麥牛奶粥和麥片加牛奶仍保留乳製奶。若植物奶只寫在餐點層的 visibleEvidence，食物本身沒有這些欄位，這個缺口仍然存在。",
+    "名稱是牛奶、鮮奶、全脂奶、低脂奶、fresh milk、skim milk 或 low-fat milk，或者這些標籤只多了溫度或分量字（熱、凍、暖、大、細、一杯、hot、iced、cold、warm、small、large、medium、a glass of、a cup of），而備註、可見食材或不確定原因指向燕麥奶、豆漿或杏仁奶時，不配對 whole-milk。這不是只接受完全一樣的牛奶標籤，也不是名稱裡任意出現牛奶就算。`POST /api/meals` 和 `POST /api/nutrition/resolve` 也不把該項交給 USDA live lookup。牛奶布甸、奶茶、milk tea、牛奶麥片不會因為名稱裡有牛奶就當成牛奶；杏仁片和黃豆也不是植物奶。沒有植物奶或低脂證據時，鮮奶和 fresh milk 配對本地全脂奶，所以沒有 USDA key 的 Demo 仍可計算。這是香港鮮奶通常是全脂的產品預設；若那杯其實是沒有標明的低脂奶，熱量可能高估約三成。名稱本身是低脂奶、脫脂奶、簡體脱脂奶、skim milk 或 low-fat milk 時不配全脂奶，沒有植物奶證據時仍可交給 USDA。燕麥牛奶粥和麥片加牛奶仍保留乳製奶。若植物奶只寫在餐點層的 visibleEvidence，食物本身沒有這些欄位，這個缺口仍然存在。",
     "",
   ];
 }

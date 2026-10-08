@@ -430,6 +430,45 @@ describe("POST /api/meals bounded input", () => {
     expect(commitMeal).toHaveBeenCalledOnce();
   });
 
+  it("does not send 熱牛奶 with an oat-milk note to USDA when saving a live meal", async () => {
+    clearUsdaCache();
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => Response.json({ foods: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const hotMilk = {
+      ...meal.items[0],
+      id: "hot-milk",
+      displayName: "熱牛奶",
+      normalizedName: "hot milk",
+      identityLevel: "ingredient" as const,
+      notes: "燕麥奶",
+    };
+    const mystery = {
+      ...meal.items[0],
+      id: "mystery",
+      displayName: "mystery food",
+      normalizedName: "mystery food",
+      identityLevel: "ingredient" as const,
+    };
+    const response = await POST(jsonRequest(JSON.stringify({
+      ...meal,
+      mode: "live",
+      items: [hotMilk, mystery],
+    })));
+    const body = await response.json();
+    const queries = fetchMock.mock.calls.map((call) =>
+      new URL(String(call[0])).searchParams.get("query") ?? "");
+
+    expect(response.status).toBe(200);
+    expect(queries).toEqual(["mystery food"]);
+    expect(reserveHourlyUsdaCall).toHaveBeenCalledOnce();
+    expect(body.record.items[0].nutritionMatch.includedInTotal).toBe(false);
+    expect(body.record.items[0].nutritionMatch.reasons[0]).toBe(PLANT_MILK_CONTRADICTION_REASON);
+    expect(body.record.items[0].nutritionMatch.reasons).not.toContain(copy.nutritionLookupFailed);
+    expect(body.record.items[1].nutritionMatch.reasons).not.toContain(PLANT_MILK_CONTRADICTION_REASON);
+    expect(commitMeal).toHaveBeenCalledOnce();
+  });
+
   it.each([undefined, "8"])(
     "cancels actual oversized JSON before parsing with content-length %s",
     async (contentLength) => {

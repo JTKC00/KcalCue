@@ -216,17 +216,16 @@ describe("negative match rules", () => {
     }
 
     const modifiedMilk = [
-      food("熱牛奶", "hot milk", "ingredient"),
-      food("凍鮮奶", "iced milk", "ingredient"),
-      food("大牛奶", "cold milk", "ingredient"),
-      food("細鮮奶", "warm milk", "ingredient"),
-      food("暫鮮奶", "a glass of milk", "ingredient"),
+      { ...food("熱牛奶", "hot milk", "ingredient"), notes: "燕麥奶" },
+      { ...food("凍鮮奶", "iced milk", "ingredient"), notes: "oat milk" },
+      { ...food("大牛奶", "cold milk", "ingredient"), visibleIngredients: ["soy milk"] },
+      { ...food("細鮮奶", "warm milk", "ingredient"), uncertaintyReasons: ["杏仁奶"] },
+      { ...food("暖鮮奶", "a glass of milk", "ingredient"), preparationMethod: "植物奶" },
+      { ...food("一杯牛奶", "a cup of milk", "ingredient"), notes: "燕麥奶" },
+      { ...food("牛奶", "small milk", "ingredient"), notes: "oat milk" },
+      { ...food("鮮奶", "large milk", "ingredient"), visibleIngredients: ["soy milk"] },
+      { ...food("全脂奶", "medium milk", "ingredient"), uncertaintyReasons: ["杏仁奶"] },
     ];
-    modifiedMilk[0] = { ...modifiedMilk[0], notes: "燕麥奶" };
-    modifiedMilk[1] = { ...modifiedMilk[1], notes: "oat milk" };
-    modifiedMilk[2] = { ...modifiedMilk[2], visibleIngredients: ["soy milk"] };
-    modifiedMilk[3] = { ...modifiedMilk[3], uncertaintyReasons: ["杏仁奶"] };
-    modifiedMilk[4] = { ...modifiedMilk[4], preparationMethod: "植物奶" };
     for (const item of modifiedMilk) {
       expect(contradictoryDairyMilkLabel(item), item.displayName).toBe(true);
       const match = provider.resolve(item);
@@ -239,6 +238,25 @@ describe("negative match rules", () => {
     const plainHotMilk = food("熱牛奶", "hot milk", "ingredient");
     expect(contradictoryDairyMilkLabel(plainHotMilk)).toBe(false);
     expect(provider.resolve(plainHotMilk).profile?.id).toBe("whole-milk");
+
+    const notAWarmModifier = { ...food("暫鮮奶", "暫鮮奶", "ingredient"), notes: "燕麥奶" };
+    expect(contradictoryDairyMilkLabel(notAWarmModifier)).toBe(false);
+
+    const simplifiedSkim = food("脱脂奶", "脱脂奶", "ingredient");
+    expect(contradictoryDairyMilkLabel(simplifiedSkim)).toBe(false);
+    expect(provider.resolve(simplifiedSkim).profile?.id).not.toBe("whole-milk");
+    expect(reachesUsdaLive(simplifiedSkim)).toBe(true);
+    const freshWithSimplifiedSkim = { ...food("鮮奶", "fresh milk", "ingredient"), notes: "脱脂" };
+    expect(contradictoryDairyMilkLabel(freshWithSimplifiedSkim)).toBe(false);
+    expect(provider.resolve(freshWithSimplifiedSkim).profile?.id).not.toBe("whole-milk");
+    expect(reachesUsdaLive(freshWithSimplifiedSkim)).toBe(true);
+    const simplifiedSkimPlant = { ...food("脱脂奶", "脱脂奶", "ingredient"), notes: "燕麥奶" };
+    expect(contradictoryDairyMilkLabel(simplifiedSkimPlant)).toBe(true);
+    expect(reachesUsdaLive(simplifiedSkimPlant)).toBe(false);
+
+    const cupOfTea = { ...food("一杯奶茶", "a cup of milk tea", "dish"), notes: "燕麥奶" };
+    expect(contradictoryDairyMilkLabel(cupOfTea)).toBe(false);
+    expect(provider.resolve(cupOfTea).profile?.id).toBe("milk-tea");
 
     const hotTea = {
       ...food("熱奶茶", "hot milk tea", "dish"),

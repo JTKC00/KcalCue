@@ -587,6 +587,7 @@ const DAIRY_MILK_LABELS = [
   "whole milk",
   "milk",
   "脫脂奶",
+  "脱脂奶",
   "低脂奶",
   "全脂奶",
   "鮮奶",
@@ -621,19 +622,20 @@ function isGrainWithDairyMilk(name: string): boolean {
   return grain && textHasDairyMilkLabel(text);
 }
 
-const ENGLISH_MILK_MODIFIER = "a glass of|hot|iced|cold|warm";
-const CJK_MILK_MODIFIER = "熱凍暫大細";
+const ENGLISH_MILK_MODIFIER = "a glass of|a cup of|hot|iced|cold|warm|small|large|medium";
+const CJK_MILK_MODIFIER = "一杯|[熱凍暖大細]";
 
 /**
- * Temperature and size words may wrap a milk label. 熱牛奶、凍鮮奶、
- * hot milk and "a glass of milk" are still milk. Dish words are not
- * modifiers, so 牛奶布甸、奶茶、milk tea and 牛奶麥片 stay excluded.
+ * Temperature and size words may wrap a milk label. 熱牛奶、暖鮮奶、
+ * 一杯牛奶、hot milk、"a cup of milk" and small/large/medium milk are
+ * still milk. Dish words are not modifiers, so 牛奶布甸、奶茶、milk tea
+ * and 牛奶麥片 stay excluded.
  */
 function milkLabelCore(text: string): string {
   const leadingEnglish = new RegExp(`^(?:(?:${ENGLISH_MILK_MODIFIER})\\s+)+`);
   const trailingEnglish = new RegExp(`(?:\\s+(?:${ENGLISH_MILK_MODIFIER}))+$`);
-  const leadingCjk = new RegExp(`^[${CJK_MILK_MODIFIER}]+`);
-  const trailingCjk = new RegExp(`[${CJK_MILK_MODIFIER}]+$`);
+  const leadingCjk = new RegExp(`^(?:${CJK_MILK_MODIFIER})+`);
+  const trailingCjk = new RegExp(`(?:${CJK_MILK_MODIFIER})+$`);
   let remaining = text;
   let previous = "";
   while (remaining !== previous) {
@@ -667,6 +669,7 @@ const LOW_FAT_MILK_LABELS = [
   "skimmed milk",
   "skim milk",
   "脫脂奶",
+  "脱脂奶",
   "低脂奶",
 ] as const;
 
@@ -682,7 +685,7 @@ function lowFatMilkEvidence(food: PlantMilkFood): boolean {
       ...(food.uncertaintyReasons ?? []),
     ].join(" "),
   );
-  if (/低脂|脫脂/.test(text)) return true;
+  if (/低脂|脫脂|脱脂/.test(text)) return true;
   return LOW_FAT_MILK_LABELS.some((label) =>
     textContainsKey(text, label, { skipLongerAliasShadow: true }),
   );
