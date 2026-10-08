@@ -239,12 +239,15 @@ test("車仔麵 asks for a narrower range and a meal note can mark hot milk as p
   await page.getByRole("button", { name: "手動記一餐", exact: true }).click();
   await page.getByRole("combobox", { name: "食物名稱", exact: true }).fill("車仔麵");
   await expect(page.getByRole("status").filter({ hasText: "2.5 倍" })).toBeVisible();
-  await expect(page.getByText(/約 45–185 kcal/)).toBeVisible();
-  await page.getByRole("combobox", { name: "食物名稱", exact: true }).fill("熱牛奶");
-  await expect(page.getByText(/約 60–95 kcal/)).toBeVisible();
+  await expect(page.getByRole("article").getByText("約 45–185 kcal", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "新增食物", exact: true }).click();
+  await page.getByRole("combobox", { name: "食物名稱", exact: true }).nth(1).fill("熱牛奶");
+  const hotMilk = page.getByRole("article").filter({ has: page.getByRole("combobox", { name: "食物名稱" }) }).nth(1);
+  await expect(hotMilk.getByText("約 60–95 kcal", { exact: true })).toBeVisible();
   await page.locator("#meal-journal-note").fill("這杯是燕麥奶");
-  await expect(page.getByText(/不配對乳製奶/)).toBeVisible();
-  await expect(page.getByText(/約 60–95 kcal/)).toHaveCount(0);
+  await expect(hotMilk.getByText(/不配對乳製奶/)).toBeVisible();
+  await expect(hotMilk.getByText("約 60–95 kcal", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("status").filter({ hasText: "2.5 倍" })).toBeVisible();
 });
 
 test("journal visual refresh keeps mobile and desktop hierarchy usable", async ({ browser, page }) => {
