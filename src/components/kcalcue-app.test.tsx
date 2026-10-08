@@ -8,7 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { demoFoodAnalysis } from "@/lib/providers/food-vision/demo";
 import { createEditableFoodItems } from "@/lib/domain/editable-meal";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
-import { PLANT_MILK_CONTRADICTION_REASON } from "@/lib/nutrition/negative-rules";
+import { PHOTO_GENERIC_MILK_CONFIRMATION_REASON, PLANT_MILK_CONTRADICTION_REASON } from "@/lib/nutrition/negative-rules";
+import { duplicateGenericMilkCartonAnalysis } from "@/lib/nutrition/duplicate-milk-carton.fixture";
 import { oatMilkCartonPhotoAnalysis } from "@/lib/nutrition/oat-milk-photo.fixture";
 import { newDraft } from "@/lib/meals/types";
 import { copy } from "@/content/zh-HK";
@@ -287,6 +288,34 @@ describe("KcalCueApp analysis cancel", () => {
     expect(ids).toHaveLength(2);
     expect(ids.every((id) => typeof id === "string" && /^[0-9a-f-]{36}$/i.test(id))).toBe(true);
     expect(ids[0]).not.toBe(ids[1]);
+  });
+
+  it("merges a duplicated milk carton and waits for a dairy choice before counting", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      mode: "live",
+      analysis: duplicateGenericMilkCartonAnalysis,
+    })));
+    render(<KcalCueApp initialProviderMode="live" />);
+    await user.upload(document.querySelectorAll<HTMLInputElement>('input[type="file"]')[1], pngFile());
+    await user.click(screen.getByRole("button", { name: /開始分析/ }));
+
+    expect(await screen.findByRole("heading", { name: "暫未能計算" })).toBeInTheDocument();
+    expect(screen.getAllByRole("combobox", { name: "食物名稱" })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "全脂牛奶" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "低脂牛奶" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "燕麥奶" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "豆漿" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "其他" })).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("最少份量"), "250");
+    await user.tab();
+    expect(screen.getByText(PHOTO_GENERIC_MILK_CONFIRMATION_REASON)).toBeInTheDocument();
+    expect(screen.queryByText(/155–160/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "全脂牛奶" }));
+    expect(await screen.findByText("約 155–160 kcal")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "燕麥奶" })).not.toBeInTheDocument();
   });
 });
 

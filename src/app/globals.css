@@ -1388,6 +1388,36 @@ svg {
   box-shadow: 0 2px 8px rgba(23, 53, 46, 0.07);
 }
 
+.milk-choice-control {
+  width: 100%;
+  padding: 3px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #f2f3ee;
+}
+
+.milk-choice-control button {
+  min-height: 38px;
+  flex: 1 1 5.5rem;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--ink-soft);
+  background: transparent;
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
+.milk-choice-control button:hover,
+.milk-choice-control button:focus-visible {
+  color: var(--green);
+  background: var(--white);
+  box-shadow: 0 2px 8px rgba(23, 53, 46, 0.07);
+}
+
 .portion-fields {
   display: grid;
   grid-template-columns: minmax(90px, 1fr) auto minmax(90px, 1fr) minmax(128px, 0.8fr);

@@ -6,6 +6,7 @@ import { copy, errorCopy } from "@/content/zh-HK";
 import { foodAnalysisSchema, type FoodAnalysis, type PortionUnit } from "@/lib/domain/food-analysis";
 import {
   applyPortionPreset,
+  assignEntrySource,
   convertPortionUnit,
   createEditableFoodItems,
   hasKnownPortion,
@@ -13,9 +14,11 @@ import {
   type EditableFoodItem,
   type PortionPreset,
 } from "@/lib/domain/editable-meal";
-import { contradictoryDairyMilkLabel, mealPlantMilkContext, type MealPlantMilkContext } from "@/lib/nutrition/canonical";
+import { dedupeIdenticalContainerMilk } from "@/lib/domain/milk-dedupe";
+import { contradictoryDairyMilkLabel, mealPlantMilkContext, photoGenericMilkNeedsConfirmation, type MealPlantMilkContext } from "@/lib/nutrition/canonical";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
-import { PLANT_MILK_CONTRADICTION_REASON } from "@/lib/nutrition/negative-rules";
+import { PHOTO_GENERIC_MILK_CONFIRMATION_REASON, PHOTO_MILK_OTHER_REASON, PLANT_MILK_CONTRADICTION_REASON } from "@/lib/nutrition/negative-rules";
+import { PHOTO_MILK_CHOICES, type PhotoMilkChoiceId } from "@/lib/nutrition/photo-milk";
 import {
   canReuseNutritionMatchForNameEdit,
   enrichUnresolvedMatches,
@@ -121,6 +124,7 @@ function createManualItem(): EditableFoodItem {
     portionConfidence: 0.5,
     uncertaintyReasons: ["手動輸入仍需要你確認實際份量。"],
     nutritionMatch: null,
+    entrySource: "manual",
   };
 }
 
@@ -382,6 +386,29 @@ function reapplyPlantMilkGuard(
   return changed ? next : items;
 }
 
+function reapplyPhotoMilkGuard(
+  items: EditableFoodItem[],
+  context: MealPlantMilkContext,
+  provider: LocalNutritionProvider,
+): EditableFoodItem[] {
+  let changed = false;
+  const next = items.map((item) => {
+    if (!hasKnownPortion(item) || !item.displayName.trim()) return item;
+    const needs = photoGenericMilkNeedsConfirmation(item, context);
+    const was = item.nutritionMatch?.reasons[0] === PHOTO_GENERIC_MILK_CONFIRMATION_REASON;
+    if (!needs && !was) return item;
+    const match = provider.resolve(item, context);
+    if (
+      item.nutritionMatch?.includedInTotal === match.includedInTotal &&
+      item.nutritionMatch?.profile?.id === match.profile?.id &&
+      item.nutritionMatch?.reasons[0] === match.reasons[0]
+    ) return item;
+    changed = true;
+    return { ...item, nutritionMatch: match };
+  });
+  return changed ? next : items;
+}
+
 export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrection, mealNote, onDraftChange, onExit, onNewMeal, manual, onPhotoSelected }: KcalCueAppProps) {
   const [stage, setStage] = useState<AppStage>(initialDraft?.items.length || manual ? "result" : "input");
   const [file, setFile] = useState<File | null>(() => initialDraft?.photo && !initialDraft.items.length ? new File([initialDraft.photo], "餐點.jpg", { type: "image/jpeg" }) : null);
@@ -390,7 +417,10 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
   const [analysis, setAnalysis] = useState<FoodAnalysis | null>(initialDraft?.analysis ?? null);
   const [analysisProvenance, setAnalysisProvenance] = useState<AnalysisProvenance | null>(() =>
     initialDraft?.analysis ? readAnalysisProvenance(initialDraft.analysisProvenance, initialDraft.mode) : null);
-  const [items, setItems] = useState<EditableFoodItem[]>(initialDraft?.items.length ? initialDraft.items : manual ? [createManualItem()] : []);
+  const [items, setItems] = useState<EditableFoodItem[]>(() => assignEntrySource(
+    initialDraft?.items.length ? initialDraft.items : manual ? [createManualItem()] : [],
+    initialDraft?.analysis ?? null,
+  ));
   const [activeMode, setActiveMode] = useState<AppMode>(
     initialDraft?.items.length ? initialDraft.mode : manual ? "manual" : initialProviderMode,
   );
@@ -412,7 +442,11 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
   );
   const guardedItems = useMemo(
     () => stage === "result"
-      ? reapplyPlantMilkGuard(items, plantMilkContext, nutritionProvider)
+      ? reapplyPhotoMilkGuard(
+        reapplyPlantMilkGuard(items, plantMilkContext, nutritionProvider),
+        plantMilkContext,
+        nutritionProvider,
+      )
       : items,
     [stage, items, plantMilkContext, nutritionProvider],
   );
@@ -564,24 +598,31 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
 
       const parsed = foodAnalysisSchema.safeParse(body.analysis);
       if (!parsed.success) throw getError("invalid_response");
+      const recognized = dedupeIdenticalContainerMilk(parsed.data);
 
       const responseMode = body.mode === "live" ? "live" : "demo";
       setActiveMode(responseMode);
-      setAnalysis(parsed.data);
+      setAnalysis(recognized);
       setAnalysisProvenance(readAnalysisProvenance(body.analysisProvenance, responseMode));
 
-      if (parsed.data.analysisStatus === "unable_to_identify") {
+      if (recognized.analysisStatus === "unable_to_identify") {
         setItems([]);
         setStage("unable");
       } else {
-        const photoContext = mealPlantMilkContext({ analysis: parsed.data, mealNote: mealContextRef.current.mealNote });
-        const localMatches = parsed.data.foods.map((food) =>
+        const photoContext = mealPlantMilkContext({ analysis: recognized, mealNote: mealContextRef.current.mealNote });
+        const photoFoods = recognized.foods.map((food) => ({ ...food, entrySource: "photo" as const }));
+        const localMatches = photoFoods.map((food) =>
           hasKnownPortion(food) ? nutritionProvider.resolve(food, photoContext) : null,
         );
-        const initialItems = createEditableFoodItems(parsed.data.foods, localMatches);
+        const initialItems = createEditableFoodItems(recognized.foods, localMatches)
+          .map((item) => ({ ...item, entrySource: "photo" as const }));
         setItems(initialItems);
         setStage("result");
-        if (responseMode === "live" && localMatches.some((match) => match && !match.includedInTotal)) {
+        const knownFoods = photoFoods.flatMap((food, index) =>
+          hasKnownPortion(food) && localMatches[index] && !photoGenericMilkNeedsConfirmation(food, photoContext)
+            ? [{ index, food, match: localMatches[index]! }] : [],
+        );
+        if (responseMode === "live" && knownFoods.some((entry) => !entry.match.includedInTotal)) {
           setNutritionPending(true);
           const unchangedFood = (item: EditableFoodItem, index: number) => {
             const original = initialItems[index];
@@ -602,7 +643,9 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
               if (editSignal.aborted) return;
               setItems((current) => current.map((item, index) => {
                 const match = localMatches[index];
+                const food = photoFoods[index];
                 if (!match || match.includedInTotal || !unchangedFood(item, index)) return item;
+                if (food && photoGenericMilkNeedsConfirmation(food, photoContext)) return item;
                 return {
                   ...item,
                   nutritionMatch: {
@@ -615,10 +658,6 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
               setNutritionPending(false);
             },
             NUTRITION_ENRICH_TIMEOUT_MS,
-          );
-          const knownFoods = parsed.data.foods.flatMap((food, index) =>
-            hasKnownPortion(food) && localMatches[index]
-              ? [{ index, food, match: localMatches[index]! }] : [],
           );
           void enrichUnresolvedMatches(
             knownFoods.map(entry => entry.food),
@@ -633,6 +672,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
                 if (knownIndex < 0 || !unchangedFood(item, index) ||
                     matches[knownIndex] === localMatches[index]) return item;
                 if (contradictoryDairyMilkLabel(item, mealContextRef.current)) return item;
+                if (photoGenericMilkNeedsConfirmation(item, mealContextRef.current)) return item;
                 return { ...item, nutritionMatch: matches[knownIndex] };
               }));
             })
@@ -722,7 +762,11 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
     const revision = invalidateNameLookup(id);
     const currentItem = items.find((item) => item.id === id);
     if (!currentItem) return;
-    const nextFood = renameFoodItem(currentItem, name, originalFoods.get(id) ?? initialDraft?.originalItems.find(food => food.id === id));
+    const renamed = renameFoodItem(currentItem, name, originalFoods.get(id) ?? initialDraft?.originalItems.find(food => food.id === id));
+    const nextFood = {
+      ...renamed,
+      uncertaintyReasons: renamed.uncertaintyReasons.filter((reason) => reason !== PHOTO_MILK_OTHER_REASON),
+    };
     const cachedMatch = hasKnownPortion(currentItem) && hasKnownPortion(nextFood) && canReuseNutritionMatchForNameEdit(
       currentItem,
       nextFood,
@@ -770,6 +814,22 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
       nameEditTimers.current.delete(id);
     }, 350);
     nameEditTimers.current.set(id, timer);
+  };
+
+  const handleMilkChoice = (id: string, choiceId: PhotoMilkChoiceId) => {
+    const choice = PHOTO_MILK_CHOICES.find((item) => item.id === choiceId);
+    if (!choice) return;
+    if (choice.id === "other") {
+      updateItem(id, (item) => ({
+        ...item,
+        uncertaintyReasons: [
+          PHOTO_MILK_OTHER_REASON,
+          ...item.uncertaintyReasons.filter((reason) => reason !== PHOTO_MILK_OTHER_REASON),
+        ].slice(0, 8),
+      }));
+      return;
+    }
+    handleNameChange(id, choice.displayName);
   };
 
   const handlePortionChange = (
@@ -900,6 +960,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
           onUnitChange={handleUnitChange}
           onPreset={handlePreset}
           onDelete={(id) => setItems((current) => current.filter((item) => item.id !== id))}
+          onMilkChoice={handleMilkChoice}
           onAdd={() => setItems((current) => [...current, createManualItem()])}
           onReset={onNewMeal ?? reset}
         />

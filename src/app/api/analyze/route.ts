@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 import type { AnalysisProvenanceMetadata } from "@/lib/domain/analysis-provenance";
+import { dedupeIdenticalContainerMilk } from "@/lib/domain/milk-dedupe";
 import { DemoFoodVisionProvider } from "@/lib/providers/food-vision/demo";
 import {
   extractOpenAIErrorDetails,
@@ -98,13 +99,13 @@ export async function POST(request: Request) {
 
     if (provider.mode === "demo") {
       visionStartedAt = performance.now();
-      const analysis = await provider.analyzeImage(
+      const analysis = dedupeIdenticalContainerMilk(await provider.analyzeImage(
         {
           data: "",
           mimeType: "image/jpeg",
         },
         { signal: request.signal, onMetadata },
-      );
+      ));
       return NextResponse.json({ analysis, analysisProvenance, mode: provider.mode });
     }
 
@@ -179,13 +180,13 @@ export async function POST(request: Request) {
         });
       }
       visionStartedAt = performance.now();
-      const analysis = await provider.analyzeImage(
+      const analysis = dedupeIdenticalContainerMilk(await provider.analyzeImage(
         {
           data: bytes.toString("base64"),
           mimeType: detectedMimeType,
         },
         { signal: request.signal, onMetadata },
-      );
+      ));
       return NextResponse.json({ analysis, analysisProvenance, mode: provider.mode });
     } finally {
       release();

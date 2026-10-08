@@ -18,6 +18,7 @@ import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { NutritionService } from "@/lib/nutrition/service";
 import { AlertIcon, CheckIcon, PlusIcon, RefreshIcon, ShieldIcon } from "./icons";
 import { FoodEditor, type RecognitionBadge } from "./food-editor";
+import type { PhotoMilkChoiceId } from "@/lib/nutrition/photo-milk";
 import { ImagePreviewFallback } from "./image-preview-fallback";
 import { mealCalories, type MealCalorieCorrection } from "@/lib/meals/calories";
 
@@ -39,6 +40,7 @@ interface ResultViewProps {
   onUnitChange: (id: string, unit: PortionUnit) => void;
   onPreset: (id: string, preset: PortionPreset) => void;
   onDelete: (id: string) => void;
+  onMilkChoice?: (id: string, choice: PhotoMilkChoiceId) => void;
   onAdd: () => void;
   onReset: () => void;
 }
@@ -105,6 +107,7 @@ export function ResultView({
   onUnitChange,
   onPreset,
   onDelete,
+  onMilkChoice,
   onAdd,
   onReset,
 }: ResultViewProps) {
@@ -266,6 +269,7 @@ export function ResultView({
                   onUnitChange={(unit) => onUnitChange(item.id, unit)}
                   onPreset={(preset) => onPreset(item.id, preset)}
                   onDelete={() => onDelete(item.id)}
+                  onMilkChoice={(choice) => onMilkChoice?.(item.id, choice)}
                 />
               ))}
             </div>

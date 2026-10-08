@@ -23,7 +23,7 @@ import { getNutritionApiKey } from "@/lib/server/env";
 import { reserveHourlyUsdaCall } from "@/lib/server/durable-nutrition-quota";
 import { claimMealLookupAttempt, releaseMealLookupAttempt } from "@/lib/server/meal-lookup-attempt";
 import { copy } from "@/content/zh-HK";
-import { PLANT_MILK_CONTRADICTION_REASON } from "@/lib/nutrition/negative-rules";
+import { PHOTO_GENERIC_MILK_CONFIRMATION_REASON, PLANT_MILK_CONTRADICTION_REASON } from "@/lib/nutrition/negative-rules";
 import { oatMilkCartonPhotoAnalysis } from "@/lib/nutrition/oat-milk-photo.fixture";
 import { clearUsdaCache } from "@/lib/nutrition/usda";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
@@ -527,6 +527,56 @@ describe("POST /api/meals bounded input", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(body.record.items[0].nutritionMatch.profile).toBeNull();
     expect(body.record.items[0].nutritionMatch.reasons[0]).toBe(PLANT_MILK_CONTRADICTION_REASON);
+  });
+
+  it("does not send a photo labelled only 牛奶 to USDA whole milk", async () => {
+    clearUsdaCache();
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => Response.json({ foods: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await POST(jsonRequest(JSON.stringify({
+      ...meal,
+      mode: "live",
+      analysis: {
+        analysisStatus: "success",
+        foods: [{
+          displayName: "牛奶",
+          normalizedName: "milk",
+          identityLevel: "ingredient",
+          portionMin: 250,
+          portionMax: 250,
+          unit: "ml",
+          recognitionConfidence: 0.7,
+          portionConfidence: 0.4,
+          uncertaintyReasons: ["未能讀到紙盒上的種類。"],
+        }],
+        uncertaintyReasons: ["紙盒飲品的種類未能確認。"],
+        visibleEvidence: ["一盒飲品。"],
+        estimatedInformation: [],
+        unknownInformation: ["紙盒上的品牌未能讀到。"],
+      },
+      items: [{
+        ...meal.items[0],
+        id: "photo-milk",
+        displayName: "牛奶",
+        normalizedName: "milk",
+        identityLevel: "ingredient",
+        unit: "ml",
+        portionMin: 250,
+        portionMax: 250,
+        originalPortionMin: 250,
+        originalPortionMax: 250,
+        entrySource: "photo",
+        uncertaintyReasons: ["未能讀到紙盒上的種類。"],
+      }],
+    })));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(body.record.items[0].nutritionMatch.profile).toBeNull();
+    expect(body.record.items[0].nutritionMatch.includedInTotal).toBe(false);
+    expect(body.record.items[0].nutritionMatch.reasons[0]).toBe(PHOTO_GENERIC_MILK_CONFIRMATION_REASON);
   });
 
   it.each([undefined, "8"])(

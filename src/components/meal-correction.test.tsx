@@ -213,6 +213,30 @@ describe("meal identity correction", () => {
     select.mockRestore();
   });
 
+  it("does not append a programmatic maximum onto the minimum that was filled first", () => {
+    const changed = vi.fn();
+    const analysis = draft().analysis!;
+    analysis.foods[0] = { ...analysis.foods[0], portionMin: null, portionMax: null };
+    const items = createEditableFoodItems(analysis.foods);
+    const blank = { ...draft(), analysis, items, originalItems: items };
+    render(<KcalCueApp initialProviderMode="live" initialDraft={blank} onDraftChange={changed} />);
+    const minimum = screen.getByLabelText("最少份量") as HTMLInputElement;
+    fireEvent.change(minimum, { target: { value: "300" } });
+    fireEvent.blur(minimum);
+    expect(changed.mock.lastCall![0].items[0]).toMatchObject({ portionMin: 300, portionMax: 300 });
+
+    const maximum = screen.getByLabelText("最多份量") as HTMLInputElement;
+    expect(maximum).toHaveValue(300);
+    fireEvent.focus(maximum);
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    act(() => {
+      setter?.call(maximum, "300300");
+      maximum.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: "300" }));
+    });
+    fireEvent.blur(maximum);
+    expect(changed.mock.lastCall![0].items[0]).toMatchObject({ portionMin: 300, portionMax: 300 });
+  });
+
   it("cancels a queued name lookup and ignores an in-flight result when the portion becomes unknown", async () => {
     const changed = vi.fn();
     render(<KcalCueApp initialProviderMode="live" initialDraft={draft()} onDraftChange={changed} />);

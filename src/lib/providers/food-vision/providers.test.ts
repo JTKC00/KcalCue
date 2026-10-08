@@ -231,6 +231,9 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
     expect(FOOD_VISION_SYSTEM_INSTRUCTION).toContain("豆漿");
     expect(FOOD_VISION_SYSTEM_INSTRUCTION).toContain("杏仁奶");
     expect(FOOD_VISION_SYSTEM_INSTRUCTION).toContain("Do not name it 牛奶 or milk");
+    expect(FOOD_VISION_SYSTEM_INSTRUCTION).toContain("readable packaging");
+    expect(FOOD_VISION_SYSTEM_INSTRUCTION).toContain("visibleEvidence must not be empty");
+    expect(FOOD_VISION_SYSTEM_INSTRUCTION).toContain("A single carton or bottle is one food");
     expect(FOOD_VISION_SYSTEM_INSTRUCTION).toContain("set both portionMin and portionMax to null");
     expect(FOOD_VISION_SYSTEM_INSTRUCTION).toContain("return numeric portionMin and portionMax instead");
   });

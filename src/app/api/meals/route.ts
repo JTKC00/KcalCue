@@ -17,7 +17,7 @@ import {
 import { accountPath } from "@/lib/firebase/admin";
 import { createEditableFoodItems, hasKnownPortion } from "@/lib/domain/editable-meal";
 import { canReuseNutritionMatchForNameEdit } from "@/lib/nutrition/client";
-import { contradictoryDairyMilkLabel, isCompositeIdentity, mealPlantMilkContext } from "@/lib/nutrition/canonical";
+import { blocksUsdaLiveLookup, isCompositeIdentity, mealPlantMilkContext } from "@/lib/nutrition/canonical";
 import { supportsUsdaPortionUnit, UsdaNutritionClient } from "@/lib/nutrition/usda";
 import { getNutritionApiKey } from "@/lib/server/env";
 import { reserveHourlyUsdaCall } from "@/lib/server/durable-nutrition-quota";
@@ -171,7 +171,7 @@ export async function POST(request: Request) {
       sameCalorieBasis(input.items, previous.items);
     const previousItems = new Map(previous?.items.map((item) => [item.id, item]) ?? []);
     const plantMilkGuardUnchanged = (item: typeof input.items[number]) =>
-      contradictoryDairyMilkLabel(item, mealContext) === contradictoryDairyMilkLabel(item, previousContext);
+      blocksUsdaLiveLookup(item, mealContext) === blocksUsdaLiveLookup(item, previousContext);
     const initialItems = input.items.map((item) => {
       if (!hasKnownPortion(item)) return { ...item, nutritionMatch: null };
       const old = previousItems.get(item.id);
@@ -191,7 +191,7 @@ export async function POST(request: Request) {
       !item.nutritionMatch.includedInTotal &&
       supportsUsdaPortionUnit(item.unit) &&
       !isCompositeIdentity(item.nutritionMatch.identity) &&
-      !contradictoryDairyMilkLabel(item, mealContext);
+      !blocksUsdaLiveLookup(item, mealContext);
     // All writes participate in this claim. Otherwise a changed local/manual
     // payload with the same mutation ID could race a Live lookup and commit
     // first, causing the eventual Live request to acknowledge the wrong body.
@@ -242,8 +242,10 @@ export async function POST(request: Request) {
         (analysis
           ? createEditableFoodItems(
               analysis.foods,
-              analysis.foods.map((food) => hasKnownPortion(food) ? local.resolve(food, mealContext) : null),
-            )
+              analysis.foods.map((food) => hasKnownPortion(food)
+                ? local.resolve({ ...food, entrySource: "photo" }, mealContext)
+                : null),
+            ).map((item) => ({ ...item, entrySource: "photo" as const }))
           : items);
       const record: Omit<MealRecord, "updatedAt"> = {
         ...mealInput,

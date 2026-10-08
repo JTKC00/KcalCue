@@ -661,6 +661,45 @@ function dairyMilkLabel(name: string): boolean {
   return DAIRY_MILK_LABELS.some((label) => normalizeFoodName(label) === core);
 }
 
+const EXPLICIT_DAIRY_QUALIFIER =
+  /全脂|鮮奶|低脂|脫脂|脱脂|(?:^|\s)(?:whole|fresh|skimmed|skim|semi-skimmed|semi skimmed|low-fat|low fat|reduced-fat|reduced fat)(?:$|\s)/;
+
+/**
+ * 牛奶 / milk / 奶, including temperature and size words.
+ * 鮮奶、全脂、低脂、脫脂 are explicit dairy qualifiers, not this generic label.
+ * Chocolate milk is neither: it must not fall through to whole milk.
+ *
+ * Photo versus manual: a photo item with this label does not use the Hong
+ * Kong fresh-milk default. Typed manual 鮮奶 / 牛奶 still does, because
+ * that default is what the manual QA cases lock in.
+ */
+export function genericMilkLabel(name: string): boolean {
+  const text = normalizeFoodName(name);
+  if (!text || plantMilkProductName(text)) return false;
+  if (EXPLICIT_DAIRY_QUALIFIER.test(text)) return false;
+  if (/朱古力|巧克力|chocolate/.test(text)) return false;
+  const core = milkLabelCore(text);
+  return core === "milk" || core === "牛奶" || core === "奶";
+}
+
+export function photoGenericMilkNeedsConfirmation(
+  food: PlantMilkFood & { entrySource?: "photo" | "manual" },
+  context?: MealPlantMilkContext,
+): boolean {
+  if (food.entrySource !== "photo") return false;
+  if (!genericMilkLabel(food.displayName)) return false;
+  return !contradictoryDairyMilkLabel(food, context);
+}
+
+export function blocksUsdaLiveLookup(
+  food: PlantMilkFood & { entrySource?: "photo" | "manual" },
+  context?: MealPlantMilkContext,
+): boolean {
+  return contradictoryDairyMilkLabel(food, context)
+    || photoGenericMilkNeedsConfirmation(food, context)
+    || chocolateMilkName(food);
+}
+
 const LOW_FAT_MILK_LABELS = [
   "semi-skimmed milk",
   "semi skimmed milk",
@@ -689,6 +728,37 @@ function lowFatMilkEvidence(food: PlantMilkFood): boolean {
   return LOW_FAT_MILK_LABELS.some((label) =>
     textContainsKey(text, label, { skipLongerAliasShadow: true }),
   );
+}
+
+/** Low-fat or skim dairy milk. Plant-milk names and milk tea stay out. */
+export function explicitLowFatMilk(food: PlantMilkFood): boolean {
+  if (!lowFatMilkEvidence(food)) return false;
+  const text = normalizeFoodName(`${food.displayName} ${food.normalizedName}`);
+  if (!text || plantMilkProductName(text)) return false;
+  if (/奶茶|布甸|麥片|粥|(?:^|\s)(?:tea|pudding|cereal|porridge)(?:$|\s)/.test(text)) return false;
+  return /奶|milk/.test(text);
+}
+
+/**
+ * Same container when the vision model splits one milk drink into copies.
+ * Null when the food is not a milk drink. Visual notes, preparation, and
+ * visible ingredients stay in the caller so two different cups do not merge.
+ */
+export function containerMilkNameKey(food: {
+  displayName: string;
+  normalizedName: string;
+}): string | null {
+  const display = normalizeFoodName(food.displayName);
+  const normalized = normalizeFoodName(food.normalizedName);
+  const milkish =
+    genericMilkLabel(food.displayName) ||
+    genericMilkLabel(food.normalizedName) ||
+    dairyMilkLabel(food.displayName) ||
+    dairyMilkLabel(food.normalizedName) ||
+    plantMilkProductName(display) ||
+    plantMilkProductName(normalized);
+  if (!milkish) return null;
+  return `${display}\n${normalized}`;
 }
 
 /**
@@ -737,6 +807,14 @@ function plantMilkEvidence(food: PlantMilkFood, context?: MealPlantMilkContext):
 function blocksDairyMilkIdentity(food: PlantMilkFood): boolean {
   const names = normalizeFoodName(`${food.displayName} ${food.normalizedName}`);
   return plantMilkProductName(names) || plantMilkEvidence(food);
+}
+
+/** 朱古力奶 is not plain dairy milk and must not use the whole-milk profile. */
+export function chocolateMilkName(food: PlantMilkFood): boolean {
+  const rule = NEGATIVE_MATCH_RULES.find((item) => item.id === "chocolate-milk-not-whole-milk");
+  if (!rule) return false;
+  const text = normalizeFoodName(`${food.displayName} ${food.normalizedName}`);
+  return ruleMatchesName(rule, text);
 }
 
 /**
@@ -804,7 +882,7 @@ export function contradictoryDairyMilkLabel(
 
 function collectIdentityHits(text: string, food: FoodEstimate): IdentityHit[] {
   const hits: IdentityHit[] = [];
-  const blockDairyMilk = blocksDairyMilkIdentity(food) || lowFatMilkEvidence(food);
+  const blockDairyMilk = blocksDairyMilkIdentity(food) || lowFatMilkEvidence(food) || chocolateMilkName(food);
   for (const rule of IDENTITY_RULES) {
     if (rule.canonicalName === "milk" && blockDairyMilk) continue;
     const matchedKey = findLongestMatch(text, rule.keys, {
