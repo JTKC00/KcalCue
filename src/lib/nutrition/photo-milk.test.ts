@@ -4,8 +4,10 @@ import type { FoodEstimate } from "@/lib/domain/food-analysis";
 import { dedupeIdenticalContainerMilk, MERGED_DUPLICATE_MILK_NOTICE } from "@/lib/domain/milk-dedupe";
 import { calculateFoodNutrition, roundRange } from "./calculation";
 import {
+  contradictoryDairyMilkLabel,
   explicitLowFatMilk,
   genericMilkLabel,
+  mealPlantMilkContext,
   photoGenericMilkNeedsConfirmation,
 } from "./canonical";
 import { duplicateGenericMilkCartonAnalysis } from "./duplicate-milk-carton.fixture";
@@ -14,6 +16,7 @@ import {
   glassOfMilkDishAnalysis,
   oatCartonNameVariantsAnalysis,
   oatPackagingWholeMilkChoiceAnalysis,
+  productionGlassMilkUnknownAnalysis,
   wholeMilkChoiceStillDish,
 } from "./photo-milk-prod-qa.fixture";
 import { localNutritionProfiles } from "./local-data";
@@ -22,6 +25,7 @@ import {
   CHOCOLATE_MILK_UNCALCULATED_REASON,
   LOW_FAT_MILK_UNCALCULATED_REASON,
   PHOTO_GENERIC_MILK_CONFIRMATION_REASON,
+  PLANT_MILK_CONTRADICTION_REASON,
 } from "./negative-rules";
 import { isMilkTypeUncertainty } from "./photo-milk";
 import { findLowFatMilkProfile, resolveNutritionMatch } from "./resolver";
@@ -287,5 +291,50 @@ describe("photo generic milk", () => {
     expect(genericAndOat.foods).toHaveLength(1);
     expect(genericAndOat.foods[0].displayName).toBe("紙盒燕麥奶");
     expect(genericAndOat.foods[0].duplicateMilkNotice).toBe(MERGED_DUPLICATE_MILK_NOTICE);
+  });
+
+  it("shows the chooser for the production glass, then counts 全脂 at 250 ml", () => {
+    const source = productionGlassMilkUnknownAnalysis.foods[0];
+    const context = mealPlantMilkContext({ analysis: productionGlassMilkUnknownAnalysis });
+    const photo = food(source.displayName, source.normalizedName, {
+      entrySource: "photo",
+      identityLevel: source.identityLevel,
+      portionMin: source.portionMin,
+      portionMax: source.portionMax,
+      unit: source.unit,
+      recognitionConfidence: source.recognitionConfidence,
+      portionConfidence: source.portionConfidence,
+      uncertaintyReasons: source.uncertaintyReasons,
+      notes: source.notes,
+    });
+
+    expect(context.uncertaintyText).toContain("未能確認是否為牛奶、植物奶或其他白色飲品。");
+    expect(photoGenericMilkNeedsConfirmation(photo, context)).toBe(true);
+    expect(contradictoryDairyMilkLabel(photo, context)).toBe(false);
+    expect(isMilkTypeUncertainty(source.uncertaintyReasons[0])).toBe(false);
+
+    const blocked = provider.resolve(photo, context);
+    expect(blocked.includedInTotal).toBe(false);
+    expect(blocked.profile).toBeNull();
+    expect(blocked.reasons[0]).toBe(PHOTO_GENERIC_MILK_CONFIRMATION_REASON);
+    expect(blocked.reasons).not.toContain(PLANT_MILK_CONTRADICTION_REASON);
+    expect(blocked.coverageReason).not.toBe("UNKNOWN_DISH");
+
+    const chosen = food("全脂牛奶", "全脂牛奶", {
+      entrySource: "photo",
+      identityLevel: "dish",
+      portionMin: 250,
+      portionMax: 250,
+      unit: "ml",
+      uncertaintyReasons: source.uncertaintyReasons,
+      notes: source.notes,
+    });
+    const match = provider.resolve(chosen, context);
+    const calories = calculateFoodNutrition(chosen, match).ranges?.calories;
+    expect(match.profile?.id).toBe("whole-milk");
+    expect(match.includedInTotal).toBe(true);
+    expect(match.coverageReason).not.toBe("UNKNOWN_DISH");
+    expect(match.identity.canonicalName).not.toBe("mixed-dish");
+    expect(calories && roundRange(calories, 5)).toEqual({ min: 155, max: 160 });
   });
 });

@@ -27,6 +27,7 @@ import { PHOTO_GENERIC_MILK_CONFIRMATION_REASON, PLANT_MILK_CONTRADICTION_REASON
 import { oatMilkCartonPhotoAnalysis } from "@/lib/nutrition/oat-milk-photo.fixture";
 import {
   oatPackagingWholeMilkChoiceAnalysis,
+  productionGlassMilkUnknownAnalysis,
   wholeMilkChoiceStillDish,
 } from "@/lib/nutrition/photo-milk-prod-qa.fixture";
 import { clearUsdaCache } from "@/lib/nutrition/usda";
@@ -607,6 +608,39 @@ describe("POST /api/meals bounded input", () => {
     expect(body.record.items[0].nutritionMatch.profile.id).toBe("whole-milk");
     expect(body.record.items[0].nutritionMatch.includedInTotal).toBe(true);
     expect(body.record.items[0].nutritionMatch.coverageReason).not.toBe("UNKNOWN_DISH");
+  });
+
+  it("counts 全脂牛奶 at 250 ml for the production glass even when the model left it a dish", async () => {
+    clearUsdaCache();
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => Response.json({ foods: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const source = productionGlassMilkUnknownAnalysis.foods[0];
+    const response = await POST(jsonRequest(JSON.stringify({
+      ...meal,
+      mode: "live",
+      analysis: productionGlassMilkUnknownAnalysis,
+      items: [{
+        ...source,
+        id: "production-glass",
+        displayName: "全脂牛奶",
+        normalizedName: "全脂牛奶",
+        identityLevel: "dish",
+        portionMin: 250,
+        portionMax: 250,
+        originalPortionMin: 250,
+        originalPortionMax: 250,
+        entrySource: "photo",
+      }],
+    })));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(body.record.items[0].nutritionMatch.profile.id).toBe("whole-milk");
+    expect(body.record.items[0].nutritionMatch.includedInTotal).toBe(true);
+    expect(body.record.items[0].nutritionMatch.coverageReason).not.toBe("UNKNOWN_DISH");
+    expect(body.record.items[0].nutritionMatch.identity.canonicalName).not.toBe("mixed-dish");
   });
 
   it.each([undefined, "8"])(

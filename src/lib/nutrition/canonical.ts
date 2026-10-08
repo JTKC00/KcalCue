@@ -736,7 +736,8 @@ export function genericMilkLabel(name: string): boolean {
  * Photo item that is still plain milk. The chooser depends on the names,
  * not on identityLevel or meal-level visibleEvidence. A model guess of
  * "whole milk" in normalizedName does not count as type evidence when the
- * display name is still generic.
+ * display name is still generic. Meal text that only says the drink might
+ * be milk or plant milk is not plant evidence and must not hide the chooser.
  */
 export function photoGenericMilkNeedsConfirmation(
   food: PlantMilkFood & { entrySource?: "photo" | "manual" },
@@ -842,11 +843,26 @@ function plantMilkCueText(text: string): string {
 }
 
 /**
+ * "Could not tell whether this is milk or plant milk" is uncertainty, not
+ * a sighting. 紙盒寫有燕麥奶 and 植物奶字樣 stay as evidence.
+ */
+function dropUnknownMilkOrPlantClauses(text: string): string {
+  return text
+    .replace(/未能確認是否為[^。；;]*/g, " ")
+    .replace(/未能確定是否為[^。；;]*/g, " ")
+    .replace(/未知是否為[^。；;]*/g, " ")
+    .replace(/不確定是否為[^。；;]*/g, " ")
+    .replace(/未能確認是[^。；;]*還是[^。；;]*/g, " ");
+}
+
+/**
  * Plant-milk evidence on this food. A porridge or cereal-with-milk name
  * does not count bare oat words: 燕麥 there is a separate grain, not oat milk.
+ * A meal note that only says the drink might be milk or plant milk does not
+ * count either, so it cannot hide the generic-milk chooser.
  */
 function plantMilkEvidence(food: PlantMilkFood, context?: MealPlantMilkContext): boolean {
-  const text = normalizeFoodName(
+  const text = normalizeFoodName(dropUnknownMilkOrPlantClauses(
     [
       food.displayName,
       food.normalizedName,
@@ -858,7 +874,7 @@ function plantMilkEvidence(food: PlantMilkFood, context?: MealPlantMilkContext):
       ...(context?.visibleEvidence ?? []),
       ...(context?.uncertaintyText ?? []),
     ].join(" "),
-  );
+  ));
   if (plantMilkProductName(text)) return true;
   const cueText = plantMilkCueText(text);
   const grainWithDairy = [food.displayName, food.normalizedName].some((name) => isGrainWithDairyMilk(name));

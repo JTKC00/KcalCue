@@ -14,7 +14,8 @@ import {
  * The food card asks for 全脂牛奶, 低脂牛奶, 燕麥奶, 豆漿, or 其他. That
  * decision uses the names only. identityLevel, a guessed normalizedName
  * such as "whole milk", and meal-level visibleEvidence do not hide the
- * chooser and do not invent a direct calorie.
+ * chooser and do not invent a direct calorie. Meal unknownInformation that
+ * only says the drink might be milk or plant milk is not plant evidence.
  *
  * Choosing 全脂牛奶 forces one whole-milk ingredient, even when the model
  * called the row a dish. Choosing 其他 keeps the row uncomputed and hides

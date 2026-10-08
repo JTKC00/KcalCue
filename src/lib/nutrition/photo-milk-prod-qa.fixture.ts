@@ -93,6 +93,39 @@ export const oatCartonNameVariantsAnalysis = {
   unknownInformation: [],
 } satisfies FoodAnalysis;
 
+/**
+ * Production FAIL 2 on abcae3b (kcalcue-00039-fes), verbatim.
+ * Meal unknownInformation says the drink might be milk or plant milk.
+ * The item uncertainty does not mention whole versus low-fat.
+ */
+export const productionGlassMilkUnknownAnalysis = {
+  analysisStatus: "success",
+  foods: [
+    {
+      displayName: "牛奶",
+      normalizedName: "milk",
+      identityLevel: "dish",
+      unit: "ml",
+      recognitionConfidence: 0.72,
+      portionConfidence: 0.65,
+      uncertaintyReasons: [
+        "相片只顯示一杯白色飲品，沒有包裝或標籤，因此未能確認是牛奶還是其他類似飲品。",
+        "玻璃杯沒有標準容量，份量是按液面高度及一般水杯大小作估算。",
+      ],
+      notes: "透明玻璃杯內有白色、不透明飲品；相片未見品牌或包裝文字。",
+      portionMin: 250,
+      portionMax: 350,
+    },
+  ],
+  uncertaintyReasons: ["飲品外觀可辨認為牛奶類白色飲品，但沒有標籤，成分及種類未能完全確認。"],
+  visibleEvidence: ["透明玻璃杯", "白色、不透明飲品", "未見品牌或包裝標籤"],
+  estimatedInformation: ["按一般水杯大小及可見液面，估計約250至350毫升。"],
+  unknownInformation: [
+    "未能確認是否為牛奶、植物奶或其他白色飲品。",
+    "未能確認脂肪含量、糖分及實際容量。",
+  ],
+} satisfies FoodAnalysis;
+
 /** Generic row plus a more specific carton row. */
 export const genericPlusOatCartonAnalysis = {
   analysisStatus: "success",
