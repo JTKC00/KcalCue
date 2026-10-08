@@ -18,7 +18,7 @@ import { dedupeIdenticalContainerMilk } from "@/lib/domain/milk-dedupe";
 import { contradictoryDairyMilkLabel, mealPlantMilkContext, photoGenericMilkNeedsConfirmation, type MealPlantMilkContext } from "@/lib/nutrition/canonical";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { PHOTO_GENERIC_MILK_CONFIRMATION_REASON, PHOTO_MILK_OTHER_REASON, PLANT_MILK_CONTRADICTION_REASON } from "@/lib/nutrition/negative-rules";
-import { PHOTO_MILK_CHOICES, type PhotoMilkChoiceId } from "@/lib/nutrition/photo-milk";
+import { isMilkTypeUncertainty, PHOTO_MILK_CHOICES, type PhotoMilkChoiceId } from "@/lib/nutrition/photo-milk";
 import {
   canReuseNutritionMatchForNameEdit,
   enrichUnresolvedMatches,
@@ -763,9 +763,15 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
     const currentItem = items.find((item) => item.id === id);
     if (!currentItem) return;
     const renamed = renameFoodItem(currentItem, name, originalFoods.get(id) ?? initialDraft?.originalItems.find(food => food.id === id));
+    const confirmedMilkChoice = PHOTO_MILK_CHOICES.some(
+      (choice) => choice.id !== "other" && choice.displayName === name.trim(),
+    );
     const nextFood = {
       ...renamed,
-      uncertaintyReasons: renamed.uncertaintyReasons.filter((reason) => reason !== PHOTO_MILK_OTHER_REASON),
+      uncertaintyReasons: renamed.uncertaintyReasons.filter((reason) =>
+        reason !== PHOTO_MILK_OTHER_REASON &&
+        !(confirmedMilkChoice && isMilkTypeUncertainty(reason)),
+      ),
     };
     const cachedMatch = hasKnownPortion(currentItem) && hasKnownPortion(nextFood) && canReuseNutritionMatchForNameEdit(
       currentItem,

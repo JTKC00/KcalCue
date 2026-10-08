@@ -10,6 +10,7 @@ import {
 import type { EditableFoodItem, PortionPreset } from "@/lib/domain/editable-meal";
 import { roundRange, type CalculatedFood } from "@/lib/nutrition/calculation";
 import { templateRangeNeedsFollowUp } from "@/lib/nutrition/recipe-templates";
+import { MERGED_DUPLICATE_MILK_NOTICE } from "@/lib/domain/milk-dedupe";
 import { photoGenericMilkNeedsConfirmation } from "@/lib/nutrition/canonical";
 import { PHOTO_MILK_CHOICES, type PhotoMilkChoiceId } from "@/lib/nutrition/photo-milk";
 import { portionValueAfterProgrammaticFill } from "./portion-fill";
@@ -98,6 +99,8 @@ export function FoodEditor({
   const nutrition = calculation.match;
   const fieldId = `food-${item.id}`;
   const confirmMilk = photoGenericMilkNeedsConfirmation(item);
+  const mergedMilk = item.uncertaintyReasons.includes(MERGED_DUPLICATE_MILK_NOTICE);
+  const otherUncertainty = item.uncertaintyReasons.find((reason) => reason !== MERGED_DUPLICATE_MILK_NOTICE);
 
   return (
     <article className="food-card">
@@ -226,10 +229,14 @@ export function FoodEditor({
         </p>
       ) : null}
 
-      {item.uncertaintyReasons.length > 0 ? (
+      {mergedMilk ? (
+        <p className="food-uncertainty" role="status">{MERGED_DUPLICATE_MILK_NOTICE}</p>
+      ) : null}
+
+      {otherUncertainty ? (
         <p className="food-uncertainty">
           <span>留意：</span>
-          {item.uncertaintyReasons[0]}
+          {otherUncertainty}
         </p>
       ) : null}
     </article>

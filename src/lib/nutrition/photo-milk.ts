@@ -1,3 +1,5 @@
+import { normalizeFoodName } from "./canonical";
+
 /**
  * Photo versus manual milk.
  *
@@ -22,3 +24,16 @@ export const PHOTO_MILK_CHOICES = [
 
 export type PhotoMilkChoice = (typeof PHOTO_MILK_CHOICES)[number];
 export type PhotoMilkChoiceId = PhotoMilkChoice["id"];
+
+/**
+ * Vision uncertainty that is only about which milk it might be.
+ * An explicit card choice drops these sentences. A model label of 全脂奶
+ * that still carries 杏仁奶 in uncertaintyReasons is not a user choice
+ * and keeps that evidence.
+ */
+const MILK_TYPE_UNCERTAINTY =
+  /低脂|脫脂|脱脂|全脂|鮮奶|植物奶|燕麥|燕麦|豆漿|杏仁奶|(?:^|\s)(?:oat|oats|soy|soya|almond|skim|low fat|reduced fat|whole milk|fresh milk|plant milk)(?:$|\s)/;
+
+export function isMilkTypeUncertainty(reason: string): boolean {
+  return MILK_TYPE_UNCERTAINTY.test(normalizeFoodName(reason));
+}

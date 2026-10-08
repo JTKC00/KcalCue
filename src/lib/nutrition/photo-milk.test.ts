@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { FoodEstimate } from "@/lib/domain/food-analysis";
-import { dedupeIdenticalContainerMilk } from "@/lib/domain/milk-dedupe";
+import { dedupeIdenticalContainerMilk, MERGED_DUPLICATE_MILK_NOTICE } from "@/lib/domain/milk-dedupe";
 import { calculateFoodNutrition, roundRange } from "./calculation";
 import {
   explicitLowFatMilk,
@@ -16,6 +16,7 @@ import {
   LOW_FAT_MILK_UNCALCULATED_REASON,
   PHOTO_GENERIC_MILK_CONFIRMATION_REASON,
 } from "./negative-rules";
+import { isMilkTypeUncertainty } from "./photo-milk";
 import { findLowFatMilkProfile, resolveNutritionMatch } from "./resolver";
 import type { NutritionProfile } from "./types";
 
@@ -126,11 +127,39 @@ describe("photo generic milk", () => {
     expect(match.includedInTotal).toBe(false);
   });
 
+  it("computes 全脂牛奶 after the choice drops uncertainty that could not tell low-fat apart", () => {
+    const ambiguous = food("全脂牛奶", "whole milk", {
+      entrySource: "photo",
+      uncertaintyReasons: ["未能分辨全脂或低脂"],
+    });
+    expect(provider.resolve(ambiguous).profile?.id).not.toBe("whole-milk");
+    expect(isMilkTypeUncertainty("未能分辨全脂或低脂")).toBe(true);
+    expect(isMilkTypeUncertainty("未能讀到紙盒上的種類。")).toBe(false);
+    expect(isMilkTypeUncertainty(MERGED_DUPLICATE_MILK_NOTICE)).toBe(false);
+
+    const chosen = {
+      ...ambiguous,
+      uncertaintyReasons: ambiguous.uncertaintyReasons.filter((reason) => !isMilkTypeUncertainty(reason)),
+    };
+    const match = provider.resolve(chosen);
+    const calories = calculateFoodNutrition(chosen, match).ranges?.calories;
+    expect(explicitLowFatMilk(chosen)).toBe(false);
+    expect(match.profile?.id).toBe("whole-milk");
+    expect(match.includedInTotal).toBe(true);
+    expect(calories && roundRange(calories, 5)).toEqual({ min: 155, max: 160 });
+
+    const plantUncertainty = food("全脂奶", "whole milk", {
+      uncertaintyReasons: ["杏仁奶"],
+    });
+    expect(provider.resolve(plantUncertainty).profile?.id).not.toBe("whole-milk");
+  });
+
   it("merges two identical milk rows from one carton and does not double the calories", () => {
     const merged = dedupeIdenticalContainerMilk(duplicateGenericMilkCartonAnalysis);
     expect(duplicateGenericMilkCartonAnalysis.foods).toHaveLength(2);
     expect(merged.foods).toHaveLength(1);
     expect(merged.foods[0]).toMatchObject({ displayName: "牛奶", portionMin: null, portionMax: null });
+    expect(merged.foods[0].uncertaintyReasons[0]).toBe(MERGED_DUPLICATE_MILK_NOTICE);
 
     const one = food("牛奶", "milk", { entrySource: "photo" });
     const confirmed = food("全脂牛奶", "whole milk", { entrySource: "photo" });
