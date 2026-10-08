@@ -231,6 +231,22 @@ async function rice(page: Page) {
     .fill("白飯");
 }
 
+test("車仔麵 asks for a narrower range and a meal note can mark hot milk as plant milk", async ({ page, context }) => {
+  const backend = cloud();
+  await backend.install(context);
+  await page.goto("/");
+  await login(page);
+  await page.getByRole("button", { name: "手動記一餐", exact: true }).click();
+  await page.getByRole("combobox", { name: "食物名稱", exact: true }).fill("車仔麵");
+  await expect(page.getByRole("status").filter({ hasText: "2.5 倍" })).toBeVisible();
+  await expect(page.getByText(/約 45–185 kcal/)).toBeVisible();
+  await page.getByRole("combobox", { name: "食物名稱", exact: true }).fill("熱牛奶");
+  await expect(page.getByText(/約 60–95 kcal/)).toBeVisible();
+  await page.locator("#meal-journal-note").fill("這杯是燕麥奶");
+  await expect(page.getByText(/不配對乳製奶/)).toBeVisible();
+  await expect(page.getByText(/約 60–95 kcal/)).toHaveCount(0);
+});
+
 test("journal visual refresh keeps mobile and desktop hierarchy usable", async ({ browser, page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "今日飲食", exact: true })).toBeVisible();

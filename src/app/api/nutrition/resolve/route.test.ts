@@ -18,6 +18,7 @@ import { authenticated, HttpError } from "@/lib/server/auth";
 import { NUTRITION_RATE_LIMIT, clearRateLimitStore } from "@/lib/server/rate-limit";
 import { clearUsdaCache } from "@/lib/nutrition/usda";
 import { PLANT_MILK_CONTRADICTION_REASON } from "@/lib/nutrition/negative-rules";
+import { oatMilkCartonPhotoAnalysis } from "@/lib/nutrition/oat-milk-photo.fixture";
 import { reserveHourlyUsdaCall } from "@/lib/server/durable-nutrition-quota";
 import { POST } from "./route";
 
@@ -643,6 +644,36 @@ describe("POST /api/nutrition/resolve", () => {
     expect(body.matches[0].includedInTotal).toBe(false);
     expect(body.matches[0].reasons[0]).toBe(PLANT_MILK_CONTRADICTION_REASON);
     expect(body.matches[1].includedInTotal).toBe(false);
+  });
+
+  it("does not send photo-labelled 牛奶 to USDA when the meal saw oat milk", async () => {
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => Response.json({ foods: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const drink = oatMilkCartonPhotoAnalysis.foods[0];
+    const response = await POST(new Request("http://localhost/api/nutrition/resolve", {
+      method: "POST",
+      body: JSON.stringify({
+        mealContext: {
+          visibleEvidence: oatMilkCartonPhotoAnalysis.visibleEvidence,
+          uncertaintyText: [
+            ...oatMilkCartonPhotoAnalysis.uncertaintyReasons,
+            ...oatMilkCartonPhotoAnalysis.estimatedInformation,
+            ...oatMilkCartonPhotoAnalysis.unknownInformation,
+          ],
+        },
+        foods: [drink, remoteFood("mystery food")],
+      }),
+    }));
+    const body = await response.json();
+    const queries = fetchMock.mock.calls.map((call) =>
+      new URL(String(call[0])).searchParams.get("query") ?? "");
+
+    expect(response.status).toBe(200);
+    expect(queries).toEqual(["mystery food"]);
+    expect(body.matches[0].profile).toBeNull();
+    expect(body.matches[0].includedInTotal).toBe(false);
+    expect(body.matches[0].reasons[0]).toBe(PLANT_MILK_CONTRADICTION_REASON);
   });
 
   it("resolves 鮮奶 locally and still looks up low-fat milk", async () => {

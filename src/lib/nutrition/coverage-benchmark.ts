@@ -768,6 +768,8 @@ export function formatCoverageBaselineMarkdown(report: NutritionCoverageReport):
     "",
     "`npm run coverage:report` 只跑上述本地管線。輸出應與這份 Markdown 及旁邊的 JSON 一致。",
     "",
+    "要覆寫基準檔，執行 `UPDATE_COVERAGE_BASELINE=1 npm run coverage:report`。它會寫入 `docs/research/nutrition-coverage-baseline.json` 和這份 Markdown。沒有該環境變數時，測試只核對已提交的檔案，不會寫入。",
+    "",
   ];
   return `${lines.join("\n")}`;
 }
@@ -803,7 +805,7 @@ function formatPilotSections(report: NutritionCoverageReport): string[] {
     `| \`DISH_KNOWN_NO_PROFILE\` | ${pilot.n1.dishKnownNoProfile} | ${report.reasons.DISH_KNOWN_NO_PROFILE} |`,
     `| complete | ${pilot.n1.complete} | ${report.coverage.complete} |`,
     "",
-    "R 是每道菜每 100 g 熱量上限除以下限，也就是一份參考份量的熱量比。R > 2.5 標記需要後續追問（N4 才做提問介面）。R > 3 不標記完成，維持 `DISH_KNOWN_NO_PROFILE`。新 profile 的 R ≥ 2 時，配對信心維持中等。",
+    "R 是每道菜每 100 g 熱量上限除以下限，也就是一份參考份量的熱量比。R > 2.5 會在食物卡顯示追問，請使用者補充配料或份量，這次仍納入計算。R > 3 不標記完成，維持 `DISH_KNOWN_NO_PROFILE`。新 profile 的 R ≥ 2 時，配對信心維持中等。手動預設份量是 100–150 g，顯示出來的 kcal 比會再乘上這段份量，所以可以高過每 100 g 的 R。",
     "",
     "| R | 菜數 |",
     "|---|---:|",
@@ -842,7 +844,7 @@ function formatPilotSections(report: NutritionCoverageReport): string[] {
     "",
     "## 沒有改動的既有總數",
     "",
-    "下列 profile 的每 100 g 熱量這次沒有改。鮮蝦雲吞麵、雲吞麵、湯麵仍用 `noodle-soup`。叉燒飯、燒味飯仍用 `siu-mei-rice`。白粥、皮蛋瘦肉粥仍用 `congee`。",
+    "鮮蝦雲吞麵、雲吞麵、湯麵仍用 `noodle-soup`。叉燒飯、燒味飯仍用 `siu-mei-rice`，但每 100 g 上限由 320 收緊到 210。白粥、皮蛋瘦肉粥仍用 `congee`。其餘列出的 profile 熱量沒有改。",
     "",
     "| profile | 每 100 g kcal |",
     "|---|---:|",
@@ -864,7 +866,11 @@ function formatPilotSections(report: NutritionCoverageReport): string[] {
     "",
     "胡麻醬沙律和油醋汁沙律維持不計算，原因碼是 `DISH_KNOWN_NO_PROFILE`。使用者句子說明還沒有營養 profile。醬量足以把 R 推過 3，而且不在這五個試點家族，所以這次不加模板。",
     "",
-    "名稱是牛奶、鮮奶、全脂奶、低脂奶、fresh milk、skim milk 或 low-fat milk，或者這些標籤只多了溫度或分量字（熱、凍、暖、大、細、一杯、hot、iced、cold、warm、small、large、medium、a glass of、a cup of），而備註、可見食材或不確定原因指向燕麥奶、豆漿或杏仁奶時，不配對 whole-milk。這不是只接受完全一樣的牛奶標籤，也不是名稱裡任意出現牛奶就算。`POST /api/meals` 和 `POST /api/nutrition/resolve` 也不把該項交給 USDA live lookup。牛奶布甸、奶茶、milk tea、牛奶麥片不會因為名稱裡有牛奶就當成牛奶；杏仁片和黃豆也不是植物奶。沒有植物奶或低脂證據時，鮮奶和 fresh milk 配對本地全脂奶，所以沒有 USDA key 的 Demo 仍可計算。這是香港鮮奶通常是全脂的產品預設；若那杯其實是沒有標明的低脂奶，熱量可能高估約三成。名稱本身是低脂奶、脫脂奶、簡體脱脂奶、skim milk 或 low-fat milk 時不配全脂奶，沒有植物奶證據時仍可交給 USDA。燕麥牛奶粥和麥片加牛奶仍保留乳製奶。若植物奶只寫在餐點層的 visibleEvidence，食物本身沒有這些欄位，這個缺口仍然存在。",
+    "名稱是牛奶、鮮奶、全脂奶、低脂奶、fresh milk、skim milk 或 low-fat milk，或者這些標籤只多了溫度或分量字（熱、凍、暖、大、細、一杯、hot、iced、cold、warm、small、large、medium、a glass of、a cup of），而該項備註、可見食材、不確定原因，或同一餐的可見證據、餐點備註、餐點不確定說明指向燕麥奶、豆漿或杏仁奶時，不配對 whole-milk。這不是只接受完全一樣的牛奶標籤，也不是名稱裡任意出現牛奶就算。`POST /api/meals` 和 `POST /api/nutrition/resolve` 也不把該項交給 USDA live lookup。牛奶布甸、奶茶、milk tea、牛奶麥片不會因為名稱裡有牛奶就當成牛奶；杏仁片和黃豆也不是植物奶。沒有植物奶或低脂證據時，鮮奶和 fresh milk 配對本地全脂奶，所以沒有 USDA key 的 Demo 仍可計算。這是香港鮮奶通常是全脂的產品預設；若那杯其實是沒有標明的低脂奶，熱量可能高估約三成。名稱本身是低脂奶、脫脂奶、簡體脱脂奶、skim milk 或 low-fat milk 時不配全脂奶，沒有植物奶證據時仍可交給 USDA。燕麥牛奶粥和麥片加牛奶仍保留乳製奶，餐點備註裡的植物奶不會改這碗粥。",
+    "",
+    "茶餐廳常餐不放進早餐家族的模板。它是客人選的主菜加飲品，不是西多士、菠蘿包、腸仔蛋或通粉湯。身份是 `cha-chaan-teng-set`，原因碼 `DISH_KNOWN_NO_PROFILE`。蝦餃、鮮蝦餃、水晶蝦餃都對上點心家族的 `har-gow`。火腿通粉繼續用通粉湯模板，因為茶餐廳的火腿通粉是連湯的。",
+    "",
+    "叉燒飯的每 100 g 上限對齊食譜模板。叉燒碟頭飯原料最高約 186 kcal／100 g，燒鵝飯約 188，脆皮燒肉飯約 205。舊上限 320 在預設 100–150 g 會顯示 170–480 kcal，高過這些以飯為主的組合。上限改為 210，下限維持 170。高脂沙律目錄下限仍是 63；畫面把 100 g 顯示成 60，這是進位，沒有改。",
     "",
   ];
 }

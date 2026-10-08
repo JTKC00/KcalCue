@@ -6,7 +6,11 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { demoFoodAnalysis } from "@/lib/providers/food-vision/demo";
+import { createEditableFoodItems } from "@/lib/domain/editable-meal";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
+import { PLANT_MILK_CONTRADICTION_REASON } from "@/lib/nutrition/negative-rules";
+import { oatMilkCartonPhotoAnalysis } from "@/lib/nutrition/oat-milk-photo.fixture";
+import { newDraft } from "@/lib/meals/types";
 import { copy } from "@/content/zh-HK";
 import { KcalCueApp } from "./kcalcue-app";
 
@@ -283,5 +287,34 @@ describe("KcalCueApp analysis cancel", () => {
     expect(ids).toHaveLength(2);
     expect(ids.every((id) => typeof id === "string" && /^[0-9a-f-]{36}$/i.test(id))).toBe(true);
     expect(ids[0]).not.toBe(ids[1]);
+  });
+});
+
+describe("plant milk meal evidence", () => {
+  it("drops whole milk when the photo only recorded oat milk at meal level", async () => {
+    const provider = new LocalNutritionProvider();
+    const drink = oatMilkCartonPhotoAnalysis.foods[0];
+    const items = createEditableFoodItems([drink], [provider.resolve(drink)]);
+    const draft = {
+      ...newDraft(),
+      mode: "live" as const,
+      analysis: oatMilkCartonPhotoAnalysis,
+      items,
+      originalItems: items,
+    };
+    render(<KcalCueApp initialProviderMode="live" initialDraft={draft} />);
+    expect(await screen.findByText(PLANT_MILK_CONTRADICTION_REASON)).toBeInTheDocument();
+    expect(screen.queryByText(/155–220/)).not.toBeInTheDocument();
+  });
+
+  it("uses the meal note for typed 熱牛奶", async () => {
+    const view = render(<KcalCueApp initialProviderMode="demo" manual mealNote="" />);
+    fireEvent.change(screen.getByRole("combobox", { name: "食物名稱" }), {
+      target: { value: "熱牛奶" },
+    });
+    expect(await screen.findByText(/約 60–95 kcal/)).toBeInTheDocument();
+    view.rerender(<KcalCueApp initialProviderMode="demo" manual mealNote="燕麥奶" />);
+    expect(await screen.findByText(PLANT_MILK_CONTRADICTION_REASON)).toBeInTheDocument();
+    expect(screen.queryByText(/約 60–95 kcal/)).not.toBeInTheDocument();
   });
 });

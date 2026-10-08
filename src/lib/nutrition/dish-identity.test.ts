@@ -145,4 +145,39 @@ describe("curated dish identities", () => {
     expect(macaroni.includedInTotal).toBe(true);
     expect(macaroni).not.toHaveProperty("coverageReason");
   });
+
+  it("resolves shrimp dumpling aliases in the dim sum family", () => {
+    for (const name of ["蝦餃", "鮮蝦餃", "水晶蝦餃"]) {
+      const match = provider.resolve(food(name, name));
+      expect(match.identity.dishId, name).toBe("har-gow");
+      expect(match.identity.familyId, name).toBe("dim-sum");
+      expect(match.profile?.id, name).toBe("template:har-gow");
+      expect(match.includedInTotal, name).toBe(true);
+    }
+  });
+
+  it("keeps ham macaroni on the macaroni soup template", () => {
+    const ham = provider.resolve(food("火腿通粉", "ham macaroni soup"));
+    expect(ham.identity).toMatchObject({
+      dishId: "macaroni-soup-breakfast",
+      familyId: "cha-chaan-teng-breakfast",
+      hasNutritionProfile: true,
+    });
+    expect(ham.profile?.id).toBe("template:macaroni-soup-breakfast");
+    expect(ham.includedInTotal).toBe(true);
+  });
+
+  it("leaves a cha chaan teng set meal uncalculated", () => {
+    const setMeal = provider.resolve(food("茶餐廳常餐", "茶餐廳常餐"));
+    expect(setMeal.includedInTotal).toBe(false);
+    expect(setMeal.profile).toBeNull();
+    expect(setMeal.coverageReason).toBe("DISH_KNOWN_NO_PROFILE");
+    expect(setMeal.identity).toMatchObject({
+      dishId: "cha-chaan-teng-set",
+      familyId: "cha-chaan-teng-set",
+      hasNutritionProfile: false,
+    });
+    expect(setMeal.reasons[0]).toContain("不套用早餐模板");
+    expect(setMeal.profile?.id).not.toBe("template:macaroni-soup-breakfast");
+  });
 });

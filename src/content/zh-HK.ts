@@ -48,6 +48,7 @@ export const copy = {
   nutritionIncomplete: "未完整",
   nutritionUnavailable: "未有足夠資料",
   nutritionLookupFailed: "補充營養資料暫時未能取得，這項食物仍未計入總數。你可以手動選擇有資料的食物。",
+  nutritionRangeFollowUp: "熱量上限超過下限 2.5 倍。請補充配料或實際份量；未補充前仍用這個較寬範圍計算。",
   addFood: "新增食物",
   emptyName: "未命名食物",
   deleteFood: "刪除",

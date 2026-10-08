@@ -13,6 +13,7 @@ import {
 import {
   calculateRecipe,
   densityRange,
+  RANGE_RATIO_FOLLOW_UP,
   type GramRange,
   type RecipeCalculation,
 } from "./recipe-calculator";
@@ -362,6 +363,15 @@ export const templateNutritionProfiles: NutritionProfile[] = compiledDishTemplat
 
 export function dishTemplateIsComplete(dishId: string): boolean {
   return templateByDishId.get(dishId)?.complete === true;
+}
+
+/** Template profiles whose per-100 g calorie band exceeds the follow-up rule. */
+export function templateRangeNeedsFollowUp(
+  profile: { id: string; nutrientsPer100g: { calories: { min: number; max: number } } } | null | undefined,
+): boolean {
+  if (!profile?.id.startsWith("template:")) return false;
+  const { min, max } = profile.nutrientsPer100g.calories;
+  return min > 0 && max / min > RANGE_RATIO_FOLLOW_UP;
 }
 
 export function pilotFamilyDefinitions(): ReadonlyArray<{

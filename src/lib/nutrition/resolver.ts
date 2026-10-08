@@ -5,6 +5,7 @@ import {
   isCompositeIdentity,
   normalizeFoodName,
   profileBlockedByNegativeRule,
+  type MealPlantMilkContext,
 } from "./canonical";
 import {
   CREAM_MACARONI_UNCALCULATED_REASON,
@@ -15,7 +16,10 @@ import {
   COMPOSITE_GENERIC_FALLBACK_REASON,
   isCompatibleNutritionIdentity,
 } from "./compatibility";
-import { compositeDishCoverageReason } from "./coverage-reason";
+import {
+  CHA_CHAAN_TENG_SET_UNCALCULATED_REASON,
+  compositeDishCoverageReason,
+} from "./coverage-reason";
 import type {
   CanonicalFoodIdentity,
   FoodPreparation,
@@ -227,15 +231,17 @@ function compositeUnmatchedReason(identity: CanonicalFoodIdentity): string {
   if (identity.canonicalName === "cream-macaroni" || identity.dishId === "cream-macaroni") {
     return CREAM_MACARONI_UNCALCULATED_REASON;
   }
+  if (identity.dishId === "cha-chaan-teng-set") return CHA_CHAAN_TENG_SET_UNCALCULATED_REASON;
   return COMPOSITE_GENERIC_FALLBACK_REASON;
 }
 
 export function resolveNutritionMatch(
   food: FoodEstimate,
   catalog: NutritionProfile[],
+  mealContext?: MealPlantMilkContext,
 ): NutritionMatch {
   const identity = canonicalizeFood(food);
-  if (contradictoryDairyMilkLabel(food)) {
+  if (contradictoryDairyMilkLabel(food, mealContext)) {
     return unmatched({
       profile: null,
       confidence: "low",

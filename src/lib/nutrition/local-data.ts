@@ -456,7 +456,7 @@ const baseNutritionProfiles: NutritionProfile[] = [
       "燒味飯",
     ],
     composite: true,
-    nutrientsPer100g: nutrientBand([170, 320], [8, 18], [18, 42], [5, 22]),
+    nutrientsPer100g: nutrientBand([170, 210], [8, 12], [18, 28], [5, 12]),
     gramsPerUnit: { g: 1, bowl: 400 },
     source: usdaSource(
       "generic:hong-kong-siu-mei-rice",
@@ -464,7 +464,7 @@ const baseNutritionProfiles: NutritionProfile[] = [
     ),
     dataNotice: LOCAL_DATA_NOTICE,
     densityBasis:
-      "叉燒／燒味肥瘦、蜜汁、飯量及淋汁不能由相片確定；密度參考熟豬肉與熟飯公開值再加烹調不確定性，不是某間茶餐廳的配方。",
+      "上限對齊 USDA SR Legacy 食譜模板：叉燒碟頭飯最高約 186 kcal／100 g，燒鵝飯約 188，脆皮燒肉飯約 205。舊上限 320 高過這些以飯為主的組合，預設 100–150 g 會顯示到 480 kcal。上限改為 210，仍高於脆皮燒肉飯模板，並留少量蜜汁空間。下限維持 170。這不是模型估計，也不是某一間燒臘店的配方。",
   },
   {
     id: "claypot-rice",

@@ -711,7 +711,7 @@ function plantMilkCueText(text: string): string {
  * Plant-milk evidence on this food. A porridge or cereal-with-milk name
  * does not count bare oat words: 燕麥 there is a separate grain, not oat milk.
  */
-function plantMilkEvidence(food: PlantMilkFood): boolean {
+function plantMilkEvidence(food: PlantMilkFood, context?: MealPlantMilkContext): boolean {
   const text = normalizeFoodName(
     [
       food.displayName,
@@ -720,6 +720,9 @@ function plantMilkEvidence(food: PlantMilkFood): boolean {
       food.notes ?? "",
       ...(food.visibleIngredients ?? []),
       ...(food.uncertaintyReasons ?? []),
+      context?.mealNote ?? "",
+      ...(context?.visibleEvidence ?? []),
+      ...(context?.uncertaintyText ?? []),
     ].join(" "),
   );
   if (plantMilkProductName(text)) return true;
@@ -737,13 +740,50 @@ function blocksDairyMilkIdentity(food: PlantMilkFood): boolean {
 }
 
 /**
- * The name is dairy milk, including fresh, skim, and low-fat labels, but
- * notes, ingredients, or the description say oat, soy, or almond.
- * Meal-level visibleEvidence is not on the food and is not read here.
+ * Meal-level text that can identify a milk item as plant milk.
+ * The food editor has no item note, so the journal note and the photo
+ * analysis have to count.
  */
-export function contradictoryDairyMilkLabel(food: PlantMilkFood): boolean {
+export interface MealPlantMilkContext {
+  visibleEvidence?: readonly string[];
+  uncertaintyText?: readonly string[];
+  mealNote?: string | null;
+}
+
+export function mealPlantMilkContext(input: {
+  analysis?: {
+    visibleEvidence?: readonly string[];
+    uncertaintyReasons?: readonly string[];
+    estimatedInformation?: readonly string[];
+    unknownInformation?: readonly string[];
+  } | null;
+  mealNote?: string | null;
+}): MealPlantMilkContext {
+  const analysis = input.analysis;
+  return {
+    visibleEvidence: analysis?.visibleEvidence,
+    uncertaintyText: [
+      ...(analysis?.uncertaintyReasons ?? []),
+      ...(analysis?.estimatedInformation ?? []),
+      ...(analysis?.unknownInformation ?? []),
+    ],
+    mealNote: input.mealNote,
+  };
+}
+
+/**
+ * The name is dairy milk, including fresh, skim, and low-fat labels, but
+ * the item or the rest of the meal says oat, soy, or almond milk.
+ * Meal-level visible evidence, the meal note, and meal uncertainty text
+ * count for that milk item. A porridge that merely contains dairy milk
+ * does not read the meal context.
+ */
+export function contradictoryDairyMilkLabel(
+  food: PlantMilkFood,
+  context?: MealPlantMilkContext,
+): boolean {
   if (dairyMilkLabel(food.displayName) || dairyMilkLabel(food.normalizedName)) {
-    return plantMilkEvidence(food);
+    return plantMilkEvidence(food, context);
   }
   // Oat porridge or cereal with milk stays dairy unless the text names a
   // plant-milk product such as 杏仁奶. Almond slices and soybeans do not.

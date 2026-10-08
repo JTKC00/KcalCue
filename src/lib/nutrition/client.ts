@@ -1,5 +1,5 @@
 import type { FoodEstimate } from "@/lib/domain/food-analysis";
-import { canonicalizeFood, normalizeFoodName } from "./canonical";
+import { canonicalizeFood, normalizeFoodName, type MealPlantMilkContext } from "./canonical";
 import type { NutritionMatch } from "./types";
 import { copy } from "@/content/zh-HK";
 import { nutritionMatchResponseSchema } from "./response-schema";
@@ -59,6 +59,7 @@ export async function enrichUnresolvedMatches(
   foods: FoodEstimate[],
   localMatches: NutritionMatch[],
   signal?: AbortSignal,
+  mealContext?: MealPlantMilkContext,
 ): Promise<NutritionMatch[]> {
   const unresolvedIndexes = localMatches
     .map((match, index) => (match.includedInTotal ? -1 : index))
@@ -83,6 +84,7 @@ export async function enrichUnresolvedMatches(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        ...(mealContext ? { mealContext } : {}),
         foods: unresolvedIndexes.map((index) => {
           const food = foods[index];
           return {
@@ -131,7 +133,8 @@ export async function resolveNutritionMatchWithFallback(
   food: FoodEstimate,
   localMatch: NutritionMatch,
   signal?: AbortSignal,
+  mealContext?: MealPlantMilkContext,
 ): Promise<NutritionMatch> {
-  const [match] = await enrichUnresolvedMatches([food], [localMatch], signal);
+  const [match] = await enrichUnresolvedMatches([food], [localMatch], signal, mealContext);
   return match ?? localMatch;
 }

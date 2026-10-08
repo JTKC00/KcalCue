@@ -190,6 +190,8 @@ npm run eval
 npm run build
 ```
 
+營養覆蓋基準在 `docs/research/nutrition-coverage-baseline.md`。改完對應程式後，用 `UPDATE_COVERAGE_BASELINE=1 npm run coverage:report` 覆寫這份 Markdown 和旁邊的 JSON。沒有該環境變數時，`npm run coverage:report` 只核對已提交的檔案，不會寫入。
+
 測試涵蓋 calculation ranges、所有 macros、g/ml/piece conversion、portion presets、confidence mapping、uncertainty de-duplication/fallback、schema validation、OpenAI error mapping、HEIC／HEIF conversion、API rate limit，以及 Demo analysis → nutrition → user correction → updated result integration pipeline。Component tests（jsdom）覆蓋 HEIC fallback、取消分析及 partial coverage 文案。
 
 `npm run eval` 會獨立執行 representative food / meal cases，驗證 canonical identity、nutrition match、partial / unresolved coverage、composite dish safety、range ordering、非負值及 deterministic recalculation；不使用 OpenAI 或 USDA live API，也不建立精確 kcal golden numbers。
