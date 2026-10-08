@@ -2,6 +2,7 @@ import type { FoodAnalysis, FoodEstimate, ObservedFood, PortionUnit } from "./fo
 import type { NutritionMatch, NutritionProfile } from "@/lib/nutrition/types";
 import { normalizeFoodName } from "@/lib/nutrition/canonical";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
+import { isMilkTypeUncertainty, photoMilkChoiceByLabel } from "@/lib/nutrition/photo-milk";
 
 export type PortionPreset = "small" | "regular" | "large";
 
@@ -26,6 +27,21 @@ export function renameFoodItem(
   name: string,
   originalFood: ObservedFood = food,
 ): EditableFoodItem {
+  const milkChoice = photoMilkChoiceByLabel(name);
+  if (milkChoice) {
+    return {
+      ...food,
+      displayName: milkChoice.displayName,
+      normalizedName: milkChoice.normalizedName,
+      identityLevel: "ingredient",
+      preparationMethod: undefined,
+      visibleIngredients: undefined,
+      notes: undefined,
+      nutritionMatch: null,
+      uncertaintyReasons: food.uncertaintyReasons.filter((reason) => !isMilkTypeUncertainty(reason)),
+    };
+  }
+
   if (normalizeFoodName(food.displayName) === normalizeFoodName(name)) {
     return { ...food, displayName: name };
   }

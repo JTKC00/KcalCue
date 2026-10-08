@@ -13,6 +13,7 @@ import { templateRangeNeedsFollowUp } from "@/lib/nutrition/recipe-templates";
 import { MERGED_DUPLICATE_MILK_NOTICE } from "@/lib/domain/milk-dedupe";
 import { photoGenericMilkNeedsConfirmation } from "@/lib/nutrition/canonical";
 import { PHOTO_MILK_CHOICES, type PhotoMilkChoiceId } from "@/lib/nutrition/photo-milk";
+import { PHOTO_MILK_OTHER_REASON } from "@/lib/nutrition/negative-rules";
 import { portionValueAfterProgrammaticFill } from "./portion-fill";
 import { TrashIcon } from "./icons";
 
@@ -98,9 +99,12 @@ export function FoodEditor({
 }: FoodEditorProps) {
   const nutrition = calculation.match;
   const fieldId = `food-${item.id}`;
-  const confirmMilk = photoGenericMilkNeedsConfirmation(item);
-  const mergedMilk = item.uncertaintyReasons.includes(MERGED_DUPLICATE_MILK_NOTICE);
-  const otherUncertainty = item.uncertaintyReasons.find((reason) => reason !== MERGED_DUPLICATE_MILK_NOTICE);
+  const choseOther = item.uncertaintyReasons.includes(PHOTO_MILK_OTHER_REASON);
+  const confirmMilk = photoGenericMilkNeedsConfirmation(item) && !choseOther;
+  const mergedMilk = item.duplicateMilkNotice === MERGED_DUPLICATE_MILK_NOTICE
+    || item.uncertaintyReasons.includes(MERGED_DUPLICATE_MILK_NOTICE);
+  const otherUncertainty = item.uncertaintyReasons.find((reason) =>
+    reason !== MERGED_DUPLICATE_MILK_NOTICE && reason !== PHOTO_MILK_OTHER_REASON);
 
   return (
     <article className="food-card">
@@ -227,6 +231,10 @@ export function FoodEditor({
           <span>營養：</span>
           {nutrition.reasons[0]}
         </p>
+      ) : null}
+
+      {choseOther && nutrition?.reasons[0] !== PHOTO_MILK_OTHER_REASON ? (
+        <p className="food-uncertainty" role="status">{PHOTO_MILK_OTHER_REASON}</p>
       ) : null}
 
       {mergedMilk ? (
