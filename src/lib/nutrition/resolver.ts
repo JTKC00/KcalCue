@@ -8,10 +8,12 @@ import {
   COMPOSITE_GENERIC_FALLBACK_REASON,
   isCompatibleNutritionIdentity,
 } from "./compatibility";
+import { compositeDishCoverageReason } from "./coverage-reason";
 import type {
   CanonicalFoodIdentity,
   FoodPreparation,
   NutritionConfidence,
+  NutritionCoverageReason,
   NutritionMatch,
   NutritionMatchType,
   NutritionProfile,
@@ -178,6 +180,13 @@ function classifyMatch(
   };
 }
 
+function unmatched(
+  match: Omit<NutritionMatch, "coverageReason" | "includedInTotal">,
+  coverageReason: NutritionCoverageReason,
+): NutritionMatch {
+  return { ...match, includedInTotal: false, coverageReason };
+}
+
 export function resolveNutritionMatch(
   food: FoodEstimate,
   catalog: NutritionProfile[],
@@ -200,48 +209,46 @@ export function resolveNutritionMatch(
   const second = isCompositeIdentity(identity) ? compatible[1] : ranked[1];
 
   if (isCompositeIdentity(identity) && (!best || best.score < 50)) {
-    return {
+    return unmatched({
       profile: null,
       confidence: "low",
       matchType: "unresolved",
       reasons: [COMPOSITE_GENERIC_FALLBACK_REASON],
       identity,
-      includedInTotal: false,
-    };
+    }, compositeDishCoverageReason(identity));
   }
 
   if (!best || best.score < 50) {
-    return {
+    return unmatched({
       profile: null,
       confidence: "low",
       matchType: "unresolved",
       reasons: ["未有足夠可靠的營養參考資料可以配對。"],
       identity,
-      includedInTotal: false,
-    };
+    }, isCompositeIdentity(identity)
+      ? compositeDishCoverageReason(identity)
+      : "INSUFFICIENT_COVERAGE");
   }
 
   if (second && best.score - second.score < 12 && best.profile.canonicalName !== second.profile.canonicalName) {
-    return {
+    return unmatched({
       profile: null,
       confidence: "low",
       matchType: "unresolved",
       reasons: ["找到多個相近但不相同的營養資料，為免假裝精準，暫不自動配對。"],
       identity,
-      includedInTotal: false,
-    };
+    }, "AMBIGUOUS_MATCH");
   }
 
   const gramsPerUnit = best.profile.gramsPerUnit[food.unit];
   if (typeof gramsPerUnit !== "number" || !Number.isFinite(gramsPerUnit) || gramsPerUnit <= 0) {
-    return {
+    return unmatched({
       profile: null,
       confidence: "low",
       matchType: "unresolved",
       reasons: [`未有 ${food.unit} 的可靠克重換算，因此不納入總數。`],
       identity,
-      includedInTotal: false,
-    };
+    }, "TYPE_MISMATCH");
   }
 
   const classified = classifyMatch(identity, best.profile, best.score, best.aliasExact);
@@ -251,25 +258,30 @@ export function resolveNutritionMatch(
     !(isCompositeIdentity(identity) && classified.confidence === "low");
 
   if (!includedInTotal && classified.matchType === "approximate_generic") {
-    return {
+    return unmatched({
       profile: best.profile,
       confidence: "low",
       matchType: "approximate_generic",
       reasons: classified.reasons,
       identity,
-      includedInTotal: false,
-    };
+    }, "INSUFFICIENT_COVERAGE");
   }
 
   if (!includedInTotal) {
-    return {
+    const coverageReason: NutritionCoverageReason = classified.matchType !== "unresolved"
+      ? "INSUFFICIENT_COVERAGE"
+      : !isCompatibleNutritionIdentity(identity, best.profile)
+        ? "TYPE_MISMATCH"
+        : isCompositeIdentity(identity)
+          ? compositeDishCoverageReason(identity)
+          : "INSUFFICIENT_COVERAGE";
+    return unmatched({
       profile: null,
       confidence: classified.confidence,
       matchType: "unresolved",
       reasons: classified.reasons,
       identity,
-      includedInTotal: false,
-    };
+    }, coverageReason);
   }
 
   return {
