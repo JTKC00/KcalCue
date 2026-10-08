@@ -4,7 +4,9 @@ import { createEditableFoodItems } from "@/lib/domain/editable-meal";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { mealShowsTotal } from "@/lib/nutrition/calculation";
 import { NutritionService } from "@/lib/nutrition/service";
-import { representativeEvaluationCases } from "./fixtures";
+import { compiledDishTemplates } from "@/lib/nutrition/recipe-templates";
+import { representativeEvaluationCases, type EvaluationCase } from "./fixtures";
+import type { FoodEstimate } from "@/lib/domain/food-analysis";
 
 function rangesAreSafe(meal: ReturnType<NutritionService["calculateMeal"]>): boolean {
   const ranges = [
@@ -28,6 +30,31 @@ function rangesAreSafe(meal: ReturnType<NutritionService["calculateMeal"]>): boo
   );
 }
 
+function pilotEvaluationCases(): EvaluationCase[] {
+  return compiledDishTemplates.map((template) => {
+    const food: FoodEstimate = {
+      displayName: template.displayName,
+      normalizedName: template.displayName,
+      identityLevel: "dish",
+      portionMin: 100,
+      portionMax: 100,
+      unit: "g",
+      recognitionConfidence: 0.9,
+      portionConfidence: 0.8,
+      uncertaintyReasons: [],
+    };
+    return {
+      id: `pilot-${template.dishId}`,
+      description: `${template.displayName} uses the ${template.familyId} recipe template`,
+      foods: [food],
+      expectedCanonicalNames: [template.dishId],
+      expectedIncluded: [template.complete],
+      expectedMatchTypes: template.complete ? ["exact_canonical" as const] : ["unresolved" as const],
+      expectedCoverage: template.complete ? "complete" as const : "none" as const,
+    };
+  });
+}
+
 describe("KcalCue deterministic evaluation", () => {
   it("runs representative resolution, coverage and calculation invariants", () => {
     const provider = new LocalNutritionProvider();
@@ -39,7 +66,8 @@ describe("KcalCue deterministic evaluation", () => {
     let coveragePass = 0;
     let calculationPass = 0;
 
-    for (const evaluationCase of representativeEvaluationCases) {
+    const cases = [...representativeEvaluationCases, ...pilotEvaluationCases()];
+    for (const evaluationCase of cases) {
       const matches = evaluationCase.foods.map((food) => provider.resolve(food));
       const items = createEditableFoodItems(evaluationCase.foods, matches);
       const meal = service.calculateMeal(items);
@@ -101,13 +129,13 @@ describe("KcalCue deterministic evaluation", () => {
     const report = [
       "KcalCue Evaluation",
       "",
-      `Cases: ${representativeEvaluationCases.length}`,
+      `Cases: ${cases.length}`,
       `PASS: ${passedCases}`,
-      `FAIL: ${representativeEvaluationCases.length - passedCases}`,
-      `Canonical resolution: ${canonicalPass}/${representativeEvaluationCases.length}`,
-      `Nutrition resolution: ${nutritionPass}/${representativeEvaluationCases.length}`,
-      `Coverage rules: ${coveragePass}/${representativeEvaluationCases.length}`,
-      `Calculation invariants: ${calculationPass}/${representativeEvaluationCases.length}`,
+      `FAIL: ${cases.length - passedCases}`,
+      `Canonical resolution: ${canonicalPass}/${cases.length}`,
+      `Nutrition resolution: ${nutritionPass}/${cases.length}`,
+      `Coverage rules: ${coveragePass}/${cases.length}`,
+      `Calculation invariants: ${calculationPass}/${cases.length}`,
       ...(failures.length > 0 ? ["", "Failures:", ...failures.map((failure) => `- ${failure}`)] : []),
     ].join("\n");
     process.stdout.write(`${report}\n`);

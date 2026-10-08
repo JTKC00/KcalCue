@@ -17,7 +17,7 @@ import {
 import { accountPath } from "@/lib/firebase/admin";
 import { createEditableFoodItems, hasKnownPortion } from "@/lib/domain/editable-meal";
 import { canReuseNutritionMatchForNameEdit } from "@/lib/nutrition/client";
-import { isCompositeIdentity } from "@/lib/nutrition/canonical";
+import { contradictoryDairyMilkLabel, isCompositeIdentity } from "@/lib/nutrition/canonical";
 import { supportsUsdaPortionUnit, UsdaNutritionClient } from "@/lib/nutrition/usda";
 import { getNutritionApiKey } from "@/lib/server/env";
 import { reserveHourlyUsdaCall } from "@/lib/server/durable-nutrition-quota";
@@ -177,7 +177,8 @@ export async function POST(request: Request) {
       hasKnownPortion(item) && item.nutritionMatch !== null &&
       !item.nutritionMatch.includedInTotal &&
       supportsUsdaPortionUnit(item.unit) &&
-      !isCompositeIdentity(item.nutritionMatch.identity);
+      !isCompositeIdentity(item.nutritionMatch.identity) &&
+      !contradictoryDairyMilkLabel(item);
     // All writes participate in this claim. Otherwise a changed local/manual
     // payload with the same mutation ID could race a Live lookup and commit
     // first, causing the eventual Live request to acknowledge the wrong body.

@@ -1,7 +1,9 @@
 import type { FoodEstimate } from "@/lib/domain/food-analysis";
 import { DISH_IDENTITIES, type DishIdentity } from "./dish-identity";
+import { dishTemplateIsComplete } from "./recipe-templates";
 import {
   NEGATIVE_MATCH_RULES,
+  PLANT_MILK_CONTEXT_CUES,
   SALAD_NAME_SPELLINGS,
   type NegativeMatchRule,
 } from "./negative-rules";
@@ -148,7 +150,7 @@ const IDENTITY_RULES: TermRule[] = [
   { keys: ["fried egg", "boiled egg", "雞蛋", "煎蛋", "烚蛋", "egg"], canonicalName: "egg", category: "egg", kind: "specific_food" },
   { keys: ["firm tofu", "bean curd", "豆腐", "tofu"], canonicalName: "tofu", category: "tofu", kind: "specific_food" },
   { keys: ["french fries", "fries", "chips", "薯條"], canonicalName: "french-fries", category: "fried", kind: "specific_food" },
-  { keys: ["whole milk", "milk", "全脂奶", "牛奶"], canonicalName: "milk", category: "dairy", kind: "specific_food" },
+  { keys: ["fresh milk", "whole milk", "milk", "鮮奶", "全脂奶", "牛奶"], canonicalName: "milk", category: "dairy", kind: "specific_food" },
   { keys: ["banana", "香蕉"], canonicalName: "banana", category: "fruit", kind: "specific_food" },
   { keys: ["apple", "蘋果"], canonicalName: "apple", category: "fruit", kind: "specific_food" },
 ];
@@ -196,6 +198,49 @@ function matchingSaladDressingRule(name: string): NegativeMatchRule | null {
  * guesses and must not move a lean salad into this profile. 「沙律醬」 is the
  * dressing, not a salad: the salad word does not match when 醬 follows it.
  */
+function creamMacaroniText(food: FoodEstimate): string {
+  return normalizeFoodName(
+    [food.displayName, food.normalizedName, food.notes ?? "", food.preparationMethod ?? ""].join(" "),
+  );
+}
+
+/**
+ * Hot or sauced cream macaroni. These must not use the cold salad profile.
+ * Chinese and English cues are the same ideas: 熱食/hot, 粟米忌廉/corn cream,
+ * 忌廉汁/cream sauce, 焗/baked/gratin, plus 熱辣. Bare 熱 would match 高熱量,
+ * and corn or 粟米 alone is not the cream-corn dish.
+ */
+function hasHotCreamMacaroniCue(name: string): boolean {
+  return /焗|熱食|熱辣|粟米忌廉|玉米忌廉|忌廉汁|(?:^|\s)(?:baked|gratin|hot|corn cream|cream sauce)(?:$|\s)/.test(name);
+}
+
+function hasColdCreamMacaroniCue(name: string): boolean {
+  return SALAD_WORD.test(name) || /凍|冷盤|冷食|(?:^|\s)(?:cold|chilled)(?:$|\s)/.test(name);
+}
+
+function hasCreamMacaroniStem(name: string): boolean {
+  if (/(?:^|\s)soup(?:$|\s)|湯/.test(name)) return false;
+  return /忌廉通粉|忌廉通心粉|忌廉汁通粉|忌廉汁通心粉|(?:^|\s)(?:cream|creamy) macaroni(?:$|\s)|macaroni in cream/.test(name);
+}
+
+/** Salad or an explicit cold cue, and no hot/baked/sauce cue. */
+function isColdCreamMacaroni(food: FoodEstimate): boolean {
+  const name = creamMacaroniText(food);
+  return hasCreamMacaroniStem(name) && hasColdCreamMacaroniCue(name) && !hasHotCreamMacaroniCue(name);
+}
+
+/** Plain, hot, baked, or cream-sauce macaroni. Not a completed salad. */
+function isUnspecifiedCreamMacaroni(food: FoodEstimate): boolean {
+  const name = creamMacaroniText(food);
+  if (!hasCreamMacaroniStem(name) || isColdCreamMacaroni(food)) return false;
+  return true;
+}
+
+function isHotCreamMacaroni(food: FoodEstimate): boolean {
+  const name = creamMacaroniText(food);
+  return hasCreamMacaroniStem(name) && hasHotCreamMacaroniCue(name);
+}
+
 function isCreamySalad(food: FoodEstimate): boolean {
   const name = saladSearchName(food);
   if (!SALAD_WORD.test(name)) return false;
@@ -258,6 +303,7 @@ const COMPOSITE_CANONICALS = new Set([
   "protein-vegetable-salad",
   "creamy-salad",
   "dressed-salad",
+  "cream-macaroni",
 ]);
 
 const SIMPLE_RICE_MODIFIERS = [
@@ -530,15 +576,197 @@ function isSimpleRemainder(text: string, modifiers: string[]): boolean {
   return stripTokens(text, [...modifiers, ...preparationTokens]).length === 0;
 }
 
-function plantMilkBlocksWholeMilk(text: string): boolean {
+const DAIRY_MILK_LABELS = [
+  "semi-skimmed milk",
+  "semi skimmed milk",
+  "low-fat milk",
+  "low fat milk",
+  "skimmed milk",
+  "skim milk",
+  "fresh milk",
+  "whole milk",
+  "milk",
+  "脫脂奶",
+  "脱脂奶",
+  "低脂奶",
+  "全脂奶",
+  "鮮奶",
+  "牛奶",
+] as const;
+
+type PlantMilkFood = {
+  displayName: string;
+  normalizedName: string;
+  preparationMethod?: string;
+  notes?: string;
+  visibleIngredients?: readonly string[];
+  uncertaintyReasons?: readonly string[];
+};
+
+function plantMilkProductName(text: string): boolean {
   const rule = NEGATIVE_MATCH_RULES.find((item) => item.id === "plant-milk-not-whole-milk");
   return rule ? ruleMatchesName(rule, text) : false;
 }
 
-function collectIdentityHits(text: string): IdentityHit[] {
+function textHasDairyMilkLabel(text: string): boolean {
+  return DAIRY_MILK_LABELS.some((label) =>
+    textContainsKey(text, label, { skipLongerAliasShadow: true }),
+  );
+}
+
+/** Oat or cereal named with dairy milk is not a plant-milk drink. */
+function isGrainWithDairyMilk(name: string): boolean {
+  const text = normalizeFoodName(name);
+  if (!text || plantMilkProductName(text)) return false;
+  const grain = /燕麥|燕麦|麥片|麦片|粥|(?:^|\s)(?:cereal|oatmeal|porridge)(?:$|\s)/.test(text);
+  return grain && textHasDairyMilkLabel(text);
+}
+
+const ENGLISH_MILK_MODIFIER = "a glass of|a cup of|hot|iced|cold|warm|small|large|medium";
+const CJK_MILK_MODIFIER = "一杯|[熱凍暖大細]";
+
+/**
+ * Temperature and size words may wrap a milk label. 熱牛奶、暖鮮奶、
+ * 一杯牛奶、hot milk、"a cup of milk" and small/large/medium milk are
+ * still milk. Dish words are not modifiers, so 牛奶布甸、奶茶、milk tea
+ * and 牛奶麥片 stay excluded.
+ */
+function milkLabelCore(text: string): string {
+  const leadingEnglish = new RegExp(`^(?:(?:${ENGLISH_MILK_MODIFIER})\\s+)+`);
+  const trailingEnglish = new RegExp(`(?:\\s+(?:${ENGLISH_MILK_MODIFIER}))+$`);
+  const leadingCjk = new RegExp(`^(?:${CJK_MILK_MODIFIER})+`);
+  const trailingCjk = new RegExp(`(?:${CJK_MILK_MODIFIER})+$`);
+  let remaining = text;
+  let previous = "";
+  while (remaining !== previous) {
+    previous = remaining;
+    remaining = remaining
+      .replace(leadingEnglish, "")
+      .replace(leadingCjk, "")
+      .replace(trailingEnglish, "")
+      .replace(trailingCjk, "")
+      .trim();
+  }
+  return remaining;
+}
+
+/**
+ * The food name is a dairy-milk label, not a longer dish that merely
+ * contains the word. 牛奶布甸、奶茶 and 牛奶麥片 are not milk drinks.
+ */
+function dairyMilkLabel(name: string): boolean {
+  const text = normalizeFoodName(name);
+  if (!text || plantMilkProductName(text)) return false;
+  const core = milkLabelCore(text);
+  return DAIRY_MILK_LABELS.some((label) => normalizeFoodName(label) === core);
+}
+
+const LOW_FAT_MILK_LABELS = [
+  "semi-skimmed milk",
+  "semi skimmed milk",
+  "low-fat milk",
+  "low fat milk",
+  "skimmed milk",
+  "skim milk",
+  "脫脂奶",
+  "脱脂奶",
+  "低脂奶",
+] as const;
+
+/** Skim or low-fat milk. 鮮奶 with this evidence stays off the whole-milk profile. */
+function lowFatMilkEvidence(food: PlantMilkFood): boolean {
+  const text = normalizeFoodName(
+    [
+      food.displayName,
+      food.normalizedName,
+      food.preparationMethod ?? "",
+      food.notes ?? "",
+      ...(food.visibleIngredients ?? []),
+      ...(food.uncertaintyReasons ?? []),
+    ].join(" "),
+  );
+  if (/低脂|脫脂|脱脂/.test(text)) return true;
+  return LOW_FAT_MILK_LABELS.some((label) =>
+    textContainsKey(text, label, { skipLongerAliasShadow: true }),
+  );
+}
+
+/**
+ * Grain words inside a porridge or cereal-with-milk name. They are the
+ * grain, not a plant-milk drink. Soy, almond, and explicit plant-milk
+ * product names still count.
+ */
+const GRAIN_NOT_PLANT_MILK_CUES = new Set<string>(["oat", "oats", "燕麥", "燕麦"]);
+
+/** Almond slices and soybeans are ingredients, not almond milk or soy milk. */
+function plantMilkCueText(text: string): string {
+  return text
+    .replace(/杏仁片/g, " ")
+    .replace(/黃豆/g, " ")
+    .replace(/\balmond (?:slices|flakes|slivers)\b/g, " ")
+    .replace(/\bsoy ?beans?\b/g, " ");
+}
+
+/**
+ * Plant-milk evidence on this food. A porridge or cereal-with-milk name
+ * does not count bare oat words: 燕麥 there is a separate grain, not oat milk.
+ */
+function plantMilkEvidence(food: PlantMilkFood): boolean {
+  const text = normalizeFoodName(
+    [
+      food.displayName,
+      food.normalizedName,
+      food.preparationMethod ?? "",
+      food.notes ?? "",
+      ...(food.visibleIngredients ?? []),
+      ...(food.uncertaintyReasons ?? []),
+    ].join(" "),
+  );
+  if (plantMilkProductName(text)) return true;
+  const cueText = plantMilkCueText(text);
+  const grainWithDairy = [food.displayName, food.normalizedName].some((name) => isGrainWithDairyMilk(name));
+  const cues = grainWithDairy
+    ? PLANT_MILK_CONTEXT_CUES.filter((cue) => !GRAIN_NOT_PLANT_MILK_CUES.has(cue))
+    : PLANT_MILK_CONTEXT_CUES;
+  return cues.some((cue) => textContainsKey(cueText, cue, { skipLongerAliasShadow: true }));
+}
+
+function blocksDairyMilkIdentity(food: PlantMilkFood): boolean {
+  const names = normalizeFoodName(`${food.displayName} ${food.normalizedName}`);
+  return plantMilkProductName(names) || plantMilkEvidence(food);
+}
+
+/**
+ * The name is dairy milk, including fresh, skim, and low-fat labels, but
+ * notes, ingredients, or the description say oat, soy, or almond.
+ * Meal-level visibleEvidence is not on the food and is not read here.
+ */
+export function contradictoryDairyMilkLabel(food: PlantMilkFood): boolean {
+  if (dairyMilkLabel(food.displayName) || dairyMilkLabel(food.normalizedName)) {
+    return plantMilkEvidence(food);
+  }
+  // Oat porridge or cereal with milk stays dairy unless the text names a
+  // plant-milk product such as 杏仁奶. Almond slices and soybeans do not.
+  const grainWithDairy = [food.displayName, food.normalizedName].some((name) => isGrainWithDairyMilk(name));
+  if (!grainWithDairy) return false;
+  const text = normalizeFoodName(
+    [
+      food.displayName,
+      food.normalizedName,
+      food.preparationMethod ?? "",
+      food.notes ?? "",
+      ...(food.visibleIngredients ?? []),
+      ...(food.uncertaintyReasons ?? []),
+    ].join(" "),
+  );
+  return plantMilkProductName(text);
+}
+
+function collectIdentityHits(text: string, food: FoodEstimate): IdentityHit[] {
   const hits: IdentityHit[] = [];
+  const blockDairyMilk = blocksDairyMilkIdentity(food) || lowFatMilkEvidence(food);
   for (const rule of IDENTITY_RULES) {
-    if (rule.canonicalName === "milk" && plantMilkBlocksWholeMilk(text)) continue;
+    if (rule.canonicalName === "milk" && blockDairyMilk) continue;
     const matchedKey = findLongestMatch(text, rule.keys, {
       singleCjkKeyMustBeStandalone: true,
     });
@@ -751,7 +979,8 @@ function identityFromDish(
     qualifiers: ["composite"],
     dishId: identity.id,
     familyId: identity.familyId,
-    hasNutritionProfile: identity.nutritionCanonicalName !== null,
+    hasNutritionProfile:
+      identity.nutritionCanonicalName !== null || dishTemplateIsComplete(identity.id),
   };
 }
 
@@ -778,15 +1007,27 @@ export function canonicalizeFood(food: FoodEstimate): CanonicalFoodIdentity {
       qualifiers: ["composite", "ambiguous"],
     };
   }
-  if (curated.status === "matched") {
+  if (
+    curated.status === "matched" &&
+    !(curated.identity.id === "creamy-macaroni-salad" && isHotCreamMacaroni(food))
+  ) {
     return identityFromDish(curated.identity, preparation);
   }
 
-  const identityHits = collectIdentityHits(text);
+  const identityHits = collectIdentityHits(text, food);
   const saladName = saladSearchName(food);
   const dressingRule = SALAD_WORD.test(saladName) ? matchingSaladDressingRule(saladName) : null;
   if (!hasNamedDish(identityHits)) {
-    if (dressingRule?.routeCanonicalName === null) {
+    if (isUnspecifiedCreamMacaroni(food)) {
+      identityHits.push({
+        keys: [],
+        matchedKey: "cream macaroni",
+        canonicalName: "cream-macaroni",
+        category: "mixed",
+        kind: "named_dish",
+        qualifiers: ["composite"],
+      });
+    } else if (dressingRule?.routeCanonicalName === null) {
       identityHits.push({
         keys: [],
         matchedKey: "dressed salad",
@@ -795,7 +1036,7 @@ export function canonicalizeFood(food: FoodEstimate): CanonicalFoodIdentity {
         kind: "named_dish",
         qualifiers: ["composite"],
       });
-    } else if (isCreamySalad(food)) {
+    } else if (isColdCreamMacaroni(food) || isCreamySalad(food)) {
       identityHits.push({
         keys: [],
         matchedKey: "creamy salad",
@@ -836,7 +1077,13 @@ export function canonicalizeFood(food: FoodEstimate): CanonicalFoodIdentity {
 
   let primary: IdentityHit | undefined;
 
-  if (food.identityLevel === "dish") {
+  const grainWithMilk =
+    (isGrainWithDairyMilk(food.displayName) || isGrainWithDairyMilk(food.normalizedName))
+    && !plantMilkEvidence(food);
+  const milkHit = identityHits.find((hit) => hit.canonicalName === "milk");
+  if (food.identityLevel === "dish" && grainWithMilk && milkHit) {
+    primary = milkHit;
+  } else if (food.identityLevel === "dish") {
     primary = hasCurryRiceDish
       ? synthesizedIdentityHit("curry-rice")
       : rankedHits.find((hit) => hit.kind === "named_dish" || hit.kind === "dish_class") ??
@@ -892,6 +1139,11 @@ export function canonicalizeFood(food: FoodEstimate): CanonicalFoodIdentity {
     identified.familyId = "salad";
     identified.hasNutritionProfile = false;
   }
+  if (canonicalName === "cream-macaroni") {
+    identified.dishId = "cream-macaroni";
+    identified.familyId = "pasta";
+    identified.hasNutritionProfile = false;
+  }
   return identified;
 }
 
@@ -914,7 +1166,10 @@ export function profileBlockedByNegativeRule(
       if (isCompositeIdentity(identity) && profile.composite !== true) return true;
       continue;
     }
-    if (!ruleMatchesName(rule, name)) continue;
+    const described = rule.id === "plant-milk-not-whole-milk"
+      ? blocksDairyMilkIdentity(food) || lowFatMilkEvidence(food)
+      : ruleMatchesName(rule, name);
+    if (!described) continue;
     if (
       rule.blockProfileIds.includes(profile.id) ||
       rule.blockCanonicalNames.includes(profile.canonicalName)

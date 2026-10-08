@@ -1,10 +1,16 @@
 import type { FoodEstimate } from "@/lib/domain/food-analysis";
 import {
   canonicalizeFood,
+  contradictoryDairyMilkLabel,
   isCompositeIdentity,
   normalizeFoodName,
   profileBlockedByNegativeRule,
 } from "./canonical";
+import {
+  CREAM_MACARONI_UNCALCULATED_REASON,
+  DRESSED_SALAD_UNCALCULATED_REASON,
+  PLANT_MILK_CONTRADICTION_REASON,
+} from "./negative-rules";
 import {
   COMPOSITE_GENERIC_FALLBACK_REASON,
   isCompatibleNutritionIdentity,
@@ -119,6 +125,21 @@ function scoreProfile(
   return score;
 }
 
+function finishMatch(
+  profile: NutritionProfile,
+  matchType: NutritionMatchType,
+  confidence: NutritionConfidence,
+  reasons: string[],
+): { matchType: NutritionMatchType; confidence: NutritionConfidence; reasons: string[] } {
+  if (!profile.id.startsWith("template:")) return { matchType, confidence, reasons };
+  const { min, max } = profile.nutrientsPer100g.calories;
+  if (confidence === "high" && min > 0 && max / min >= 2) {
+    reasons.push("食譜模板的熱量上限至少是下限的兩倍，因此信心維持中等。");
+    return { matchType, confidence: "medium", reasons };
+  }
+  return { matchType, confidence, reasons };
+}
+
 function classifyMatch(
   identity: CanonicalFoodIdentity,
   profile: NutritionProfile,
@@ -143,10 +164,10 @@ function classifyMatch(
       identity.preparation === "unknown" ||
       preparationCompatible(identity, profile)
     ) {
-      return { matchType: "exact_canonical", confidence: "high", reasons };
+      return finishMatch(profile, "exact_canonical", "high", reasons);
     }
     reasons.push("烹調方法未能完全對應，密度範圍已保留不確定性。");
-    return { matchType: "exact_canonical", confidence: "medium", reasons };
+    return finishMatch(profile, "exact_canonical", "medium", reasons);
   }
 
   if (identity.canonicalName === profile.canonicalName) {
@@ -160,17 +181,18 @@ function classifyMatch(
     }
     if (identity.qualifiers.includes("wholegrain") || identity.preparation === "pan_fried") {
       reasons.push("品種或用油未能由相片確定，因此營養密度使用範圍。");
-      return { matchType: "exact_canonical", confidence: "medium", reasons };
+      return finishMatch(profile, "exact_canonical", "medium", reasons);
     }
-    return {
-      matchType: aliasExact ? "exact_canonical" : "strong_synonym",
-      confidence: "high",
+    return finishMatch(
+      profile,
+      aliasExact ? "exact_canonical" : "strong_synonym",
+      "high",
       reasons,
-    };
+    );
   }
 
   if (isCompositeIdentity(identity) || !isCompatibleNutritionIdentity(identity, profile)) {
-    reasons.push(COMPOSITE_GENERIC_FALLBACK_REASON);
+    reasons.push(compositeUnmatchedReason(identity));
     return { matchType: "unresolved", confidence: "low", reasons };
   }
 
@@ -198,11 +220,30 @@ function unmatched(
   return { ...match, includedInTotal: false, coverageReason };
 }
 
+function compositeUnmatchedReason(identity: CanonicalFoodIdentity): string {
+  if (identity.canonicalName === "dressed-salad" || identity.dishId === "dressed-salad") {
+    return DRESSED_SALAD_UNCALCULATED_REASON;
+  }
+  if (identity.canonicalName === "cream-macaroni" || identity.dishId === "cream-macaroni") {
+    return CREAM_MACARONI_UNCALCULATED_REASON;
+  }
+  return COMPOSITE_GENERIC_FALLBACK_REASON;
+}
+
 export function resolveNutritionMatch(
   food: FoodEstimate,
   catalog: NutritionProfile[],
 ): NutritionMatch {
   const identity = canonicalizeFood(food);
+  if (contradictoryDairyMilkLabel(food)) {
+    return unmatched({
+      profile: null,
+      confidence: "low",
+      matchType: "unresolved",
+      reasons: [PLANT_MILK_CONTRADICTION_REASON],
+      identity,
+    }, "INSUFFICIENT_COVERAGE");
+  }
   if (identity.qualifiers.includes("ambiguous")) {
     return unmatched({
       profile: null,
@@ -237,7 +278,7 @@ export function resolveNutritionMatch(
       profile: null,
       confidence: "low",
       matchType: "unresolved",
-      reasons: [COMPOSITE_GENERIC_FALLBACK_REASON],
+      reasons: [compositeUnmatchedReason(identity)],
       identity,
     }, compositeDishCoverageReason(identity));
   }

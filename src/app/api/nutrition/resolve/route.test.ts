@@ -17,6 +17,7 @@ import { getNutritionApiKey } from "@/lib/server/env";
 import { authenticated, HttpError } from "@/lib/server/auth";
 import { NUTRITION_RATE_LIMIT, clearRateLimitStore } from "@/lib/server/rate-limit";
 import { clearUsdaCache } from "@/lib/nutrition/usda";
+import { PLANT_MILK_CONTRADICTION_REASON } from "@/lib/nutrition/negative-rules";
 import { reserveHourlyUsdaCall } from "@/lib/server/durable-nutrition-quota";
 import { POST } from "./route";
 
@@ -39,7 +40,7 @@ const remoteNames = [
 ];
 
 function remoteFood(name: string) {
-  return { ...banana, displayName: name, normalizedName: name, uncertaintyReasons: [] };
+  return { ...banana, displayName: name, normalizedName: name, uncertaintyReasons: [] as string[] };
 }
 
 function usdaResponse(index: number): Response {
@@ -592,6 +593,96 @@ describe("POST /api/nutrition/resolve", () => {
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: { code: "invalid_request" } });
+  });
+
+  it("skips USDA live lookup for a contradictory dairy label and still looks up other foods", async () => {
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => Response.json({ foods: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const guarded = [
+      { ...remoteFood("牛奶"), displayName: "牛奶", normalizedName: "whole milk", notes: "oat milk" },
+      { ...remoteFood("鮮奶"), displayName: "鮮奶", normalizedName: "fresh milk", notes: "燕麥" },
+      { ...remoteFood("低脂奶"), displayName: "低脂奶", normalizedName: "low-fat milk", visibleIngredients: ["soy milk"] },
+      { ...remoteFood("脫脂奶"), displayName: "脫脂奶", normalizedName: "skim milk", uncertaintyReasons: ["杏仁奶"] },
+    ];
+    const response = await POST(resolveRequest([...guarded, remoteFood("mystery food")]));
+    const body = await response.json();
+    const queries = fetchMock.mock.calls.map((call) =>
+      new URL(String(call[0])).searchParams.get("query") ?? "");
+
+    expect(response.status).toBe(200);
+    expect(queries).toEqual(["mystery food"]);
+    expect(reserveHourlyUsdaCall).toHaveBeenCalledTimes(1);
+    for (const [index, food] of guarded.entries()) {
+      expect(body.matches[index].includedInTotal, food.displayName).toBe(false);
+      expect(body.matches[index].reasons[0], food.displayName).toBe(PLANT_MILK_CONTRADICTION_REASON);
+    }
+    expect(body.matches[4].includedInTotal).toBe(false);
+  });
+
+  it("does not send 熱牛奶 with an oat-milk note to USDA live", async () => {
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => Response.json({ foods: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const hotMilk = {
+      ...remoteFood("熱牛奶"),
+      displayName: "熱牛奶",
+      normalizedName: "hot milk",
+      notes: "燕麥奶",
+    };
+    const response = await POST(resolveRequest([hotMilk, remoteFood("mystery food")]));
+    const body = await response.json();
+    const queries = fetchMock.mock.calls.map((call) =>
+      new URL(String(call[0])).searchParams.get("query") ?? "");
+
+    expect(response.status).toBe(200);
+    expect(queries).toEqual(["mystery food"]);
+    expect(reserveHourlyUsdaCall).toHaveBeenCalledOnce();
+    expect(body.matches[0].includedInTotal).toBe(false);
+    expect(body.matches[0].reasons[0]).toBe(PLANT_MILK_CONTRADICTION_REASON);
+    expect(body.matches[1].includedInTotal).toBe(false);
+  });
+
+  it("resolves 鮮奶 locally and still looks up low-fat milk", async () => {
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => Response.json({ foods: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await POST(resolveRequest([
+      { ...remoteFood("鮮奶"), displayName: "鮮奶", normalizedName: "fresh milk" },
+      { ...remoteFood("低脂奶"), displayName: "低脂奶", normalizedName: "低脂奶" },
+    ]));
+    const body = await response.json();
+    const queries = fetchMock.mock.calls.map((call) =>
+      new URL(String(call[0])).searchParams.get("query") ?? "");
+
+    expect(response.status).toBe(200);
+    expect(queries).toEqual(["低脂奶"]);
+    expect(reserveHourlyUsdaCall).toHaveBeenCalledOnce();
+    expect(body.matches[0].profile.id).toBe("whole-milk");
+    expect(body.matches[0].includedInTotal).toBe(true);
+    expect(body.matches[1].includedInTotal).toBe(false);
+    expect(body.matches[1].profile).toBeNull();
+  });
+
+  it("resolves 鮮奶 locally when no USDA key is configured", async () => {
+    vi.mocked(getNutritionApiKey).mockReturnValue(null);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await POST(resolveRequest([
+      { ...remoteFood("鮮奶"), displayName: "鮮奶", normalizedName: "鮮奶" },
+    ]));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.provider).toBe("kcalcue-reference");
+    expect(body.matches[0].profile.id).toBe("whole-milk");
+    expect(body.matches[0].includedInTotal).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(reserveHourlyUsdaCall).not.toHaveBeenCalled();
   });
 
   it("returns a controlled error for an interrupted input stream", async () => {

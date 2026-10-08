@@ -73,12 +73,13 @@ describe("curated dish identities", () => {
     expect(rice.identity.hasNutritionProfile).toBe(true);
 
     const plate = provider.resolve(food("叉燒碟頭飯", "char siu rice plate"));
-    expect(plate.includedInTotal).toBe(false);
-    expect(plate.profile).toBeNull();
+    expect(plate.includedInTotal).toBe(true);
+    expect(plate.profile?.id).toBe("template:char-siu-rice-plate");
+    expect(plate.profile?.composite).toBe(true);
     expect(plate.identity.dishId).toBe("char-siu-rice-plate");
     expect(plate.identity.familyId).toBe("rice-plate");
-    expect(plate.identity.hasNutritionProfile).toBe(false);
-    expect(plate.coverageReason).toBe("DISH_KNOWN_NO_PROFILE");
+    expect(plate.identity.hasNutritionProfile).toBe(true);
+    expect(plate).not.toHaveProperty("coverageReason");
 
     const englishPlate = provider.resolve(food("char siu rice plate", "char siu rice plate"));
     expect(englishPlate.profile?.id).not.toBe("siu-mei-rice");
@@ -88,13 +89,17 @@ describe("curated dish identities", () => {
   it("does not let a shorter English name override the Chinese dish", () => {
     const plate = provider.resolve(food("叉燒碟頭飯", "char siu rice"));
     expect(plate.identity.dishId).toBe("char-siu-rice-plate");
+    expect(plate.profile?.id).toBe("template:char-siu-rice-plate");
     expect(plate.profile?.id).not.toBe("siu-mei-rice");
-    expect(plate.includedInTotal).toBe(false);
+    expect(plate.profile?.composite).toBe(true);
+    expect(plate.includedInTotal).toBe(true);
 
     const plain = provider.resolve(food("陽春麵", "noodle soup"));
     expect(plain.identity.dishId).toBe("plain-noodle-soup");
+    expect(plain.profile?.id).toBe("template:plain-noodle-soup");
     expect(plain.profile?.id).not.toBe("noodle-soup");
-    expect(plain.includedInTotal).toBe(false);
+    expect(plain.profile?.composite).toBe(true);
+    expect(plain.includedInTotal).toBe(true);
 
     const genericSoup = provider.resolve(food("湯麵", "noodle soup"));
     expect(genericSoup.profile?.id).toBe("noodle-soup");
@@ -119,20 +124,25 @@ describe("curated dish identities", () => {
     expect(match).not.toHaveProperty("coverageReason");
   });
 
-  it("records families for congee, dim sum and macaroni-soup breakfast without adding profiles", () => {
+  it("keeps congee on its existing profile and completes dim sum and macaroni through templates", () => {
     expect(canonicalizeFood(food("白粥", "congee")).hasNutritionProfile).toBe(true);
-    expect(canonicalizeFood(food("燒賣", "siu mai"))).toMatchObject({
+    const siuMai = provider.resolve(food("燒賣", "siu mai"));
+    expect(siuMai.identity).toMatchObject({
       dishId: "siu-mai",
       familyId: "dim-sum",
-      hasNutritionProfile: false,
+      hasNutritionProfile: true,
     });
+    expect(siuMai.profile?.id).toBe("template:siu-mai");
+    expect(siuMai.profile?.composite).toBe(true);
+    expect(siuMai.includedInTotal).toBe(true);
     const macaroni = provider.resolve(food("通粉湯", "macaroni soup"));
     expect(macaroni.identity).toMatchObject({
       dishId: "macaroni-soup-breakfast",
       familyId: "cha-chaan-teng-breakfast",
-      hasNutritionProfile: false,
+      hasNutritionProfile: true,
     });
-    expect(macaroni.includedInTotal).toBe(false);
-    expect(macaroni.coverageReason).toBe("DISH_KNOWN_NO_PROFILE");
+    expect(macaroni.profile?.id).toBe("template:macaroni-soup-breakfast");
+    expect(macaroni.includedInTotal).toBe(true);
+    expect(macaroni).not.toHaveProperty("coverageReason");
   });
 });

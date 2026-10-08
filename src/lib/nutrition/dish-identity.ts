@@ -8,8 +8,8 @@ export interface DishAlias {
 }
 
 /**
- * A curated dish identity. Nutrition numbers stay on existing profiles.
- * `nutritionCanonicalName` is null until a later gate adds a profile.
+ * A curated dish identity. Existing profiles stay on `nutritionCanonicalName`.
+ * N2 recipe templates can complete a dish while leaving that field null.
  */
 export interface DishIdentity {
   id: string;
@@ -446,6 +446,14 @@ export const DISH_IDENTITIES: readonly DishIdentity[] = [
     traditional: ["魚柳薯條"],
     simplified: ["鱼柳薯条"],
     english: ["fish and chips", "fish fillet and fries"],
+  }),
+  dish({
+    id: "creamy-macaroni-salad",
+    familyId: "salad",
+    nutritionCanonicalName: "creamy-salad",
+    traditional: ["通粉沙律"],
+    variant: ["忌廉通粉沙律"],
+    english: ["macaroni salad"],
   }),
   dish({
     id: "char-siu-rice",

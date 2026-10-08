@@ -6,14 +6,14 @@
   "pipeline": "dish identity → canonicalizeFood → resolveNutritionMatch → calculateMealNutrition",
   "network": "none",
   "coverage": {
-    "complete": 1,
+    "complete": 36,
     "partial": 0,
     "insufficient": 0,
-    "none": 64
+    "none": 29
   },
   "reasons": {
     "UNKNOWN_DISH": 0,
-    "DISH_KNOWN_NO_PROFILE": 51,
+    "DISH_KNOWN_NO_PROFILE": 16,
     "COMPOSITE_UNSUPPORTED": 0,
     "TYPE_MISMATCH": 0,
     "UNIT_CONVERSION_MISSING": 0,
@@ -21,9 +21,9 @@
     "INSUFFICIENT_COVERAGE": 13
   },
   "safeCoverageRate": {
-    "numerator": 1,
+    "numerator": 36,
     "denominator": 65,
-    "percent": "1.5%"
+    "percent": "55.4%"
   },
   "falseConfidentMatchRate": {
     "numerator": 0,
@@ -36,9 +36,2734 @@
     "percent": "80.0%"
   },
   "profileCoverage": {
-    "numerator": 1,
+    "numerator": 36,
     "denominator": 65,
-    "percent": "1.5%"
+    "percent": "55.4%"
+  },
+  "pilot": {
+    "gate": "N2",
+    "comparedWith": "Gate N1 / PR #120",
+    "n1": {
+      "safeCoverage": "1/65",
+      "safePercent": "1.5%",
+      "falseConfidentMatch": "0/12",
+      "falseConfidentPercent": "0.0%",
+      "profileCoverage": "1/65",
+      "dishKnownNoProfile": 51,
+      "complete": 1
+    },
+    "families": [
+      {
+        "id": "rice-plate",
+        "title": "碟頭飯／碗頭飯",
+        "selectionReason": "附錄 A 有 16 道，是 52 道菜裡最多的一族，也是香港日常的一碟飯。燒味飯已經有 profile，而且不在這 65 個名稱裡，所以不拿這族去改它。",
+        "benchmarkDishes": 16,
+        "completeBenchmarkDishes": 16,
+        "followUpDishes": 0,
+        "blockedDishes": 0
+      },
+      {
+        "id": "cha-chaan-teng-noodles",
+        "title": "茶餐廳麵",
+        "selectionReason": "附錄 A 有 7 道，與點心並列第二。麵、米線、河粉是茶餐廳午餐。通粉在早餐家族，不在這裡。",
+        "benchmarkDishes": 7,
+        "completeBenchmarkDishes": 7,
+        "followUpDishes": 1,
+        "blockedDishes": 0
+      },
+      {
+        "id": "dim-sum",
+        "title": "點心",
+        "selectionReason": "附錄 A 有 7 道，與茶餐廳麵並列第二。點心是高頻港式食物。",
+        "benchmarkDishes": 7,
+        "completeBenchmarkDishes": 7,
+        "followUpDishes": 0,
+        "blockedDishes": 0
+      },
+      {
+        "id": "cha-chaan-teng-breakfast",
+        "title": "茶餐廳早餐",
+        "selectionReason": "附錄 A 有 3 道，是前三名之後最多的一族。通粉湯也在這族，但不在 65 個名稱裡，模板仍會蓋到它。",
+        "benchmarkDishes": 3,
+        "completeBenchmarkDishes": 3,
+        "followUpDishes": 0,
+        "blockedDishes": 0
+      },
+      {
+        "id": "stir-fried-rice-noodles",
+        "title": "炒河粉／炒米",
+        "selectionReason": "附錄 A 有 2 道，與便當、丼、拌麵、壽司打平。乾炒牛河和星洲炒米比那幾族更常出現在香港日常菜單。便當、火鍋、壽司拼盤的變異更大，這次不做。",
+        "benchmarkDishes": 2,
+        "completeBenchmarkDishes": 2,
+        "followUpDishes": 0,
+        "blockedDishes": 0
+      }
+    ],
+    "familyBenchmarkCounts": [
+      {
+        "familyId": "rice-plate",
+        "benchmarkDishes": 16
+      },
+      {
+        "familyId": "cha-chaan-teng-noodles",
+        "benchmarkDishes": 7
+      },
+      {
+        "familyId": "dim-sum",
+        "benchmarkDishes": 7
+      },
+      {
+        "familyId": "cha-chaan-teng-breakfast",
+        "benchmarkDishes": 3
+      },
+      {
+        "familyId": "bento",
+        "benchmarkDishes": 2
+      },
+      {
+        "familyId": "donburi",
+        "benchmarkDishes": 2
+      },
+      {
+        "familyId": "dressed-noodles",
+        "benchmarkDishes": 2
+      },
+      {
+        "familyId": "stir-fried-rice-noodles",
+        "benchmarkDishes": 2
+      },
+      {
+        "familyId": "sushi",
+        "benchmarkDishes": 2
+      },
+      {
+        "familyId": "bibimbap",
+        "benchmarkDishes": 1
+      },
+      {
+        "familyId": "burger",
+        "benchmarkDishes": 1
+      },
+      {
+        "familyId": "fish-and-chips",
+        "benchmarkDishes": 1
+      },
+      {
+        "familyId": "hotpot",
+        "benchmarkDishes": 1
+      },
+      {
+        "familyId": "pasta",
+        "benchmarkDishes": 1
+      },
+      {
+        "familyId": "ramen",
+        "benchmarkDishes": 1
+      },
+      {
+        "familyId": "sandwich",
+        "benchmarkDishes": 1
+      },
+      {
+        "familyId": "soup",
+        "benchmarkDishes": 1
+      },
+      {
+        "familyId": "wonton-noodle-soup",
+        "benchmarkDishes": 1
+      }
+    ],
+    "dishes": [
+      {
+        "dishId": "rice-plate",
+        "displayName": "碟頭飯",
+        "familyId": "rice-plate",
+        "familyTitle": "碟頭飯／碗頭飯",
+        "inBenchmark": true,
+        "rangeRatio": 2.1427,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 107.2,
+          "max": 229.7
+        },
+        "servingCalories": {
+          "min": 439.7,
+          "max": 941.8
+        },
+        "feasibleGrams": {
+          "min": 360,
+          "max": 460
+        },
+        "components": [
+          {
+            "label": "熟白米",
+            "sourceIds": [
+              "fdc:168878"
+            ],
+            "grams": {
+              "min": 220,
+              "max": 300
+            }
+          },
+          {
+            "label": "餸菜（烚雞到排骨）",
+            "sourceIds": [
+              "fdc:171451",
+              "fdc:167854"
+            ],
+            "grams": {
+              "min": 60,
+              "max": 130
+            }
+          },
+          {
+            "label": "醬（海鮮醬到燒烤醬）",
+            "sourceIds": [
+              "fdc:172886",
+              "fdc:174523"
+            ],
+            "grams": {
+              "min": 6,
+              "max": 16
+            }
+          },
+          {
+            "label": "熟白菜仔",
+            "sourceIds": [
+              "fdc:168517"
+            ],
+            "grams": {
+              "min": 15,
+              "max": 50
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:167668",
+          "sourceName": "Restaurant, Chinese, fried rice, without meat",
+          "kcalPer100g": 174,
+          "insideRange": true,
+          "note": "美國中餐館無肉炒飯，只核對以飯為主的碟的數量級。"
+        }
+      },
+      {
+        "dishId": "char-siu-rice-plate",
+        "displayName": "叉燒碟頭飯",
+        "familyId": "rice-plate",
+        "familyTitle": "碟頭飯／碗頭飯",
+        "inBenchmark": true,
+        "rangeRatio": 1.3166,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 141.5,
+          "max": 186.3
+        },
+        "servingCalories": {
+          "min": 558.9,
+          "max": 735.9
+        },
+        "feasibleGrams": {
+          "min": 360,
+          "max": 430
+        },
+        "components": [
+          {
+            "label": "熟白米",
+            "sourceIds": [
+              "fdc:168878"
+            ],
+            "grams": {
+              "min": 240,
+              "max": 300
+            }
+          },
+          {
+            "label": "烤豬肩",
+            "sourceIds": [
+              "fdc:168257"
+            ],
+            "grams": {
+              "min": 70,
+              "max": 100
+            }
+          },
+          {
+            "label": "海鮮醬",
+            "sourceIds": [
+              "fdc:172886"
+            ],
+            "grams": {
+              "min": 8,
+              "max": 15
+            }
+          },
+          {
+            "label": "熟白菜仔",
+            "sourceIds": [
+              "fdc:168517"
+            ],
+            "grams": {
+              "min": 20,
+              "max": 40
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:167668",
+          "sourceName": "Restaurant, Chinese, fried rice, without meat",
+          "kcalPer100g": 174,
+          "insideRange": true,
+          "note": "美國中餐館無肉炒飯，只核對以飯為主的碟的數量級。"
+        }
+      },
+      {
+        "dishId": "roast-goose-rice",
+        "displayName": "燒鵝飯",
+        "familyId": "rice-plate",
+        "familyTitle": "碟頭飯／碗頭飯",
+        "inBenchmark": true,
+        "rangeRatio": 1.3732,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 137.2,
+          "max": 188.4
+        },
+        "servingCalories": {
+          "min": 548.7,
+          "max": 753.5
+        },
+        "feasibleGrams": {
+          "min": 360,
+          "max": 440
+        },
+        "components": [
+          {
+            "label": "熟白米",
+            "sourceIds": [
+              "fdc:168878"
+            ],
+            "grams": {
+              "min": 240,
+              "max": 300
+            }
+          },
+          {
+            "label": "烤鵝連皮",
+            "sourceIds": [
+              "fdc:172412"
+            ],
+            "grams": {
+              "min": 70,
+              "max": 110
+            }
+          },
+          {
+            "label": "海鮮醬",
+            "sourceIds": [
+              "fdc:172886"
+            ],
+            "grams": {
+              "min": 6,
+              "max": 14
+            }
+          },
+          {
+            "label": "熟白菜仔",
+            "sourceIds": [
+              "fdc:168517"
+            ],
+            "grams": {
+              "min": 20,
+              "max": 40
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:167668",
+          "sourceName": "Restaurant, Chinese, fried rice, without meat",
+          "kcalPer100g": 174,
+          "insideRange": true,
+          "note": "美國中餐館無肉炒飯，只核對以飯為主的碟的數量級。"
+        }
+      },
+      {
+        "dishId": "soy-sauce-chicken-rice",
+        "displayName": "油雞飯",
+        "familyId": "rice-plate",
+        "familyTitle": "碟頭飯／碗頭飯",
+        "inBenchmark": true,
+        "rangeRatio": 1.3281,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 121.3,
+          "max": 161.1
+        },
+        "servingCalories": {
+          "min": 497.3,
+          "max": 660.5
+        },
+        "feasibleGrams": {
+          "min": 370,
+          "max": 450
+        },
+        "components": [
+          {
+            "label": "熟白米",
+            "sourceIds": [
+              "fdc:168878"
+            ],
+            "grams": {
+              "min": 240,
+              "max": 300
+            }
+          },
+          {
+            "label": "烚雞連皮",
+            "sourceIds": [
+              "fdc:171051"
+            ],
+            "grams": {
+              "min": 80,
+              "max": 120
+            }
+          },
+          {
+            "label": "豉油",
+            "sourceIds": [
+              "fdc:174277"
+            ],
+            "grams": {
+              "min": 8,
+              "max": 16
+            }
+          },
+          {
+            "label": "熟白菜仔",
+            "sourceIds": [
+              "fdc:168517"
+            ],
+            "grams": {
+              "min": 20,
+              "max": 40
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:167668",
+          "sourceName": "Restaurant, Chinese, fried rice, without meat",
+          "kcalPer100g": 174,
+          "insideRange": false,
+          "note": "美國中餐館無肉炒飯，只核對以飯為主的碟的數量級。"
+        }
+      },
+      {
+        "dishId": "crispy-roast-pork-rice",
+        "displayName": "脆皮燒肉飯",
+        "familyId": "rice-plate",
+        "familyTitle": "碟頭飯／碗頭飯",
+        "inBenchmark": true,
+        "rangeRatio": 1.4224,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 144.4,
+          "max": 205.4
+        },
+        "servingCalories": {
+          "min": 556.1,
+          "max": 790.7
+        },
+        "feasibleGrams": {
+          "min": 350,
+          "max": 420
+        },
+        "components": [
+          {
+            "label": "熟白米",
+            "sourceIds": [
+              "fdc:168878"
+            ],
+            "grams": {
+              "min": 240,
+              "max": 300
+            }
+          },
+          {
+            "label": "烤豬肩",
+            "sourceIds": [
+              "fdc:168257"
+            ],
+            "grams": {
+              "min": 60,
+              "max": 100
+            }
+          },
+          {
+            "label": "食油",
+            "sourceIds": [
+              "fdc:171411"
+            ],
+            "grams": {
+              "min": 4,
+              "max": 10
+            }
+          },
+          {
+            "label": "熟白菜仔",
+            "sourceIds": [
+              "fdc:168517"
+            ],
+            "grams": {
+              "min": 15,
+              "max": 35
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:167668",
+          "sourceName": "Restaurant, Chinese, fried rice, without meat",
+          "kcalPer100g": 174,
+          "insideRange": true,
+          "note": "美國中餐館無肉炒飯，只核對以飯為主的碟的數量級。"
+        }
+      },
+      {
+        "dishId": "white-cut-chicken-rice",
+        "displayName": "白切雞飯",
+        "familyId": "rice-plate",
+        "familyTitle": "碟頭飯／碗頭飯",
+        "inBenchmark": true,
+        "rangeRatio": 1.3459,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 122,
+          "max": 164.2
+        },
+        "servingCalories": {
+          "min": 494,
+          "max": 665.1
+        },
+        "feasibleGrams": {
+          "min": 370,
+          "max": 440
+        },
+        "components": [
+          {
+            "label": "熟白米",
+            "sourceIds": [
+              "fdc:168878"
+            ],
+            "grams": {
+              "min": 240,
+              "max": 300
+            }
+          },
+          {
+            "label": "烚雞肉",
+            "sourceIds": [
+              "fdc:171451"
+            ],
+            "grams": {
+              "min": 80,
+              "max": 120
+            }
+          },
+          {
+            "label": "食油",
+            "sourceIds": [
+              "fdc:171411"
+            ],
+            "grams": {
+              "min": 3,
+              "max": 8
+            }
+          },
+          {
+            "label": "熟白菜仔",
+            "sourceIds": [
+              "fdc:168517"
+            ],
+            "grams": {
+              "min": 20,
+              "max": 40
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:167668",
+          "sourceName": "Restaurant, Chinese, fried rice, without meat",
+          "kcalPer100g": 174,
+          "insideRange": false,
+          "note": "美國中餐館無肉炒飯，只核對以飯為主的碟的數量級。"
+        }
+      },
+      {
+        "dishId": "hainanese-chicken-rice",
+        "displayName": "海南雞飯",
+        "familyId": "rice-plate",
+        "familyTitle": "碟頭飯／碗頭飯",
+        "inBenchmark": true,
+        "rangeRatio": 1.3224,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 137.1,
+          "max": 181.3
+        },
+        "servingCalories": {
+          "min": 541.6,
+          "max": 716.3
+        },
+        "feasibleGrams": {
+          "min": 360,
+          "max": 430
+        },
+        "components": [
+          {
+            "label": "熟白米",
+            "sourceIds": [
+              "fdc:168878"
+            ],
+            "grams": {
+              "min": 240,
+              "max": 310
+            }
+          },
+          {
+            "label": "烚雞肉",
+            "sourceIds": [
+              "fdc:171451"
+            ],
+            "grams": {
+              "min": 80,
+              "max": 120
+            }
+          },
+          {
+            "label": "食油",
+            "sourceIds": [
+              "fdc:171411"
+            ],
+            "grams": {
+              "min": 6,
+              "max": 14
+            }
+          },
+          {
+            "label": "豉油",
+            "sourceIds": [
+              "fdc:174277"
+            ],
+            "grams": {
+              "min": 6,
+              "max": 12
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:167668",
+          "sourceName": "Restaurant, Chinese, fried rice, without meat",
+          "kcalPer100g": 174,
+          "insideRange": true,
+          "note": "美國中餐館無肉炒飯，只核對以飯為主的碟的數量級。"
+        }
+      },
+      {
+        "dishId": "pork-chop-rice",
+        "displayName": "豬扒飯",
+        "familyId": "rice-plate",
+        "familyTitle": "碟頭飯／碗頭飯",
+        "inBenchmark": true,
+        "rangeRatio": 1.3989,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 139.9,
+          "max": 195.7
+        },
+        "servingCalories": {
+          "min": 587.6,
+          "max": 822
+        },
+        "feasibleGrams": {
+          "min": 380,
+          "max": 460
+        },
+        "components": [
+          {
+            "label": "熟白米",
+            "sourceIds": [
+              "fdc:168878"
+            ],
+            "grams": {
+              "min": 240,
+              "max": 300
+            }
+          },
+          {
+            "label": "煎豬扒",
+            "sourceIds": [
+              "fdc:168292"
+            ],
+            "grams": {
+              "min": 90,
+              "max": 140
+            }
+          },
+          {
+            "label": "食油",
+            "sourceIds": [
+              "fdc:171411"
+            ],
+            "grams": {
+              "min": 5,
+              "max": 12
+            }
+          },
+          {
+            "label": "熟白菜仔",
+            "sourceIds": [
+              "fdc:168517"
+            ],
+            "grams": {
+              "min": 15,
+              "max": 35
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:167668",
+          "sourceName": "Restaurant, Chinese, fried rice, without meat",
+          "kcalPer100g": 174,
+          "insideRange": true,
+          "note": "美國中餐館無肉炒飯，只核對以飯為主的碟的數量級。"
+        }
+      },
+      {
+        "dishId": "chicken-chop-rice",
+        "displayName": "雞扒飯",
+        "familyId": "rice-plate",
+        "familyTitle": "碟頭飯／碗頭飯",
+        "inBenchmark": true,
+        "rangeRatio": 1.373,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 141,
+          "max": 193.6
+        },
+        "servingCalories": {
+          "min": 599.2,
+          "max": 822.6
+        },
+        "feasibleGrams": {
+          "min": 380,
+          "max": 470
+        },
+        "components": [
+          {
+            "label": "熟白米",
+            "sourceIds": [
+              "fdc:168878"
+            ],
+            "grams": {
+              "min": 240,
+              "max": 300
+            }
+          },
+          {
+            "label": "炸雞扒",
+            "sourceIds": [
+              "fdc:171448"
+            ],
+            "grams": {
+              "min": 90,
+              "max": 140
+            }
+          },
+          {
+            "label": "燒烤醬",
+            "sourceIds": [
+              "fdc:174523"
+            ],
+            "grams": {
+              "min": 8,
+              "max": 16
+            }
+          },
+          {
+            "label": "熟白菜仔",
+            "sourceIds": [
+              "fdc:168517"
+            ],
+            "grams": {
+              "min": 15,
+              "max": 35
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:167668",
+          "sourceName": "Restaurant, Chinese, fried rice, without meat",
+          "kcalPer100g": 174,
+          "insideRange": true,
+          "note": "美國中餐館無肉炒飯，只核對以飯為主的碟的數量級。"
+        }
+      },
+      {
+        "dishId": "fried-egg-rice",
+        "displayName": "煎蛋飯",
+        "familyId": "rice-plate",
+        "familyTitle": "碟頭飯／碗頭飯",
+        "inBenchmark": true,
+        "rangeRatio": 1.36,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 128.9,
+          "max": 175.3
+        },
+        "servingCalories": {
+          "min": 464.1,
+          "max": 631.2
+        },
+        "feasibleGrams": {
+          "min": 320,
+          "max": 400
+        },
+        "components": [
+          {
+            "label": "熟白米",
+            "sourceIds": [
+              "fdc:168878"
+            ],
+            "grams": {
+              "min": 240,
+              "max": 320
+            }
+          },
+          {
+            "label": "煎蛋",
+            "sourceIds": [
+              "fdc:173423"
+            ],
+            "grams": {
+              "min": 50,
+              "max": 100
+            }
+          },
+          {
+            "label": "食油",
+            "sourceIds": [
+              "fdc:171411"
+            ],
+            "grams": {
+              "min": 2,
+              "max": 6
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:167668",
+          "sourceName": "Restaurant, Chinese, fried rice, without meat",
+          "kcalPer100g": 174,
+          "insideRange": true,
+          "note": "美國中餐館無肉炒飯，只核對以飯為主的碟的數量級。"
+        }
+      },
+      {
+        "dishId": "mui-choy-pork-rice",
+        "displayName": "梅菜扣肉飯",
+        "familyId": "rice-plate",
+        "familyTitle": "碟頭飯／碗頭飯",
+        "inBenchmark": true,
+        "rangeRatio": 1.3802,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 129.4,
+          "max": 178.6
+        },
+        "servingCalories": {
+          "min": 530.7,
+          "max": 732.3
+        },
+        "feasibleGrams": {
+          "min": 370,
+          "max": 450
+        },
+        "components": [
+          {
+            "label": "熟白米",
+            "sourceIds": [
+              "fdc:168878"
+            ],
+            "grams": {
+              "min": 220,
+              "max": 280
+            }
+          },
+          {
+            "label": "烤豬肩",
+            "sourceIds": [
+              "fdc:168257"
+            ],
+            "grams": {
+              "min": 70,
+              "max": 110
+            }
+          },
+          {
+            "label": "熟芥菜",
+            "sourceIds": [
+              "fdc:170503"
+            ],
+            "grams": {
+              "min": 40,
+              "max": 80
+            }
+          },
+          {
+            "label": "蠔油",
+            "sourceIds": [
+              "fdc:174529"
+            ],
+            "grams": {
+              "min": 8,
+              "max": 16
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:167668",
+          "sourceName": "Restaurant, Chinese, fried rice, without meat",
+          "kcalPer100g": 174,
+          "insideRange": true,
+          "note": "美國中餐館無肉炒飯，只核對以飯為主的碟的數量級。"
+        }
+      },
+      {
+        "dishId": "lu-rou-fan",
+        "displayName": "滷肉飯",
+        "familyId": "rice-plate",
+        "familyTitle": "碟頭飯／碗頭飯",
+        "inBenchmark": true,
+        "rangeRatio": 1.3956,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 139.8,
+          "max": 195.1
+        },
+        "servingCalories": {
+          "min": 440.3,
+          "max": 614.6
+        },
+        "feasibleGrams": {
+          "min": 280,
+          "max": 350
+        },
+        "components": [
+          {
+            "label": "熟白米",
+            "sourceIds": [
+              "fdc:168878"
+            ],
+            "grams": {
+              "min": 200,
+              "max": 260
+            }
+          },
+          {
+            "label": "熟絞肉",
+            "sourceIds": [
+              "fdc:167903"
+            ],
+            "grams": {
+              "min": 50,
+              "max": 90
+            }
+          },
+          {
+            "label": "豉油",
+            "sourceIds": [
+              "fdc:174277"
+            ],
+            "grams": {
+              "min": 8,
+              "max": 16
+            }
+          },
+          {
+            "label": "糖",
+            "sourceIds": [
+              "fdc:169655"
+            ],
+            "grams": {
+              "min": 2,
+              "max": 6
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:167668",
+          "sourceName": "Restaurant, Chinese, fried rice, without meat",
+          "kcalPer100g": 174,
+          "insideRange": true,
+          "note": "美國中餐館無肉炒飯，只核對以飯為主的碟的數量級。"
+        }
+      },
+      {
+        "dishId": "spare-rib-rice",
+        "displayName": "排骨飯",
+        "familyId": "rice-plate",
+        "familyTitle": "碟頭飯／碗頭飯",
+        "inBenchmark": true,
+        "rangeRatio": 1.3932,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 154.9,
+          "max": 215.8
+        },
+        "servingCalories": {
+          "min": 604,
+          "max": 841.7
+        },
+        "feasibleGrams": {
+          "min": 350,
+          "max": 430
+        },
+        "components": [
+          {
+            "label": "熟白米",
+            "sourceIds": [
+              "fdc:168878"
+            ],
+            "grams": {
+              "min": 230,
+              "max": 290
+            }
+          },
+          {
+            "label": "炆排骨",
+            "sourceIds": [
+              "fdc:167854"
+            ],
+            "grams": {
+              "min": 70,
+              "max": 110
+            }
+          },
+          {
+            "label": "燒烤醬",
+            "sourceIds": [
+              "fdc:174523"
+            ],
+            "grams": {
+              "min": 8,
+              "max": 16
+            }
+          },
+          {
+            "label": "熟白菜仔",
+            "sourceIds": [
+              "fdc:168517"
+            ],
+            "grams": {
+              "min": 15,
+              "max": 35
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:167668",
+          "sourceName": "Restaurant, Chinese, fried rice, without meat",
+          "kcalPer100g": 174,
+          "insideRange": true,
+          "note": "美國中餐館無肉炒飯，只核對以飯為主的碟的數量級。"
+        }
+      },
+      {
+        "dishId": "yuxiang-eggplant-rice",
+        "displayName": "魚香茄子飯",
+        "familyId": "rice-plate",
+        "familyTitle": "碟頭飯／碗頭飯",
+        "inBenchmark": true,
+        "rangeRatio": 1.5306,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 108,
+          "max": 165.3
+        },
+        "servingCalories": {
+          "min": 448.1,
+          "max": 685.9
+        },
+        "feasibleGrams": {
+          "min": 370,
+          "max": 460
+        },
+        "components": [
+          {
+            "label": "熟白米",
+            "sourceIds": [
+              "fdc:168878"
+            ],
+            "grams": {
+              "min": 220,
+              "max": 280
+            }
+          },
+          {
+            "label": "熟茄子",
+            "sourceIds": [
+              "fdc:169352"
+            ],
+            "grams": {
+              "min": 80,
+              "max": 140
+            }
+          },
+          {
+            "label": "熟絞肉",
+            "sourceIds": [
+              "fdc:167903"
+            ],
+            "grams": {
+              "min": 20,
+              "max": 45
+            }
+          },
+          {
+            "label": "海鮮醬",
+            "sourceIds": [
+              "fdc:172886"
+            ],
+            "grams": {
+              "min": 10,
+              "max": 20
+            }
+          },
+          {
+            "label": "食油",
+            "sourceIds": [
+              "fdc:171411"
+            ],
+            "grams": {
+              "min": 4,
+              "max": 10
+            }
+          },
+          {
+            "label": "糖",
+            "sourceIds": [
+              "fdc:169655"
+            ],
+            "grams": {
+              "min": 2,
+              "max": 6
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:167668",
+          "sourceName": "Restaurant, Chinese, fried rice, without meat",
+          "kcalPer100g": 174,
+          "insideRange": false,
+          "note": "美國中餐館無肉炒飯，只核對以飯為主的碟的數量級。"
+        }
+      },
+      {
+        "dishId": "mapo-tofu-rice",
+        "displayName": "麻婆豆腐飯",
+        "familyId": "rice-plate",
+        "familyTitle": "碟頭飯／碗頭飯",
+        "inBenchmark": true,
+        "rangeRatio": 1.3678,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 138.4,
+          "max": 189.3
+        },
+        "servingCalories": {
+          "min": 601.9,
+          "max": 823.3
+        },
+        "feasibleGrams": {
+          "min": 390,
+          "max": 480
+        },
+        "components": [
+          {
+            "label": "熟白米",
+            "sourceIds": [
+              "fdc:168878"
+            ],
+            "grams": {
+              "min": 220,
+              "max": 280
+            }
+          },
+          {
+            "label": "硬豆腐",
+            "sourceIds": [
+              "fdc:172475"
+            ],
+            "grams": {
+              "min": 100,
+              "max": 160
+            }
+          },
+          {
+            "label": "熟絞肉",
+            "sourceIds": [
+              "fdc:167903"
+            ],
+            "grams": {
+              "min": 25,
+              "max": 50
+            }
+          },
+          {
+            "label": "海鮮醬",
+            "sourceIds": [
+              "fdc:172886"
+            ],
+            "grams": {
+              "min": 10,
+              "max": 20
+            }
+          },
+          {
+            "label": "食油",
+            "sourceIds": [
+              "fdc:171411"
+            ],
+            "grams": {
+              "min": 4,
+              "max": 10
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:167668",
+          "sourceName": "Restaurant, Chinese, fried rice, without meat",
+          "kcalPer100g": 174,
+          "insideRange": true,
+          "note": "美國中餐館無肉炒飯，只核對以飯為主的碟的數量級。"
+        }
+      },
+      {
+        "dishId": "beef-rice",
+        "displayName": "牛肉飯",
+        "familyId": "rice-plate",
+        "familyTitle": "碟頭飯／碗頭飯",
+        "inBenchmark": true,
+        "rangeRatio": 1.3772,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 135.2,
+          "max": 186.2
+        },
+        "servingCalories": {
+          "min": 527.2,
+          "max": 726.3
+        },
+        "feasibleGrams": {
+          "min": 350,
+          "max": 430
+        },
+        "components": [
+          {
+            "label": "熟白米",
+            "sourceIds": [
+              "fdc:168878"
+            ],
+            "grams": {
+              "min": 230,
+              "max": 290
+            }
+          },
+          {
+            "label": "炆牛肩",
+            "sourceIds": [
+              "fdc:168669"
+            ],
+            "grams": {
+              "min": 70,
+              "max": 110
+            }
+          },
+          {
+            "label": "蠔油",
+            "sourceIds": [
+              "fdc:174529"
+            ],
+            "grams": {
+              "min": 8,
+              "max": 16
+            }
+          },
+          {
+            "label": "熟白菜仔",
+            "sourceIds": [
+              "fdc:168517"
+            ],
+            "grams": {
+              "min": 15,
+              "max": 35
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:167668",
+          "sourceName": "Restaurant, Chinese, fried rice, without meat",
+          "kcalPer100g": 174,
+          "insideRange": true,
+          "note": "美國中餐館無肉炒飯，只核對以飯為主的碟的數量級。"
+        }
+      },
+      {
+        "dishId": "plain-noodle-soup",
+        "displayName": "陽春麵",
+        "familyId": "cha-chaan-teng-noodles",
+        "familyTitle": "茶餐廳麵",
+        "inBenchmark": true,
+        "rangeRatio": 1.6063,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 38.1,
+          "max": 61.2
+        },
+        "servingCalories": {
+          "min": 236,
+          "max": 379.2
+        },
+        "feasibleGrams": {
+          "min": 540,
+          "max": 700
+        },
+        "components": [
+          {
+            "label": "熟蛋麵",
+            "sourceIds": [
+              "fdc:169732"
+            ],
+            "grams": {
+              "min": 140,
+              "max": 200
+            }
+          },
+          {
+            "label": "雞湯",
+            "sourceIds": [
+              "fdc:174536"
+            ],
+            "grams": {
+              "min": 350,
+              "max": 500
+            }
+          },
+          {
+            "label": "食油",
+            "sourceIds": [
+              "fdc:171411"
+            ],
+            "grams": {
+              "min": 2,
+              "max": 8
+            }
+          },
+          {
+            "label": "熟白菜仔",
+            "sourceIds": [
+              "fdc:168517"
+            ],
+            "grams": {
+              "min": 20,
+              "max": 50
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:171148",
+          "sourceName": "Soup, chunky chicken noodle, canned, ready-to-serve",
+          "kcalPer100g": 41,
+          "insideRange": true,
+          "note": "美國罐裝塊粒雞麵湯比茶餐廳一碗麵更稀，用來核對連湯麵的下限。"
+        }
+      },
+      {
+        "dishId": "cart-noodles",
+        "displayName": "車仔麵",
+        "familyId": "cha-chaan-teng-noodles",
+        "familyTitle": "茶餐廳麵",
+        "inBenchmark": true,
+        "rangeRatio": 2.5769,
+        "needsFollowUp": true,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 46.8,
+          "max": 120.6
+        },
+        "servingCalories": {
+          "min": 285.2,
+          "max": 735.8
+        },
+        "feasibleGrams": {
+          "min": 540,
+          "max": 680
+        },
+        "components": [
+          {
+            "label": "熟蛋麵",
+            "sourceIds": [
+              "fdc:169732"
+            ],
+            "grams": {
+              "min": 150,
+              "max": 200
+            }
+          },
+          {
+            "label": "雞湯",
+            "sourceIds": [
+              "fdc:174536"
+            ],
+            "grams": {
+              "min": 280,
+              "max": 400
+            }
+          },
+          {
+            "label": "配料（熟蝦到午餐肉）",
+            "sourceIds": [
+              "fdc:175180",
+              "fdc:174571"
+            ],
+            "grams": {
+              "min": 40,
+              "max": 110
+            }
+          },
+          {
+            "label": "食油",
+            "sourceIds": [
+              "fdc:171411"
+            ],
+            "grams": {
+              "min": 2,
+              "max": 8
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:168083",
+          "sourceName": "Restaurant, Chinese, chicken chow mein",
+          "kcalPer100g": 85,
+          "insideRange": true,
+          "note": "美國中餐館雞炒麵不是湯麵，只核對有麵有肉的數量級。"
+        }
+      },
+      {
+        "dishId": "beef-brisket-noodles",
+        "displayName": "牛腩麵",
+        "familyId": "cha-chaan-teng-noodles",
+        "familyTitle": "茶餐廳麵",
+        "inBenchmark": true,
+        "rangeRatio": 1.6144,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 68.2,
+          "max": 110.1
+        },
+        "servingCalories": {
+          "min": 429.8,
+          "max": 693.6
+        },
+        "feasibleGrams": {
+          "min": 540,
+          "max": 720
+        },
+        "components": [
+          {
+            "label": "熟蛋麵",
+            "sourceIds": [
+              "fdc:169732"
+            ],
+            "grams": {
+              "min": 150,
+              "max": 210
+            }
+          },
+          {
+            "label": "雞湯",
+            "sourceIds": [
+              "fdc:174536"
+            ],
+            "grams": {
+              "min": 300,
+              "max": 450
+            }
+          },
+          {
+            "label": "炆牛肩",
+            "sourceIds": [
+              "fdc:168669"
+            ],
+            "grams": {
+              "min": 60,
+              "max": 100
+            }
+          },
+          {
+            "label": "食油",
+            "sourceIds": [
+              "fdc:171411"
+            ],
+            "grams": {
+              "min": 2,
+              "max": 8
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:168083",
+          "sourceName": "Restaurant, Chinese, chicken chow mein",
+          "kcalPer100g": 85,
+          "insideRange": true,
+          "note": "美國中餐館雞炒麵不是湯麵，只核對有麵有肉的數量級。"
+        }
+      },
+      {
+        "dishId": "luncheon-meat-egg-noodles",
+        "displayName": "餐蛋麵",
+        "familyId": "cha-chaan-teng-noodles",
+        "familyTitle": "茶餐廳麵",
+        "inBenchmark": true,
+        "rangeRatio": 1.6579,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 68.1,
+          "max": 112.9
+        },
+        "servingCalories": {
+          "min": 422.4,
+          "max": 700.2
+        },
+        "feasibleGrams": {
+          "min": 540,
+          "max": 700
+        },
+        "components": [
+          {
+            "label": "熟蛋麵",
+            "sourceIds": [
+              "fdc:169732"
+            ],
+            "grams": {
+              "min": 150,
+              "max": 210
+            }
+          },
+          {
+            "label": "雞湯",
+            "sourceIds": [
+              "fdc:174536"
+            ],
+            "grams": {
+              "min": 280,
+              "max": 420
+            }
+          },
+          {
+            "label": "午餐肉",
+            "sourceIds": [
+              "fdc:174571"
+            ],
+            "grams": {
+              "min": 30,
+              "max": 60
+            }
+          },
+          {
+            "label": "煎蛋",
+            "sourceIds": [
+              "fdc:173423"
+            ],
+            "grams": {
+              "min": 40,
+              "max": 60
+            }
+          },
+          {
+            "label": "食油",
+            "sourceIds": [
+              "fdc:171411"
+            ],
+            "grams": {
+              "min": 2,
+              "max": 8
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:168083",
+          "sourceName": "Restaurant, Chinese, chicken chow mein",
+          "kcalPer100g": 85,
+          "insideRange": true,
+          "note": "美國中餐館雞炒麵不是湯麵，只核對有麵有肉的數量級。"
+        }
+      },
+      {
+        "dishId": "beef-noodle-soup",
+        "displayName": "牛肉麵",
+        "familyId": "cha-chaan-teng-noodles",
+        "familyTitle": "茶餐廳麵",
+        "inBenchmark": true,
+        "rangeRatio": 1.7039,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 64.5,
+          "max": 109.9
+        },
+        "servingCalories": {
+          "min": 409.4,
+          "max": 697.7
+        },
+        "feasibleGrams": {
+          "min": 540,
+          "max": 730
+        },
+        "components": [
+          {
+            "label": "熟蛋麵",
+            "sourceIds": [
+              "fdc:169732"
+            ],
+            "grams": {
+              "min": 150,
+              "max": 220
+            }
+          },
+          {
+            "label": "雞湯",
+            "sourceIds": [
+              "fdc:174536"
+            ],
+            "grams": {
+              "min": 280,
+              "max": 420
+            }
+          },
+          {
+            "label": "炆牛肩",
+            "sourceIds": [
+              "fdc:168669"
+            ],
+            "grams": {
+              "min": 50,
+              "max": 90
+            }
+          },
+          {
+            "label": "食油",
+            "sourceIds": [
+              "fdc:171411"
+            ],
+            "grams": {
+              "min": 3,
+              "max": 10
+            }
+          },
+          {
+            "label": "熟白菜仔",
+            "sourceIds": [
+              "fdc:168517"
+            ],
+            "grams": {
+              "min": 20,
+              "max": 50
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:168083",
+          "sourceName": "Restaurant, Chinese, chicken chow mein",
+          "kcalPer100g": 85,
+          "insideRange": true,
+          "note": "美國中餐館雞炒麵不是湯麵，只核對有麵有肉的數量級。"
+        }
+      },
+      {
+        "dishId": "rice-vermicelli",
+        "displayName": "米線",
+        "familyId": "cha-chaan-teng-noodles",
+        "familyTitle": "茶餐廳麵",
+        "inBenchmark": true,
+        "rangeRatio": 1.6727,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 33.3,
+          "max": 55.7
+        },
+        "servingCalories": {
+          "min": 203,
+          "max": 339.6
+        },
+        "feasibleGrams": {
+          "min": 520,
+          "max": 700
+        },
+        "components": [
+          {
+            "label": "熟米粉",
+            "sourceIds": [
+              "fdc:168914"
+            ],
+            "grams": {
+              "min": 150,
+              "max": 220
+            }
+          },
+          {
+            "label": "雞湯",
+            "sourceIds": [
+              "fdc:174536"
+            ],
+            "grams": {
+              "min": 300,
+              "max": 460
+            }
+          },
+          {
+            "label": "食油",
+            "sourceIds": [
+              "fdc:171411"
+            ],
+            "grams": {
+              "min": 2,
+              "max": 8
+            }
+          },
+          {
+            "label": "熟白菜仔",
+            "sourceIds": [
+              "fdc:168517"
+            ],
+            "grams": {
+              "min": 20,
+              "max": 50
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:171148",
+          "sourceName": "Soup, chunky chicken noodle, canned, ready-to-serve",
+          "kcalPer100g": 41,
+          "insideRange": true,
+          "note": "美國罐裝塊粒雞麵湯比茶餐廳一碗麵更稀，用來核對連湯麵的下限。"
+        }
+      },
+      {
+        "dishId": "ho-fun",
+        "displayName": "河粉",
+        "familyId": "cha-chaan-teng-noodles",
+        "familyTitle": "茶餐廳麵",
+        "inBenchmark": true,
+        "rangeRatio": 1.6936,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 35.9,
+          "max": 60.8
+        },
+        "servingCalories": {
+          "min": 212,
+          "max": 358.8
+        },
+        "feasibleGrams": {
+          "min": 500,
+          "max": 680
+        },
+        "components": [
+          {
+            "label": "熟河粉",
+            "sourceIds": [
+              "fdc:168914"
+            ],
+            "grams": {
+              "min": 160,
+              "max": 240
+            }
+          },
+          {
+            "label": "雞湯",
+            "sourceIds": [
+              "fdc:174536"
+            ],
+            "grams": {
+              "min": 280,
+              "max": 440
+            }
+          },
+          {
+            "label": "食油",
+            "sourceIds": [
+              "fdc:171411"
+            ],
+            "grams": {
+              "min": 2,
+              "max": 8
+            }
+          },
+          {
+            "label": "熟白菜仔",
+            "sourceIds": [
+              "fdc:168517"
+            ],
+            "grams": {
+              "min": 20,
+              "max": 50
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:171148",
+          "sourceName": "Soup, chunky chicken noodle, canned, ready-to-serve",
+          "kcalPer100g": 41,
+          "insideRange": true,
+          "note": "美國罐裝塊粒雞麵湯比茶餐廳一碗麵更稀，用來核對連湯麵的下限。"
+        }
+      },
+      {
+        "dishId": "char-siu-bao",
+        "displayName": "叉燒包",
+        "familyId": "dim-sum",
+        "familyTitle": "點心",
+        "inBenchmark": true,
+        "rangeRatio": 1.36,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 260,
+          "max": 353.6
+        },
+        "servingCalories": {
+          "min": 227.5,
+          "max": 309.4
+        },
+        "feasibleGrams": {
+          "min": 75,
+          "max": 100
+        },
+        "components": [
+          {
+            "label": "餐包",
+            "sourceIds": [
+              "fdc:172793"
+            ],
+            "grams": {
+              "min": 50,
+              "max": 70
+            }
+          },
+          {
+            "label": "烤豬肩",
+            "sourceIds": [
+              "fdc:168257"
+            ],
+            "grams": {
+              "min": 18,
+              "max": 30
+            }
+          },
+          {
+            "label": "海鮮醬",
+            "sourceIds": [
+              "fdc:172886"
+            ],
+            "grams": {
+              "min": 3,
+              "max": 7
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:172793",
+          "sourceName": "Rolls, dinner, plain, commercially prepared",
+          "kcalPer100g": 310,
+          "insideRange": true,
+          "note": "市售餐包是皮包絡的對照，叉燒包還有肉餡。"
+        }
+      },
+      {
+        "dishId": "egg-tart",
+        "displayName": "蛋撻",
+        "familyId": "dim-sum",
+        "familyTitle": "點心",
+        "inBenchmark": true,
+        "rangeRatio": 1.6286,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 185,
+          "max": 301.3
+        },
+        "servingCalories": {
+          "min": 140.6,
+          "max": 229
+        },
+        "feasibleGrams": {
+          "min": 62,
+          "max": 90
+        },
+        "components": [
+          {
+            "label": "烤批皮",
+            "sourceIds": [
+              "fdc:175026"
+            ],
+            "grams": {
+              "min": 18,
+              "max": 32
+            }
+          },
+          {
+            "label": "焗蛋奶醬",
+            "sourceIds": [
+              "fdc:169595"
+            ],
+            "grams": {
+              "min": 40,
+              "max": 65
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:172783",
+          "sourceName": "Pie, egg custard, commercially prepared",
+          "kcalPer100g": 210,
+          "insideRange": true,
+          "note": "市售蛋奶批比港式蛋撻更多餡、更少酥皮。"
+        }
+      },
+      {
+        "dishId": "sticky-rice-chicken",
+        "displayName": "糯米雞",
+        "familyId": "dim-sum",
+        "familyTitle": "點心",
+        "inBenchmark": true,
+        "rangeRatio": 1.489,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 104.9,
+          "max": 156.2
+        },
+        "servingCalories": {
+          "min": 194,
+          "max": 289
+        },
+        "feasibleGrams": {
+          "min": 160,
+          "max": 210
+        },
+        "components": [
+          {
+            "label": "熟糯米",
+            "sourceIds": [
+              "fdc:169711"
+            ],
+            "grams": {
+              "min": 110,
+              "max": 150
+            }
+          },
+          {
+            "label": "烤雞連皮",
+            "sourceIds": [
+              "fdc:171450"
+            ],
+            "grams": {
+              "min": 20,
+              "max": 40
+            }
+          },
+          {
+            "label": "煙腸",
+            "sourceIds": [
+              "fdc:174584"
+            ],
+            "grams": {
+              "min": 8,
+              "max": 15
+            }
+          },
+          {
+            "label": "熟冬菇",
+            "sourceIds": [
+              "fdc:170097"
+            ],
+            "grams": {
+              "min": 8,
+              "max": 16
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:169711",
+          "sourceName": "Rice, white, glutinous, unenriched, cooked",
+          "kcalPer100g": 97,
+          "insideRange": false,
+          "note": "熟糯米是主料對照。加了雞和腸之後，整份應高於淨糯米。"
+        }
+      },
+      {
+        "dishId": "siu-mai",
+        "displayName": "燒賣",
+        "familyId": "dim-sum",
+        "familyTitle": "點心",
+        "inBenchmark": true,
+        "rangeRatio": 1.5007,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 207.1,
+          "max": 310.8
+        },
+        "servingCalories": {
+          "min": 78.7,
+          "max": 118.1
+        },
+        "feasibleGrams": {
+          "min": 32,
+          "max": 44
+        },
+        "components": [
+          {
+            "label": "雲吞皮",
+            "sourceIds": [
+              "fdc:172802"
+            ],
+            "grams": {
+              "min": 8,
+              "max": 12
+            }
+          },
+          {
+            "label": "熟絞肉",
+            "sourceIds": [
+              "fdc:167903"
+            ],
+            "grams": {
+              "min": 16,
+              "max": 26
+            }
+          },
+          {
+            "label": "熟蝦",
+            "sourceIds": [
+              "fdc:175180"
+            ],
+            "grams": {
+              "min": 4,
+              "max": 10
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:169773",
+          "sourceName": "Potsticker or wonton, pork and vegetable, frozen, unprepared",
+          "kcalPer100g": 136,
+          "insideRange": false,
+          "note": "急凍豬肉菜鍋貼比燒賣更多菜、更少肉。"
+        }
+      },
+      {
+        "dishId": "har-gow",
+        "displayName": "蝦餃",
+        "familyId": "dim-sum",
+        "familyTitle": "點心",
+        "inBenchmark": true,
+        "rangeRatio": 1.5986,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 130.3,
+          "max": 208.3
+        },
+        "servingCalories": {
+          "min": 39.1,
+          "max": 62.5
+        },
+        "feasibleGrams": {
+          "min": 24,
+          "max": 36
+        },
+        "components": [
+          {
+            "label": "雲吞皮",
+            "sourceIds": [
+              "fdc:172802"
+            ],
+            "grams": {
+              "min": 8,
+              "max": 14
+            }
+          },
+          {
+            "label": "熟蝦",
+            "sourceIds": [
+              "fdc:175180"
+            ],
+            "grams": {
+              "min": 14,
+              "max": 24
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:169773",
+          "sourceName": "Potsticker or wonton, pork and vegetable, frozen, unprepared",
+          "kcalPer100g": 136,
+          "insideRange": true,
+          "note": "急凍豬肉菜鍋貼不是蝦餃，只核對餃子的數量級。"
+        }
+      },
+      {
+        "dishId": "xiaolongbao",
+        "displayName": "小籠包",
+        "familyId": "dim-sum",
+        "familyTitle": "點心",
+        "inBenchmark": true,
+        "rangeRatio": 1.6124,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 175.2,
+          "max": 282.5
+        },
+        "servingCalories": {
+          "min": 77.1,
+          "max": 124.3
+        },
+        "feasibleGrams": {
+          "min": 36,
+          "max": 52
+        },
+        "components": [
+          {
+            "label": "雲吞皮",
+            "sourceIds": [
+              "fdc:172802"
+            ],
+            "grams": {
+              "min": 12,
+              "max": 18
+            }
+          },
+          {
+            "label": "熟絞肉",
+            "sourceIds": [
+              "fdc:167903"
+            ],
+            "grams": {
+              "min": 14,
+              "max": 24
+            }
+          },
+          {
+            "label": "雞湯",
+            "sourceIds": [
+              "fdc:174536"
+            ],
+            "grams": {
+              "min": 6,
+              "max": 14
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:169773",
+          "sourceName": "Potsticker or wonton, pork and vegetable, frozen, unprepared",
+          "kcalPer100g": 136,
+          "insideRange": false,
+          "note": "急凍豬肉菜鍋貼沒有小籠包的湯汁。"
+        }
+      },
+      {
+        "dishId": "spring-roll",
+        "displayName": "春捲",
+        "familyId": "dim-sum",
+        "familyTitle": "點心",
+        "inBenchmark": true,
+        "rangeRatio": 1.9854,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 185.3,
+          "max": 367.9
+        },
+        "servingCalories": {
+          "min": 98.2,
+          "max": 195
+        },
+        "feasibleGrams": {
+          "min": 42,
+          "max": 64
+        },
+        "components": [
+          {
+            "label": "雲吞皮",
+            "sourceIds": [
+              "fdc:172802"
+            ],
+            "grams": {
+              "min": 12,
+              "max": 22
+            }
+          },
+          {
+            "label": "熟椰菜",
+            "sourceIds": [
+              "fdc:168514"
+            ],
+            "grams": {
+              "min": 12,
+              "max": 25
+            }
+          },
+          {
+            "label": "熟絞肉",
+            "sourceIds": [
+              "fdc:167903"
+            ],
+            "grams": {
+              "min": 8,
+              "max": 16
+            }
+          },
+          {
+            "label": "食油",
+            "sourceIds": [
+              "fdc:171411"
+            ],
+            "grams": {
+              "min": 4,
+              "max": 9
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:167667",
+          "sourceName": "Restaurant, Chinese, egg rolls, assorted",
+          "kcalPer100g": 250,
+          "insideRange": true,
+          "note": "美國中餐館雜錦蛋卷。"
+        }
+      },
+      {
+        "dishId": "hong-kong-french-toast",
+        "displayName": "西多士",
+        "familyId": "cha-chaan-teng-breakfast",
+        "familyTitle": "茶餐廳早餐",
+        "inBenchmark": true,
+        "rangeRatio": 1.5128,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 223.5,
+          "max": 338.1
+        },
+        "servingCalories": {
+          "min": 318.5,
+          "max": 481.8
+        },
+        "feasibleGrams": {
+          "min": 120,
+          "max": 165
+        },
+        "components": [
+          {
+            "label": "白方包",
+            "sourceIds": [
+              "fdc:174924"
+            ],
+            "grams": {
+              "min": 60,
+              "max": 90
+            }
+          },
+          {
+            "label": "煎蛋",
+            "sourceIds": [
+              "fdc:173423"
+            ],
+            "grams": {
+              "min": 40,
+              "max": 55
+            }
+          },
+          {
+            "label": "牛油",
+            "sourceIds": [
+              "fdc:173430"
+            ],
+            "grams": {
+              "min": 6,
+              "max": 14
+            }
+          },
+          {
+            "label": "甜煉奶",
+            "sourceIds": [
+              "fdc:171275"
+            ],
+            "grams": {
+              "min": 8,
+              "max": 18
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:174998",
+          "sourceName": "French toast, prepared from recipe, made with low fat (2%) milk",
+          "kcalPer100g": 229,
+          "insideRange": true,
+          "note": "USDA 法式吐司用低脂奶、沒有煉奶，應靠近這條範圍的下限。"
+        }
+      },
+      {
+        "dishId": "pineapple-bun",
+        "displayName": "菠蘿包",
+        "familyId": "cha-chaan-teng-breakfast",
+        "familyTitle": "茶餐廳早餐",
+        "inBenchmark": true,
+        "rangeRatio": 1.4847,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 278.3,
+          "max": 413.2
+        },
+        "servingCalories": {
+          "min": 233.8,
+          "max": 347.1
+        },
+        "feasibleGrams": {
+          "min": 70,
+          "max": 98
+        },
+        "components": [
+          {
+            "label": "餐包",
+            "sourceIds": [
+              "fdc:172793"
+            ],
+            "grams": {
+              "min": 55,
+              "max": 80
+            }
+          },
+          {
+            "label": "糖",
+            "sourceIds": [
+              "fdc:169655"
+            ],
+            "grams": {
+              "min": 6,
+              "max": 14
+            }
+          },
+          {
+            "label": "牛油",
+            "sourceIds": [
+              "fdc:173430"
+            ],
+            "grams": {
+              "min": 3,
+              "max": 8
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:175034",
+          "sourceName": "Sweet rolls, cinnamon, commercially prepared with raisins",
+          "kcalPer100g": 372,
+          "insideRange": true,
+          "note": "市售肉桂甜包用來核對甜麵包的數量級。"
+        }
+      },
+      {
+        "dishId": "sausage-and-egg",
+        "displayName": "腸仔蛋",
+        "familyId": "cha-chaan-teng-breakfast",
+        "familyTitle": "茶餐廳早餐",
+        "inBenchmark": true,
+        "rangeRatio": 1.4717,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 208.4,
+          "max": 306.7
+        },
+        "servingCalories": {
+          "min": 229.2,
+          "max": 337.4
+        },
+        "feasibleGrams": {
+          "min": 95,
+          "max": 125
+        },
+        "components": [
+          {
+            "label": "豬肉腸",
+            "sourceIds": [
+              "fdc:172964"
+            ],
+            "grams": {
+              "min": 40,
+              "max": 70
+            }
+          },
+          {
+            "label": "煎蛋",
+            "sourceIds": [
+              "fdc:173423"
+            ],
+            "grams": {
+              "min": 45,
+              "max": 60
+            }
+          },
+          {
+            "label": "食油",
+            "sourceIds": [
+              "fdc:171411"
+            ],
+            "grams": {
+              "min": 2,
+              "max": 6
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:172964",
+          "sourceName": "Frankfurter, pork",
+          "kcalPer100g": 269,
+          "insideRange": true,
+          "note": "豬肉腸是這碟的主料。加蛋之後整份密度應蓋過或接近腸本身。"
+        }
+      },
+      {
+        "dishId": "macaroni-soup-breakfast",
+        "displayName": "通粉湯",
+        "familyId": "cha-chaan-teng-breakfast",
+        "familyTitle": "茶餐廳早餐",
+        "inBenchmark": false,
+        "rangeRatio": 1.8217,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 46,
+          "max": 83.8
+        },
+        "servingCalories": {
+          "min": 190.9,
+          "max": 347.8
+        },
+        "feasibleGrams": {
+          "min": 350,
+          "max": 480
+        },
+        "components": [
+          {
+            "label": "熟通粉",
+            "sourceIds": [
+              "fdc:169737"
+            ],
+            "grams": {
+              "min": 80,
+              "max": 140
+            }
+          },
+          {
+            "label": "火腿",
+            "sourceIds": [
+              "fdc:173864"
+            ],
+            "grams": {
+              "min": 25,
+              "max": 45
+            }
+          },
+          {
+            "label": "雞湯",
+            "sourceIds": [
+              "fdc:174536"
+            ],
+            "grams": {
+              "min": 220,
+              "max": 340
+            }
+          },
+          {
+            "label": "食油",
+            "sourceIds": [
+              "fdc:171411"
+            ],
+            "grams": {
+              "min": 1,
+              "max": 4
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:171148",
+          "sourceName": "Soup, chunky chicken noodle, canned, ready-to-serve",
+          "kcalPer100g": 41,
+          "insideRange": false,
+          "note": "美國罐裝塊粒雞麵湯比火腿通粉更稀。"
+        }
+      },
+      {
+        "dishId": "dry-fried-beef-ho-fun",
+        "displayName": "乾炒牛河",
+        "familyId": "stir-fried-rice-noodles",
+        "familyTitle": "炒河粉／炒米",
+        "inBenchmark": true,
+        "rangeRatio": 1.5496,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 115,
+          "max": 178.2
+        },
+        "servingCalories": {
+          "min": 390.9,
+          "max": 605.9
+        },
+        "feasibleGrams": {
+          "min": 290,
+          "max": 390
+        },
+        "components": [
+          {
+            "label": "熟河粉",
+            "sourceIds": [
+              "fdc:168914"
+            ],
+            "grams": {
+              "min": 180,
+              "max": 240
+            }
+          },
+          {
+            "label": "瘦炆牛肉",
+            "sourceIds": [
+              "fdc:171817"
+            ],
+            "grams": {
+              "min": 50,
+              "max": 85
+            }
+          },
+          {
+            "label": "食油",
+            "sourceIds": [
+              "fdc:171411"
+            ],
+            "grams": {
+              "min": 8,
+              "max": 16
+            }
+          },
+          {
+            "label": "豉油",
+            "sourceIds": [
+              "fdc:174277"
+            ],
+            "grams": {
+              "min": 6,
+              "max": 12
+            }
+          },
+          {
+            "label": "熟椰菜",
+            "sourceIds": [
+              "fdc:168514"
+            ],
+            "grams": {
+              "min": 30,
+              "max": 60
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:167677",
+          "sourceName": "Restaurant, Chinese, vegetable lo mein, without meat",
+          "kcalPer100g": 121,
+          "insideRange": true,
+          "note": "美國中餐館素菜撈麵沒有牛肉，用來核對炒粉麵的數量級。"
+        }
+      },
+      {
+        "dishId": "singapore-fried-vermicelli",
+        "displayName": "星洲炒米",
+        "familyId": "stir-fried-rice-noodles",
+        "familyTitle": "炒河粉／炒米",
+        "inBenchmark": true,
+        "rangeRatio": 1.6833,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 116.5,
+          "max": 196.1
+        },
+        "servingCalories": {
+          "min": 361,
+          "max": 607.9
+        },
+        "feasibleGrams": {
+          "min": 260,
+          "max": 360
+        },
+        "components": [
+          {
+            "label": "熟米粉",
+            "sourceIds": [
+              "fdc:168914"
+            ],
+            "grams": {
+              "min": 150,
+              "max": 210
+            }
+          },
+          {
+            "label": "烤豬肩",
+            "sourceIds": [
+              "fdc:168257"
+            ],
+            "grams": {
+              "min": 20,
+              "max": 40
+            }
+          },
+          {
+            "label": "熟蝦",
+            "sourceIds": [
+              "fdc:175180"
+            ],
+            "grams": {
+              "min": 15,
+              "max": 35
+            }
+          },
+          {
+            "label": "煎蛋",
+            "sourceIds": [
+              "fdc:173423"
+            ],
+            "grams": {
+              "min": 20,
+              "max": 40
+            }
+          },
+          {
+            "label": "熟椰菜",
+            "sourceIds": [
+              "fdc:168514"
+            ],
+            "grams": {
+              "min": 25,
+              "max": 50
+            }
+          },
+          {
+            "label": "食油",
+            "sourceIds": [
+              "fdc:171411"
+            ],
+            "grams": {
+              "min": 8,
+              "max": 16
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:167677",
+          "sourceName": "Restaurant, Chinese, vegetable lo mein, without meat",
+          "kcalPer100g": 121,
+          "insideRange": true,
+          "note": "美國中餐館素菜撈麵用來核對炒粉麵的數量級。"
+        }
+      }
+    ],
+    "rangeDistribution": {
+      "upTo2": 34,
+      "above2To2_5": 1,
+      "above2_5To3": 1,
+      "above3": 0
+    },
+    "preservedProfiles": [
+      {
+        "id": "siu-mei-rice",
+        "caloriesPer100g": {
+          "min": 170,
+          "max": 320
+        }
+      },
+      {
+        "id": "noodle-soup",
+        "caloriesPer100g": {
+          "min": 70,
+          "max": 160
+        }
+      },
+      {
+        "id": "congee",
+        "caloriesPer100g": {
+          "min": 40,
+          "max": 110
+        }
+      },
+      {
+        "id": "claypot-rice",
+        "caloriesPer100g": {
+          "min": 170,
+          "max": 340
+        }
+      },
+      {
+        "id": "milk-tea",
+        "caloriesPer100g": {
+          "min": 45,
+          "max": 100
+        }
+      },
+      {
+        "id": "rice-noodle-roll",
+        "caloriesPer100g": {
+          "min": 110,
+          "max": 190
+        }
+      }
+    ]
   },
   "items": [
     {
@@ -46,38 +2771,38 @@
       "identityLevel": "dish",
       "canonicalName": "rice-plate",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:rice-plate",
+      "profileCanonicalName": "rice-plate",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "rice-plate",
       "familyId": "rice-plate",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "叉燒碟頭飯",
       "identityLevel": "dish",
       "canonicalName": "char-siu-rice-plate",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:char-siu-rice-plate",
+      "profileCanonicalName": "char-siu-rice-plate",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "char-siu-rice-plate",
       "familyId": "rice-plate",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "午餐便當",
@@ -122,266 +2847,266 @@
       "identityLevel": "dish",
       "canonicalName": "roast-goose-rice",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:roast-goose-rice",
+      "profileCanonicalName": "roast-goose-rice",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "roast-goose-rice",
       "familyId": "rice-plate",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "油雞飯",
       "identityLevel": "dish",
       "canonicalName": "soy-sauce-chicken-rice",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:soy-sauce-chicken-rice",
+      "profileCanonicalName": "soy-sauce-chicken-rice",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "soy-sauce-chicken-rice",
       "familyId": "rice-plate",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "脆皮燒肉飯",
       "identityLevel": "dish",
       "canonicalName": "crispy-roast-pork-rice",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:crispy-roast-pork-rice",
+      "profileCanonicalName": "crispy-roast-pork-rice",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "crispy-roast-pork-rice",
       "familyId": "rice-plate",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "白切雞飯",
       "identityLevel": "dish",
       "canonicalName": "white-cut-chicken-rice",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:white-cut-chicken-rice",
+      "profileCanonicalName": "white-cut-chicken-rice",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "white-cut-chicken-rice",
       "familyId": "rice-plate",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "海南雞飯",
       "identityLevel": "dish",
       "canonicalName": "hainanese-chicken-rice",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:hainanese-chicken-rice",
+      "profileCanonicalName": "hainanese-chicken-rice",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "hainanese-chicken-rice",
       "familyId": "rice-plate",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "豬扒飯",
       "identityLevel": "dish",
       "canonicalName": "pork-chop-rice",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:pork-chop-rice",
+      "profileCanonicalName": "pork-chop-rice",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "pork-chop-rice",
       "familyId": "rice-plate",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "雞扒飯",
       "identityLevel": "dish",
       "canonicalName": "chicken-chop-rice",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:chicken-chop-rice",
+      "profileCanonicalName": "chicken-chop-rice",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "chicken-chop-rice",
       "familyId": "rice-plate",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "煎蛋飯",
       "identityLevel": "dish",
       "canonicalName": "fried-egg-rice",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:fried-egg-rice",
+      "profileCanonicalName": "fried-egg-rice",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "fried-egg-rice",
       "familyId": "rice-plate",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "梅菜扣肉飯",
       "identityLevel": "dish",
       "canonicalName": "mui-choy-pork-rice",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:mui-choy-pork-rice",
+      "profileCanonicalName": "mui-choy-pork-rice",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "mui-choy-pork-rice",
       "familyId": "rice-plate",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "滷肉飯",
       "identityLevel": "dish",
       "canonicalName": "lu-rou-fan",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:lu-rou-fan",
+      "profileCanonicalName": "lu-rou-fan",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "lu-rou-fan",
       "familyId": "rice-plate",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "排骨飯",
       "identityLevel": "dish",
       "canonicalName": "spare-rib-rice",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:spare-rib-rice",
+      "profileCanonicalName": "spare-rib-rice",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "spare-rib-rice",
       "familyId": "rice-plate",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "魚香茄子飯",
       "identityLevel": "dish",
       "canonicalName": "yuxiang-eggplant-rice",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:yuxiang-eggplant-rice",
+      "profileCanonicalName": "yuxiang-eggplant-rice",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "yuxiang-eggplant-rice",
       "familyId": "rice-plate",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "麻婆豆腐飯",
       "identityLevel": "dish",
       "canonicalName": "mapo-tofu-rice",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:mapo-tofu-rice",
+      "profileCanonicalName": "mapo-tofu-rice",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "mapo-tofu-rice",
       "familyId": "rice-plate",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "牛肉飯",
       "identityLevel": "dish",
       "canonicalName": "beef-rice",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:beef-rice",
+      "profileCanonicalName": "beef-rice",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "beef-rice",
       "familyId": "rice-plate",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "親子丼",
@@ -445,76 +3170,76 @@
       "identityLevel": "dish",
       "canonicalName": "dry-fried-beef-ho-fun",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:dry-fried-beef-ho-fun",
+      "profileCanonicalName": "dry-fried-beef-ho-fun",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "dry-fried-beef-ho-fun",
       "familyId": "stir-fried-rice-noodles",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "星洲炒米",
       "identityLevel": "dish",
       "canonicalName": "singapore-fried-vermicelli",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:singapore-fried-vermicelli",
+      "profileCanonicalName": "singapore-fried-vermicelli",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "singapore-fried-vermicelli",
       "familyId": "stir-fried-rice-noodles",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "車仔麵",
       "identityLevel": "dish",
       "canonicalName": "cart-noodles",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:cart-noodles",
+      "profileCanonicalName": "cart-noodles",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "cart-noodles",
       "familyId": "cha-chaan-teng-noodles",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "牛腩麵",
       "identityLevel": "dish",
       "canonicalName": "beef-brisket-noodles",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:beef-brisket-noodles",
+      "profileCanonicalName": "beef-brisket-noodles",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "beef-brisket-noodles",
       "familyId": "cha-chaan-teng-noodles",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "鮮蝦雲吞麵",
@@ -540,19 +3265,19 @@
       "identityLevel": "dish",
       "canonicalName": "luncheon-meat-egg-noodles",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:luncheon-meat-egg-noodles",
+      "profileCanonicalName": "luncheon-meat-egg-noodles",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "luncheon-meat-egg-noodles",
       "familyId": "cha-chaan-teng-noodles",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "冬蔭功湯",
@@ -635,266 +3360,266 @@
       "identityLevel": "dish",
       "canonicalName": "plain-noodle-soup",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:plain-noodle-soup",
+      "profileCanonicalName": "plain-noodle-soup",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "plain-noodle-soup",
       "familyId": "cha-chaan-teng-noodles",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "牛肉麵",
       "identityLevel": "dish",
       "canonicalName": "beef-noodle-soup",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:beef-noodle-soup",
+      "profileCanonicalName": "beef-noodle-soup",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "beef-noodle-soup",
       "familyId": "cha-chaan-teng-noodles",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "米線",
       "identityLevel": "dish",
       "canonicalName": "rice-vermicelli",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:rice-vermicelli",
+      "profileCanonicalName": "rice-vermicelli",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "rice-vermicelli",
       "familyId": "cha-chaan-teng-noodles",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "河粉",
       "identityLevel": "dish",
       "canonicalName": "ho-fun",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:ho-fun",
+      "profileCanonicalName": "ho-fun",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "ho-fun",
       "familyId": "cha-chaan-teng-noodles",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "西多士",
       "identityLevel": "dish",
       "canonicalName": "hong-kong-french-toast",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:hong-kong-french-toast",
+      "profileCanonicalName": "hong-kong-french-toast",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "hong-kong-french-toast",
       "familyId": "cha-chaan-teng-breakfast",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "菠蘿包",
       "identityLevel": "dish",
       "canonicalName": "pineapple-bun",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:pineapple-bun",
+      "profileCanonicalName": "pineapple-bun",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "pineapple-bun",
       "familyId": "cha-chaan-teng-breakfast",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "叉燒包",
       "identityLevel": "dish",
       "canonicalName": "char-siu-bao",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:char-siu-bao",
+      "profileCanonicalName": "char-siu-bao",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "char-siu-bao",
       "familyId": "dim-sum",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "蛋撻",
       "identityLevel": "dish",
       "canonicalName": "egg-tart",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:egg-tart",
+      "profileCanonicalName": "egg-tart",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "egg-tart",
       "familyId": "dim-sum",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "腸仔蛋",
       "identityLevel": "dish",
       "canonicalName": "sausage-and-egg",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:sausage-and-egg",
+      "profileCanonicalName": "sausage-and-egg",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "sausage-and-egg",
       "familyId": "cha-chaan-teng-breakfast",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "糯米雞",
       "identityLevel": "dish",
       "canonicalName": "sticky-rice-chicken",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:sticky-rice-chicken",
+      "profileCanonicalName": "sticky-rice-chicken",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "sticky-rice-chicken",
       "familyId": "dim-sum",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "燒賣",
       "identityLevel": "dish",
       "canonicalName": "siu-mai",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:siu-mai",
+      "profileCanonicalName": "siu-mai",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "siu-mai",
       "familyId": "dim-sum",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "蝦餃",
       "identityLevel": "dish",
       "canonicalName": "har-gow",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:har-gow",
+      "profileCanonicalName": "har-gow",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "har-gow",
       "familyId": "dim-sum",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "小籠包",
       "identityLevel": "dish",
       "canonicalName": "xiaolongbao",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:xiaolongbao",
+      "profileCanonicalName": "xiaolongbao",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "xiaolongbao",
       "familyId": "dim-sum",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "春卷",
       "identityLevel": "dish",
       "canonicalName": "spring-roll",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:spring-roll",
+      "profileCanonicalName": "spring-roll",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "spring-roll",
       "familyId": "dim-sum",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "壽司拼盤",
@@ -1387,15 +4112,15 @@
       "identityLevel": "dish",
       "rule": "英文前綴 char siu rice 不得配對 siu-mei-rice",
       "knownFalseConfidentMatch": false,
-      "note": "N1 把叉燒碟頭飯收到 rice-plate，不再因為英文前綴 char siu rice 計入燒味飯。",
+      "note": "N1 把叉燒碟頭飯收到 rice-plate。N2 用碟頭飯模板計算，profile 不是 siu-mei-rice。",
       "violation": false,
-      "includedInTotal": false,
-      "profileId": null,
-      "profileCanonicalName": null,
+      "includedInTotal": true,
+      "profileId": "template:char-siu-rice-plate",
+      "profileCanonicalName": "char-siu-rice-plate",
       "canonicalName": "char-siu-rice-plate",
-      "coverage": "none",
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。"
+      "coverage": "complete",
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。"
     },
     {
       "id": "plain-noodle-soup",
@@ -1404,15 +4129,15 @@
       "identityLevel": "dish",
       "rule": "英文鍵 noodle soup 不得配對 noodle-soup",
       "knownFalseConfidentMatch": false,
-      "note": "N1 把陽春麵收到茶餐廳麵，plain noodle soup 不再繼承雲吞麵。",
+      "note": "N1 把陽春麵收到茶餐廳麵。N2 用茶餐廳麵模板計算，profile 不是 noodle-soup。",
       "violation": false,
-      "includedInTotal": false,
-      "profileId": null,
-      "profileCanonicalName": null,
+      "includedInTotal": true,
+      "profileId": "template:plain-noodle-soup",
+      "profileCanonicalName": "plain-noodle-soup",
       "canonicalName": "plain-noodle-soup",
-      "coverage": "none",
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。"
+      "coverage": "complete",
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。"
     },
     {
       "id": "sesame-dressing-not-lean",
@@ -1421,7 +4146,7 @@
       "identityLevel": "dish",
       "rule": "胡麻醬不得落到 protein-vegetable-salad",
       "knownFalseConfidentMatch": false,
-      "note": "胡麻醬沒有營養 profile，離開瘦身範圍後不計算。",
+      "note": "胡麻醬沒有營養 profile。原因碼 DISH_KNOWN_NO_PROFILE，畫面仍是暫未能計算。醬量未定，這次不加沙律醬模板。",
       "violation": false,
       "includedInTotal": false,
       "profileId": null,
@@ -1429,7 +4154,7 @@
       "canonicalName": "dressed-salad",
       "coverage": "none",
       "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。"
+      "userFacingReason": "胡麻醬或油醋汁還沒有營養 profile，因此這道沙律不計算。"
     },
     {
       "id": "vinaigrette-not-lean",
@@ -1438,7 +4163,7 @@
       "identityLevel": "dish",
       "rule": "油醋汁不得落到 protein-vegetable-salad",
       "knownFalseConfidentMatch": false,
-      "note": "油醋汁沒有營養 profile，離開瘦身範圍後不計算。",
+      "note": "油醋汁沒有營養 profile。原因碼 DISH_KNOWN_NO_PROFILE，畫面仍是暫未能計算。醬量未定，這次不加沙律醬模板。",
       "violation": false,
       "includedInTotal": false,
       "profileId": null,
@@ -1446,7 +4171,7 @@
       "canonicalName": "dressed-salad",
       "coverage": "none",
       "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。"
+      "userFacingReason": "胡麻醬或油醋汁還沒有營養 profile，因此這道沙律不計算。"
     },
     {
       "id": "thousand-island-not-lean",

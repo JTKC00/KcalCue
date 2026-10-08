@@ -2,6 +2,12 @@ import type { FoodEstimate, FoodIdentityLevel } from "@/lib/domain/food-analysis
 import { isCompositeIdentity } from "./canonical";
 import { NUTRITION_COVERAGE_REASONS } from "./coverage-reason";
 import { LocalNutritionProvider } from "./local-provider";
+import { localNutritionProfiles } from "./local-data";
+import {
+  compiledDishTemplates,
+  pilotFamilyDefinitions,
+  type PilotFamilyId,
+} from "./recipe-templates";
 import { NutritionService } from "./service";
 import type {
   MealCoverage,
@@ -171,7 +177,7 @@ export const FALSE_MATCH_PROBES: readonly FalseMatchProbe[] = [
     identityLevel: "dish",
     rule: "英文前綴 char siu rice 不得配對 siu-mei-rice",
     knownFalseConfidentMatch: false,
-    note: "N1 把叉燒碟頭飯收到 rice-plate，不再因為英文前綴 char siu rice 計入燒味飯。",
+    note: "N1 把叉燒碟頭飯收到 rice-plate。N2 用碟頭飯模板計算，profile 不是 siu-mei-rice。",
     violates: (match) => match.includedInTotal && match.profile?.id === "siu-mei-rice",
   },
   {
@@ -181,7 +187,7 @@ export const FALSE_MATCH_PROBES: readonly FalseMatchProbe[] = [
     identityLevel: "dish",
     rule: "英文鍵 noodle soup 不得配對 noodle-soup",
     knownFalseConfidentMatch: false,
-    note: "N1 把陽春麵收到茶餐廳麵，plain noodle soup 不再繼承雲吞麵。",
+    note: "N1 把陽春麵收到茶餐廳麵。N2 用茶餐廳麵模板計算，profile 不是 noodle-soup。",
     violates: (match) => match.includedInTotal && match.profile?.id === "noodle-soup",
   },
   {
@@ -191,7 +197,7 @@ export const FALSE_MATCH_PROBES: readonly FalseMatchProbe[] = [
     identityLevel: "dish",
     rule: "胡麻醬不得落到 protein-vegetable-salad",
     knownFalseConfidentMatch: false,
-    note: "胡麻醬沒有營養 profile，離開瘦身範圍後不計算。",
+    note: "胡麻醬沒有營養 profile。原因碼 DISH_KNOWN_NO_PROFILE，畫面仍是暫未能計算。醬量未定，這次不加沙律醬模板。",
     violates: (match) => match.profile?.id === "protein-vegetable-salad",
   },
   {
@@ -201,7 +207,7 @@ export const FALSE_MATCH_PROBES: readonly FalseMatchProbe[] = [
     identityLevel: "dish",
     rule: "油醋汁不得落到 protein-vegetable-salad",
     knownFalseConfidentMatch: false,
-    note: "油醋汁沒有營養 profile，離開瘦身範圍後不計算。",
+    note: "油醋汁沒有營養 profile。原因碼 DISH_KNOWN_NO_PROFILE，畫面仍是暫未能計算。醬量未定，這次不加沙律醬模板。",
     violates: (match) => match.profile?.id === "protein-vegetable-salad",
   },
   {
@@ -270,6 +276,66 @@ export interface CoverageRate {
   percent: string;
 }
 
+export interface PilotDishReport {
+  dishId: string;
+  displayName: string;
+  familyId: PilotFamilyId;
+  familyTitle: string;
+  inBenchmark: boolean;
+  rangeRatio: number;
+  needsFollowUp: boolean;
+  complete: boolean;
+  caloriesPer100g: { min: number; max: number };
+  servingCalories: { min: number; max: number };
+  feasibleGrams: { min: number; max: number };
+  components: Array<{
+    label: string;
+    sourceIds: string[];
+    grams: { min: number; max: number };
+  }>;
+  sanity: {
+    sourceId: string;
+    sourceName: string;
+    kcalPer100g: number;
+    insideRange: boolean;
+    note: string;
+  };
+}
+
+export interface PilotFamilyReport {
+  id: PilotFamilyId;
+  title: string;
+  selectionReason: string;
+  benchmarkDishes: number;
+  completeBenchmarkDishes: number;
+  followUpDishes: number;
+  blockedDishes: number;
+}
+
+export interface PilotCoverage {
+  gate: "N2";
+  comparedWith: "Gate N1 / PR #120";
+  n1: {
+    safeCoverage: "1/65";
+    safePercent: "1.5%";
+    falseConfidentMatch: "0/12";
+    falseConfidentPercent: "0.0%";
+    profileCoverage: "1/65";
+    dishKnownNoProfile: 51;
+    complete: 1;
+  };
+  families: PilotFamilyReport[];
+  familyBenchmarkCounts: Array<{ familyId: string; benchmarkDishes: number }>;
+  dishes: PilotDishReport[];
+  rangeDistribution: {
+    upTo2: number;
+    above2To2_5: number;
+    above2_5To3: number;
+    above3: number;
+  };
+  preservedProfiles: Array<{ id: string; caloriesPer100g: { min: number; max: number } }>;
+}
+
 export interface NutritionCoverageReport {
   benchmarkCount: number;
   dishCount: number;
@@ -285,9 +351,21 @@ export interface NutritionCoverageReport {
   identityCoverage: CoverageRate;
   /** Benchmark rows whose identity already has a nutrition profile. */
   profileCoverage: CoverageRate;
+  pilot: PilotCoverage;
   items: ResolvedCoverageItem[];
   probes: FalseMatchProbeResult[];
 }
+
+const PRESERVED_PROFILE_IDS = [
+  "siu-mei-rice",
+  "noodle-soup",
+  "congee",
+  "claypot-rice",
+  "milk-tea",
+  "rice-noodle-roll",
+] as const;
+
+const BENCHMARK_DISH_NAMES = new Set<string>(APPENDIX_A_DISHES);
 
 export function appendixAFoods(): CoverageBenchmarkFood[] {
   return [
@@ -456,11 +534,82 @@ export function buildCoverageReport(): NutritionCoverageReport {
     falseConfidentMatchRate: rate(falseConfidentProbes, probes.length),
     identityCoverage: rate(items.filter((item) => item.knownIdentity).length, foods.length),
     profileCoverage: rate(items.filter((item) => item.hasNutritionProfile).length, foods.length),
+    pilot: buildPilotCoverage(items),
     items,
     probes,
   };
   assertReportInvariants(report);
   return report;
+}
+
+function buildPilotCoverage(items: ResolvedCoverageItem[]): PilotCoverage {
+  const benchmarkNames = BENCHMARK_DISH_NAMES;
+  const familyCounts = new Map<string, number>();
+  for (const item of items) {
+    if (item.identityLevel !== "dish" || !item.familyId) continue;
+    familyCounts.set(item.familyId, (familyCounts.get(item.familyId) ?? 0) + 1);
+  }
+  const dishes: PilotDishReport[] = compiledDishTemplates.map((template) => ({
+    dishId: template.dishId,
+    displayName: template.displayName,
+    familyId: template.familyId,
+    familyTitle: template.familyTitle,
+    inBenchmark: template.aliases.some((alias) => benchmarkNames.has(alias)),
+    rangeRatio: template.rangeRatio,
+    needsFollowUp: template.needsFollowUp,
+    complete: template.complete,
+    caloriesPer100g: template.calculation.per100g.calories,
+    servingCalories: template.calculation.servingCalories,
+    feasibleGrams: template.calculation.feasibleGrams,
+    components: template.components.map((component) => ({
+      label: component.label,
+      sourceIds: component.sourceIds,
+      grams: component.grams,
+    })),
+    sanity: template.sanity,
+  }));
+  const families = pilotFamilyDefinitions().map((family) => {
+    const familyDishes = dishes.filter((dish) => dish.familyId === family.id);
+    const benchmarkDishes = items.filter((item) => item.familyId === family.id && item.identityLevel === "dish");
+    return {
+      id: family.id,
+      title: family.title,
+      selectionReason: family.selectionReason,
+      benchmarkDishes: benchmarkDishes.length,
+      completeBenchmarkDishes: benchmarkDishes.filter((item) => item.coverage === "complete").length,
+      followUpDishes: familyDishes.filter((dish) => dish.needsFollowUp).length,
+      blockedDishes: familyDishes.filter((dish) => !dish.complete).length,
+    };
+  });
+  return {
+    gate: "N2",
+    comparedWith: "Gate N1 / PR #120",
+    n1: {
+      safeCoverage: "1/65",
+      safePercent: "1.5%",
+      falseConfidentMatch: "0/12",
+      falseConfidentPercent: "0.0%",
+      profileCoverage: "1/65",
+      dishKnownNoProfile: 51,
+      complete: 1,
+    },
+    families,
+    familyBenchmarkCounts: [...familyCounts.entries()]
+      .map(([familyId, benchmarkDishes]) => ({ familyId, benchmarkDishes }))
+      .sort((left, right) => right.benchmarkDishes - left.benchmarkDishes || left.familyId.localeCompare(right.familyId)),
+    dishes,
+    rangeDistribution: {
+      upTo2: dishes.filter((dish) => dish.rangeRatio <= 2).length,
+      above2To2_5: dishes.filter((dish) => dish.rangeRatio > 2 && dish.rangeRatio <= 2.5).length,
+      above2_5To3: dishes.filter((dish) => dish.rangeRatio > 2.5 && dish.rangeRatio <= 3).length,
+      above3: dishes.filter((dish) => dish.rangeRatio > 3).length,
+    },
+    preservedProfiles: PRESERVED_PROFILE_IDS.map((id) => {
+      const profile = localNutritionProfiles.find((item) => item.id === id);
+      if (!profile) throw new Error(`缺少既有 profile ${id}`);
+      return { id, caloriesPer100g: profile.nutrientsPer100g.calories };
+    }),
+  };
 }
 
 function assertReportInvariants(report: NutritionCoverageReport): void {
@@ -499,6 +648,30 @@ function assertReportInvariants(report: NutritionCoverageReport): void {
   if (report.profileCoverage.numerator !== report.items.filter((item) => item.hasNutritionProfile).length) {
     throw new Error("profile 覆蓋分子與逐項不一致");
   }
+  for (const dish of report.pilot.dishes) {
+    if (dish.rangeRatio > 2.5 && !dish.needsFollowUp) {
+      throw new Error(`${dish.displayName} 的 R 大於 2.5 但沒有標記追問`);
+    }
+    if (dish.rangeRatio > 3 && dish.complete) {
+      throw new Error(`${dish.displayName} 的 R 大於 3 仍標記完成`);
+    }
+    if (!dish.feasibleGrams || dish.feasibleGrams.max < dish.feasibleGrams.min) {
+      throw new Error(`${dish.displayName} 的可行總重無效`);
+    }
+    const benchmarkItem = report.items.find((item) => item.dishId === dish.dishId);
+    if (dish.inBenchmark && !benchmarkItem) {
+      throw new Error(`${dish.displayName} 標記在基準內但找不到對應項`);
+    }
+    if (benchmarkItem && dish.complete && benchmarkItem.coverage !== "complete") {
+      throw new Error(`${dish.displayName} 模板已完成但基準未計入`);
+    }
+    if (benchmarkItem && !dish.complete && benchmarkItem.coverageReason !== "DISH_KNOWN_NO_PROFILE") {
+      throw new Error(`${dish.displayName} 模板未完成時應維持 DISH_KNOWN_NO_PROFILE`);
+    }
+    if (benchmarkItem?.coverage === "complete" && benchmarkItem.profileComposite !== true) {
+      throw new Error(`${dish.displayName} 完成時必須仍是組合菜 profile`);
+    }
+  }
 }
 
 export function formatCoverageBaselineMarkdown(report: NutritionCoverageReport): string {
@@ -512,11 +685,13 @@ export function formatCoverageBaselineMarkdown(report: NutritionCoverageReport):
   const passing = report.probes.filter((probe) => !probe.violation);
   const knownDishes = report.items.filter((item) => item.identityLevel === "dish" && item.knownIdentity);
   const lines = [
-    "# 營養覆蓋基準（Gate N1）",
+    "# 營養覆蓋基準（Gate N2）",
     "",
-    "這是 Gate N1 的基準，疊在 Gate N0（PR #119，分支 `cursor/nutrition-coverage-n0-053e`）之上。程式先對菜色身份表做精確別名，再跑 `canonicalizeFood`、`resolveNutritionMatch`、`calculateMealNutrition`。沒有呼叫 USDA、OpenAI，也沒有讀正式環境餐點。Vision 不參與，也不提供 kcal。這一步沒有新增營養 profile。",
+    "這是 Gate N2 的基準，疊在 Gate N1（PR #120，分支 `cursor/nutrition-coverage-n1-2823`）之上。程式先對菜色身份表做精確別名，再跑 `canonicalizeFood`、`resolveNutritionMatch`、`calculateMealNutrition`。試點家族用食譜模板編成組合菜 profile。沒有呼叫 USDA live client、OpenAI，也沒有讀正式環境餐點。Vision 不參與，也不提供 kcal。模板數字來自 USDA SR Legacy（2018-04，CC0），不是模型估計。",
     "",
-    "Gate N0 的對照：安全覆蓋 1/65（1.5%），錯誤高信心配對 2/8（25.0%）。當時還沒有分開的身份覆蓋；52 道菜裡只有少數落到既有 canonical，其餘是通用桶。",
+    `Gate N1（#120）的對照：安全覆蓋 ${report.pilot.n1.safeCoverage}（${report.pilot.n1.safePercent}），profile 覆蓋 ${report.pilot.n1.profileCoverage}，錯誤高信心配對 ${report.pilot.n1.falseConfidentMatch}（${report.pilot.n1.falseConfidentPercent}），\`DISH_KNOWN_NO_PROFILE\` ${report.pilot.n1.dishKnownNoProfile}，complete ${report.pilot.n1.complete}。身份覆蓋當時已是 52/65。`,
+    "",
+    "Gate N0 的對照：安全覆蓋 1/65（1.5%），錯誤高信心配對 2/8（25.0%）。當時還沒有分開的身份覆蓋。",
     "",
     "65 個名稱來自營養目錄研究附錄 A（Draft PR #117，commit `c9d4a1a8`）。碟上的菜是 `identityLevel: \"dish\"`，單獨食物是 `\"ingredient\"`。`displayName` 與 `normalizedName` 都是該中文名，份量 100 g。",
     "",
@@ -524,7 +699,7 @@ export function formatCoverageBaselineMarkdown(report: NutritionCoverageReport):
     "",
     "**餐覆蓋**把每一個名稱單獨當成一餐。`complete` 是該項有計入餐總數。`none` 是沒有任何項目計入。`insufficient` 是有計入但低於 75%。`partial` 是至少 75% 但不是全部。單項餐只會是 `complete` 或 `none`。",
     "",
-    "**身份覆蓋**是 65 個名稱裡，精確對上菜色身份表（有 `dishId`）的項數。**profile 覆蓋**是這些身份裡已經接上既有營養 profile 的項數。知道菜名而沒有 profile 的項目維持不計入。",
+    "**身份覆蓋**是 65 個名稱裡，精確對上菜色身份表（有 `dishId`）的項數。**profile 覆蓋**是這些身份裡已經接上營養 profile 的項數，包括 N2 食譜模板。知道菜名而沒有 profile 的項目維持不計入。",
     "",
     "**原因碼**只在該項沒有 `complete` 時出現，欄位是可選的 `coverageReason`。使用者看到的句子仍是 `reasons`，總數與已儲存餐點的必填形狀不變。舊配對沒有這個欄位，仍可通過 `nutritionMatchResponseSchema`。新代碼也是可選的，舊紀錄不必補上。",
     "",
@@ -588,10 +763,108 @@ export function formatCoverageBaselineMarkdown(report: NutritionCoverageReport):
     "",
     ...passing.map((probe) => `- \`${probe.id}\`：${probe.displayName} / \`${probe.normalizedName}\` → \`${probe.profileId ?? "—"}\`。${probe.note}`),
     "",
+    ...formatPilotSections(report),
     "## 重現",
     "",
     "`npm run coverage:report` 只跑上述本地管線。輸出應與這份 Markdown 及旁邊的 JSON 一致。",
     "",
   ];
   return `${lines.join("\n")}`;
+}
+
+function formatPilotSections(report: NutritionCoverageReport): string[] {
+  const pilot = report.pilot;
+  const followUp = pilot.dishes.filter((dish) => dish.needsFollowUp);
+  const blocked = pilot.dishes.filter((dish) => !dish.complete);
+  return [
+    "## 試點家族",
+    "",
+    "五個家族按附錄 A 的菜數來選。菜數打平時，選香港日常菜單裡更常出現的一族。燒味飯和粥已經有 profile，而且不在這 65 個名稱裡，這次不改它們的總數。",
+    "",
+    "| 家族 | 基準菜數 | 納入基準 | 需要追問 | R>3 未完成 | 選擇原因 |",
+    "|---|---:|---:|---:|---:|---|",
+    ...pilot.families.map((family) =>
+      `| ${family.title}（\`${family.id}\`） | ${family.benchmarkDishes} | ${family.completeBenchmarkDishes} | ${family.followUpDishes} | ${family.blockedDishes} | ${family.selectionReason} |`,
+    ),
+    "",
+    "全部基準菜的家族菜數：",
+    "",
+    "| 家族 | 基準菜數 |",
+    "|---|---:|",
+    ...pilot.familyBenchmarkCounts.map((family) => `| \`${family.familyId}\` | ${family.benchmarkDishes} |`),
+    "",
+    "## 與 N1 對照",
+    "",
+    "| 指標 | N1（#120） | N2 |",
+    "|---|---:|---:|",
+    `| 安全覆蓋 | ${pilot.n1.safeCoverage}（${pilot.n1.safePercent}） | ${report.safeCoverageRate.numerator}/${report.safeCoverageRate.denominator}（${report.safeCoverageRate.percent}） |`,
+    `| profile 覆蓋 | ${pilot.n1.profileCoverage} | ${report.profileCoverage.numerator}/${report.profileCoverage.denominator}（${report.profileCoverage.percent}） |`,
+    `| 錯誤高信心配對 | ${pilot.n1.falseConfidentMatch}（${pilot.n1.falseConfidentPercent}） | ${report.falseConfidentMatchRate.numerator}/${report.falseConfidentMatchRate.denominator}（${report.falseConfidentMatchRate.percent}） |`,
+    `| \`DISH_KNOWN_NO_PROFILE\` | ${pilot.n1.dishKnownNoProfile} | ${report.reasons.DISH_KNOWN_NO_PROFILE} |`,
+    `| complete | ${pilot.n1.complete} | ${report.coverage.complete} |`,
+    "",
+    "R 是每道菜每 100 g 熱量上限除以下限，也就是一份參考份量的熱量比。R > 2.5 標記需要後續追問（N4 才做提問介面）。R > 3 不標記完成，維持 `DISH_KNOWN_NO_PROFILE`。新 profile 的 R ≥ 2 時，配對信心維持中等。",
+    "",
+    "| R | 菜數 |",
+    "|---|---:|",
+    `| ≤ 2 | ${pilot.rangeDistribution.upTo2} |`,
+    `| > 2 且 ≤ 2.5 | ${pilot.rangeDistribution.above2To2_5} |`,
+    `| > 2.5 且 ≤ 3 | ${pilot.rangeDistribution.above2_5To3} |`,
+    `| > 3 | ${pilot.rangeDistribution.above3} |`,
+    "",
+    followUp.length > 0
+      ? `需要追問：${followUp.map((dish) => `${dish.displayName}（R=${dish.rangeRatio.toFixed(2)}）`).join("、")}。`
+      : "需要追問：（無）。",
+    "",
+    blocked.length > 0
+      ? `R > 3、未完成：${blocked.map((dish) => `${dish.displayName}（R=${dish.rangeRatio.toFixed(2)}）`).join("、")}。`
+      : "R > 3、未完成：（無）。",
+    "",
+    "## 每道菜的 R",
+    "",
+    "| 菜 | 家族 | 基準 | 每 100 g kcal | 一份 kcal | 可行總重 g | R | 追問 | 完成 |",
+    "|---|---|---|---:|---:|---:|---:|---|---|",
+    ...pilot.dishes.map((dish) =>
+      `| ${dish.displayName} | ${dish.familyTitle} | ${dish.inBenchmark ? "是" : "否"} | ${dish.caloriesPer100g.min}–${dish.caloriesPer100g.max} | ${dish.servingCalories.min}–${dish.servingCalories.max} | ${dish.feasibleGrams.min}–${dish.feasibleGrams.max} | ${dish.rangeRatio.toFixed(2)} | ${dish.needsFollowUp ? "是" : "否"} | ${dish.complete ? "是" : "否"} |`,
+    ),
+    "",
+    "每項原料的克數和 FDC id 在 [nutrition-coverage-baseline.json](nutrition-coverage-baseline.json) 的 `pilot.dishes[].components`。",
+    "",
+    "## 公開點值對照",
+    "",
+    "對照值只核對數量級。它們是 USDA SR Legacy 的另一列食物，不是這碟的化驗，也不是目錄裡的原料加總。落在範圍外不自動判失敗；表內寫明原因。沒有使用香港食安中心或 Open Food Facts。",
+    "",
+    "| 菜 | 模板每 100 g | 對照 | 對照 kcal | 落在範圍內 | 說明 |",
+    "|---|---:|---|---:|---|---|",
+    ...pilot.dishes.map((dish) =>
+      `| ${dish.displayName} | ${dish.caloriesPer100g.min}–${dish.caloriesPer100g.max} | ${dish.sanity.sourceName}（\`${dish.sanity.sourceId}\`） | ${dish.sanity.kcalPer100g} | ${dish.sanity.insideRange ? "是" : "否"} | ${dish.sanity.note} |`,
+    ),
+    "",
+    "## 沒有改動的既有總數",
+    "",
+    "下列 profile 的每 100 g 熱量這次沒有改。鮮蝦雲吞麵、雲吞麵、湯麵仍用 `noodle-soup`。叉燒飯、燒味飯仍用 `siu-mei-rice`。白粥、皮蛋瘦肉粥仍用 `congee`。",
+    "",
+    "| profile | 每 100 g kcal |",
+    "|---|---:|",
+    ...pilot.preservedProfiles.map((profile) =>
+      `| \`${profile.id}\` | ${profile.caloriesPer100g.min}–${profile.caloriesPer100g.max} |`,
+    ),
+    "",
+    "行為變化：試點家族裡 R ≤ 3 的菜，由 `DISH_KNOWN_NO_PROFILE` 改為計入 `template:<dishId>`，而且 `composite: true`。叉燒碟頭飯會計入，但不是 `siu-mei-rice`。陽春麵會計入，但不是 `noodle-soup`。其餘家族維持不計算。組合菜不會拆成單一食材。",
+    "",
+    "## 授權",
+    "",
+    "這次只用 USDA FoodData Central SR Legacy（2018-04），公有領域／CC0 1.0。台灣食藥署開放資料、日本八訂成分表、加拿大 CNF 的條款仍以研究文件為準，這次沒有匯入，所以沒有觸發它們的顯名義務。香港食安中心營養資料庫只限個人非商業使用，Open Food Facts 是 ODbL，兩者都沒有用。",
+    "",
+    "## 生產 QA 跟進",
+    "",
+    "65 個名稱的安全覆蓋、profile 覆蓋、身份覆蓋和錯誤高信心配對沒有因為這次跟進而改變。忌廉通粉、鮮奶和燕麥牛奶粥都不在這 65 個名稱裡。",
+    "",
+    "只有凍的通粉沙律才接到既有 `creamy-salad`：通粉沙律、macaroni salad，或忌廉通粉同時有沙律／凍食說明。熱食字中英成對：熱食對 hot，粟米忌廉或玉米忌廉對 corn cream，忌廉汁對 cream sauce，焗對 baked 或 gratin，另有熱辣。單是 corn、粟米，或備註「高熱量」，不會把它變成熱食。粟米忌廉通粉、焗忌廉通粉、忌廉汁通粉，以及沒有凍食說明的忌廉通粉，身份是 `cream-macaroni`，原因碼 `DISH_KNOWN_NO_PROFILE`，不計算，也不交給 USDA。目錄下限仍是 63 kcal／100 g（FDC 2706818）。畫面把一份的 kcal 向下取整到 5，所以 100 g 的高脂沙律會顯示 60，而不是 63。份量約 95–98 g 時，未進位的下限大約是 60–62 kcal。這是顯示進位，目錄數字沒有改。",
+    "",
+    "胡麻醬沙律和油醋汁沙律維持不計算，原因碼是 `DISH_KNOWN_NO_PROFILE`。使用者句子說明還沒有營養 profile。醬量足以把 R 推過 3，而且不在這五個試點家族，所以這次不加模板。",
+    "",
+    "名稱是牛奶、鮮奶、全脂奶、低脂奶、fresh milk、skim milk 或 low-fat milk，或者這些標籤只多了溫度或分量字（熱、凍、暖、大、細、一杯、hot、iced、cold、warm、small、large、medium、a glass of、a cup of），而備註、可見食材或不確定原因指向燕麥奶、豆漿或杏仁奶時，不配對 whole-milk。這不是只接受完全一樣的牛奶標籤，也不是名稱裡任意出現牛奶就算。`POST /api/meals` 和 `POST /api/nutrition/resolve` 也不把該項交給 USDA live lookup。牛奶布甸、奶茶、milk tea、牛奶麥片不會因為名稱裡有牛奶就當成牛奶；杏仁片和黃豆也不是植物奶。沒有植物奶或低脂證據時，鮮奶和 fresh milk 配對本地全脂奶，所以沒有 USDA key 的 Demo 仍可計算。這是香港鮮奶通常是全脂的產品預設；若那杯其實是沒有標明的低脂奶，熱量可能高估約三成。名稱本身是低脂奶、脫脂奶、簡體脱脂奶、skim milk 或 low-fat milk 時不配全脂奶，沒有植物奶證據時仍可交給 USDA。燕麥牛奶粥和麥片加牛奶仍保留乳製奶。若植物奶只寫在餐點層的 visibleEvidence，食物本身沒有這些欄位，這個缺口仍然存在。",
+    "",
+  ];
 }
