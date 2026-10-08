@@ -688,13 +688,41 @@ describe("high-fat salad profile", () => {
       portionMin: 100,
       portionMax: 100,
     });
-    for (const food of [noted, prepared]) {
+    const calorieNote = makeFood({
+      displayName: "通粉沙律",
+      normalizedName: "macaroni salad",
+      identityLevel: "dish",
+      notes: "高熱量",
+      portionMin: 100,
+      portionMax: 100,
+    });
+    const creamCalorieNote = makeFood({
+      displayName: "忌廉通粉沙律",
+      normalizedName: "macaroni salad",
+      identityLevel: "dish",
+      notes: "高熱量",
+      portionMin: 100,
+      portionMax: 100,
+    });
+    const hotNote = makeFood({
+      displayName: "忌廉通粉",
+      normalizedName: "cream macaroni",
+      identityLevel: "dish",
+      notes: "熱食",
+      portionMin: 100,
+      portionMax: 100,
+    });
+    for (const food of [noted, prepared, calorieNote, creamCalorieNote]) {
       const match = provider.resolve(food);
       expect(canonicalizeFood(food).canonicalName, food.displayName).toBe("creamy-salad");
       expect(match.profile?.id, food.displayName).toBe("creamy-salad");
       expect(match.includedInTotal, food.displayName).toBe(true);
       expect(service.calculateMeal([food]).coverage, food.displayName).toBe("complete");
     }
+    const hot = provider.resolve(hotNote);
+    expect(canonicalizeFood(hotNote).canonicalName).toBe("cream-macaroni");
+    expect(hot.includedInTotal).toBe(false);
+    expect(hot.coverageReason).toBe("DISH_KNOWN_NO_PROFILE");
   });
 
   it("does not treat soy milk as whole milk", () => {

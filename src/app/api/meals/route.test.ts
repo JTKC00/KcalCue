@@ -176,7 +176,11 @@ describe("POST /api/meals bounded input", () => {
     }));
   });
 
-  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    clearUsdaCache();
+    vi.restoreAllMocks();
+  });
 
   it("persists a valid meal with the existing ownership and version behavior", async () => {
     const response = await POST(jsonRequest(JSON.stringify(meal)));

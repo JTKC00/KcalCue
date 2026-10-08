@@ -147,15 +147,25 @@ describe("negative match rules", () => {
         && !contradictoryDairyMilkLabel(item);
     };
 
-    const plain = [
+    for (const item of [
       food("鮮奶", "鮮奶", "ingredient"),
-      food("低脂奶", "低脂奶", "ingredient"),
-    ];
-    for (const item of plain) {
-      expect(contradictoryDairyMilkLabel(item), item.displayName).toBe(false);
-      expect(provider.resolve(item).profile?.id, item.displayName).not.toBe("whole-milk");
-      expect(reachesUsdaLive(item), item.displayName).toBe(true);
+      food("鮮奶", "fresh milk", "ingredient"),
+    ]) {
+      expect(contradictoryDairyMilkLabel(item), item.normalizedName).toBe(false);
+      expect(provider.resolve(item).profile?.id, item.normalizedName).toBe("whole-milk");
+      expect(provider.resolve(item).includedInTotal, item.normalizedName).toBe(true);
+      expect(reachesUsdaLive(item), item.normalizedName).toBe(false);
     }
+
+    const lowFat = food("低脂奶", "低脂奶", "ingredient");
+    expect(contradictoryDairyMilkLabel(lowFat)).toBe(false);
+    expect(provider.resolve(lowFat).profile?.id).not.toBe("whole-milk");
+    expect(reachesUsdaLive(lowFat)).toBe(true);
+
+    const freshButLowFat = { ...food("鮮奶", "fresh milk", "ingredient"), notes: "低脂" };
+    expect(contradictoryDairyMilkLabel(freshButLowFat)).toBe(false);
+    expect(provider.resolve(freshButLowFat).profile?.id).not.toBe("whole-milk");
+    expect(reachesUsdaLive(freshButLowFat)).toBe(true);
 
     const guarded = [
       food("鮮奶", "fresh milk", "ingredient"),
@@ -167,6 +177,43 @@ describe("negative match rules", () => {
     guarded[1] = { ...guarded[1], visibleIngredients: ["soy milk"] };
     guarded[2] = { ...guarded[2], uncertaintyReasons: ["杏仁奶"] };
     guarded[3] = { ...guarded[3], preparationMethod: "植物奶" };
+
+    const notMilkDrinks = [
+      food("牛奶布甸", "milk pudding", "dish"),
+      food("奶茶", "milk tea", "dish"),
+      food("港式奶茶", "hong kong milk tea", "dish"),
+      food("牛奶麥片", "cereal with milk", "dish"),
+      food("牛奶麥片", "cereal with milk", "ingredient"),
+    ];
+    for (const item of notMilkDrinks) {
+      const withSlices = {
+        ...item,
+        visibleIngredients: ["杏仁片", "黃豆"],
+      };
+      expect(contradictoryDairyMilkLabel(withSlices), item.displayName).toBe(false);
+      const match = provider.resolve(withSlices);
+      expect(match.reasons[0], item.displayName).not.toBe(PLANT_MILK_CONTRADICTION_REASON);
+      expect(match.coverageReason, item.displayName).not.toBe("INSUFFICIENT_COVERAGE");
+    }
+    const pudding = provider.resolve({
+      ...food("牛奶布甸", "milk pudding", "dish"),
+      visibleIngredients: ["杏仁片", "黃豆"],
+    });
+    expect(pudding.profile?.id).not.toBe("whole-milk");
+    const tea = provider.resolve({
+      ...food("奶茶", "milk tea", "dish"),
+      visibleIngredients: ["杏仁片", "黃豆"],
+    });
+    expect(tea.profile?.id).toBe("milk-tea");
+    expect(tea.includedInTotal).toBe(true);
+    for (const identityLevel of ["dish", "ingredient"] as const) {
+      const cereal = provider.resolve({
+        ...food("牛奶麥片", "cereal with milk", identityLevel),
+        visibleIngredients: ["杏仁片", "黃豆"],
+      });
+      expect(cereal.profile?.id, identityLevel).toBe("whole-milk");
+      expect(cereal.includedInTotal, identityLevel).toBe(true);
+    }
 
     for (const item of guarded) {
       const match = provider.resolve(item);

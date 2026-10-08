@@ -621,20 +621,44 @@ describe("POST /api/nutrition/resolve", () => {
     expect(body.matches[4].includedInTotal).toBe(false);
   });
 
-  it("still sends unlabelled fresh milk to USDA live", async () => {
+  it("resolves 鮮奶 locally and still looks up low-fat milk", async () => {
     vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
     const fetchMock = vi.fn(async () => Response.json({ foods: [] }));
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await POST(resolveRequest([
-      { ...remoteFood("鮮奶"), displayName: "鮮奶", normalizedName: "鮮奶" },
+      { ...remoteFood("鮮奶"), displayName: "鮮奶", normalizedName: "fresh milk" },
+      { ...remoteFood("低脂奶"), displayName: "低脂奶", normalizedName: "低脂奶" },
     ]));
+    const body = await response.json();
+    const queries = fetchMock.mock.calls.map((call) =>
+      new URL(String(call[0])).searchParams.get("query") ?? "");
 
     expect(response.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledOnce();
-    expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get("query")).toBe("鮮奶");
+    expect(queries).toEqual(["低脂奶"]);
     expect(reserveHourlyUsdaCall).toHaveBeenCalledOnce();
-    expect((await response.json()).matches[0].includedInTotal).toBe(false);
+    expect(body.matches[0].profile.id).toBe("whole-milk");
+    expect(body.matches[0].includedInTotal).toBe(true);
+    expect(body.matches[1].includedInTotal).toBe(false);
+    expect(body.matches[1].profile).toBeNull();
+  });
+
+  it("resolves 鮮奶 locally when no USDA key is configured", async () => {
+    vi.mocked(getNutritionApiKey).mockReturnValue(null);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await POST(resolveRequest([
+      { ...remoteFood("鮮奶"), displayName: "鮮奶", normalizedName: "鮮奶" },
+    ]));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.provider).toBe("kcalcue-reference");
+    expect(body.matches[0].profile.id).toBe("whole-milk");
+    expect(body.matches[0].includedInTotal).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(reserveHourlyUsdaCall).not.toHaveBeenCalled();
   });
 
   it("returns a controlled error for an interrupted input stream", async () => {

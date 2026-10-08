@@ -419,7 +419,7 @@ const baseNutritionProfiles: NutritionProfile[] = [
     canonicalName: "milk",
     category: "dairy",
     preparations: ["raw", "unknown"],
-    aliases: ["whole milk", "milk", "牛奶", "全脂奶"],
+    aliases: ["whole milk", "fresh milk", "milk", "牛奶", "鮮奶", "全脂奶"],
     composite: false,
     nutrientsPer100g: pointMacros(61, 3.2, 4.8, 3.3),
     gramsPerUnit: { g: 1, ml: 1.03, cup: 244 },
