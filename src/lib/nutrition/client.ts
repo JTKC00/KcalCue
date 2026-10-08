@@ -106,6 +106,8 @@ export async function enrichUnresolvedMatches(
             visibleIngredients: food.visibleIngredients,
             notes: food.notes,
             ...(food.entrySource ? { entrySource: food.entrySource } : {}),
+            ...(food.userMilkTypeChoice ? { userMilkTypeChoice: food.userMilkTypeChoice } : {}),
+            ...(food.otherMilkNotice ? { otherMilkNotice: food.otherMilkNotice } : {}),
           };
         }),
       }),

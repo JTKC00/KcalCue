@@ -31,6 +31,8 @@ const mealContextSchema = z.object({
 }).strict();
 const resolveFoodSchema = foodEstimateSchema.safeExtend({
   entrySource: z.enum(["photo", "manual"]).optional(),
+  userMilkTypeChoice: z.enum(["whole", "low-fat", "oat", "soy", "other"]).optional(),
+  otherMilkNotice: z.string().trim().min(1).max(180).optional(),
 });
 const requestSchema = z.object({
   foods: z.array(resolveFoodSchema).max(12),

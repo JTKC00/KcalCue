@@ -7,8 +7,9 @@ export const MERGED_DUPLICATE_MILK_NOTICE =
 const SEPARATE_CONTAINER =
   /另一杯|另一盒|另一瓶|第二杯|第二盒|兩杯|兩盒|兩瓶|兩個杯|旁邊|another glass|another cup|second glass|two glasses|two cups|two cartons/;
 
-const ONE_CONTAINER =
-  /紙盒|紙包|利樂|carton|bottle|瓶子|玻璃樽|一盒|一瓶|一樽|盒裝|瓶裝|包裝/;
+const CARTON = /紙盒|紙包|利樂|carton|一盒|盒裝/;
+const BOTTLE = /瓶子|玻璃樽|一瓶|一樽|瓶裝|(?:^|\s)bottle(?:$|\s)/;
+const WRAPPED = /包裝/;
 
 function visualEvidenceKey(food: ObservedFood): string {
   const notes = normalizeFoodName(food.notes ?? "");
@@ -22,23 +23,24 @@ function withMergeNotice(food: ObservedFood): ObservedFood {
   return { ...food, duplicateMilkNotice: MERGED_DUPLICATE_MILK_NOTICE };
 }
 
-function evidenceBlob(analysis: FoodAnalysis, foods: readonly ObservedFood[]): string {
-  return normalizeFoodName(
-    [
-      ...analysis.visibleEvidence,
-      ...analysis.uncertaintyReasons,
-      ...analysis.unknownInformation,
-      ...analysis.estimatedInformation,
-      ...foods.flatMap((food) => [
-        food.displayName,
-        food.normalizedName,
-        food.notes ?? "",
-        food.preparationMethod ?? "",
-        ...(food.visibleIngredients ?? []),
-        ...food.uncertaintyReasons,
-      ]),
-    ].join(" "),
-  );
+function milkRowText(food: ObservedFood): string {
+  return [
+    food.displayName,
+    food.normalizedName,
+    food.notes ?? "",
+    food.preparationMethod ?? "",
+    ...(food.visibleIngredients ?? []),
+    ...food.uncertaintyReasons,
+  ].join(" ");
+}
+
+function containerKinds(food: ObservedFood): Set<"carton" | "bottle" | "package"> {
+  const text = normalizeFoodName(milkRowText(food));
+  const kinds = new Set<"carton" | "bottle" | "package">();
+  if (CARTON.test(text)) kinds.add("carton");
+  if (BOTTLE.test(text)) kinds.add("bottle");
+  if (WRAPPED.test(text)) kinds.add("package");
+  return kinds;
 }
 
 type MilkFamily = "oat" | "soy" | "almond" | "coconut" | "dairy" | "generic";
@@ -78,10 +80,29 @@ function compatibleFamilies(foods: readonly ObservedFood[]): boolean {
   return specific.size <= 1;
 }
 
-function indicatesOneContainer(analysis: FoodAnalysis, foods: readonly ObservedFood[]): boolean {
-  const blob = evidenceBlob(analysis, foods);
-  if (SEPARATE_CONTAINER.test(blob)) return false;
-  return ONE_CONTAINER.test(blob);
+function mentionsSeparateContainers(analysis: FoodAnalysis, foods: readonly ObservedFood[]): boolean {
+  const blob = normalizeFoodName(
+    [
+      ...foods.map(milkRowText),
+      ...analysis.visibleEvidence,
+      ...analysis.uncertaintyReasons,
+      ...analysis.unknownInformation,
+      ...analysis.estimatedInformation,
+    ].join(" "),
+  );
+  return SEPARATE_CONTAINER.test(blob);
+}
+
+/**
+ * Every milk row must carry the same container kind on its own fields.
+ * A sandwich that says 包裝, or a meal note that says 紙盒, is not evidence
+ * that two milk rows are one item. A carton of 鮮奶 beside a glass of 牛奶
+ * does not share a container.
+ */
+function sameMilkContainer(foods: readonly ObservedFood[]): boolean {
+  const kinds = foods.map(containerKinds);
+  if (kinds.some((set) => set.size === 0)) return false;
+  return [...kinds[0]].some((kind) => kinds.every((set) => set.has(kind)));
 }
 
 function pickKept(foods: readonly ObservedFood[]): ObservedFood {
@@ -90,10 +111,9 @@ function pickKept(foods: readonly ObservedFood[]): ObservedFood {
 
 /**
  * One carton recognised as several milk rows becomes one item.
- * Name variants (燕麥奶 / 燕麥飲品 / 紙盒燕麥奶), a generic row plus a
- * specific row, and different portions still merge when the text describes
- * one package and not a second cup. Portions are not added. The notice is
- * its own field, not an uncertainty reason.
+ * Name variants and a generic row plus one specific family still merge when
+ * each of those milk rows names the same container. Portions are not added.
+ * The notice is its own field, not an uncertainty reason.
  * Identical copies with the same visible notes still merge when there is
  * no package word. A different note such as 旁邊另一杯 stays separate.
  */
@@ -127,7 +147,8 @@ export function dedupeIdenticalContainerMilk(analysis: FoodAnalysis): FoodAnalys
   if (
     milkIndexes.length >= 2 &&
     compatibleFamilies(milkFoods) &&
-    indicatesOneContainer(analysis, milkFoods)
+    sameMilkContainer(milkFoods) &&
+    !mentionsSeparateContainers(analysis, milkFoods)
   ) {
     const drop = new Set(milkIndexes);
     const preferred = withMergeNotice(pickKept(milkFoods));

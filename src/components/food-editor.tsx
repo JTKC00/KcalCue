@@ -99,7 +99,9 @@ export function FoodEditor({
 }: FoodEditorProps) {
   const nutrition = calculation.match;
   const fieldId = `food-${item.id}`;
-  const choseOther = item.uncertaintyReasons.includes(PHOTO_MILK_OTHER_REASON);
+  const choseOther = item.userMilkTypeChoice === "other"
+    || item.otherMilkNotice === PHOTO_MILK_OTHER_REASON
+    || item.uncertaintyReasons.includes(PHOTO_MILK_OTHER_REASON);
   const confirmMilk = photoGenericMilkNeedsConfirmation(item) && !choseOther;
   const mergedMilk = item.duplicateMilkNotice === MERGED_DUPLICATE_MILK_NOTICE
     || item.uncertaintyReasons.includes(MERGED_DUPLICATE_MILK_NOTICE);
@@ -234,7 +236,7 @@ export function FoodEditor({
       ) : null}
 
       {choseOther && nutrition?.reasons[0] !== PHOTO_MILK_OTHER_REASON ? (
-        <p className="food-uncertainty" role="status">{PHOTO_MILK_OTHER_REASON}</p>
+        <p className="food-uncertainty" role="status">{item.otherMilkNotice ?? PHOTO_MILK_OTHER_REASON}</p>
       ) : null}
 
       {mergedMilk ? (

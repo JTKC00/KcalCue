@@ -17,9 +17,11 @@ import {
  * chooser and do not invent a direct calorie. Meal unknownInformation that
  * only says the drink might be milk or plant milk is not plant evidence.
  *
- * Choosing 全脂牛奶 forces one whole-milk ingredient, even when the model
- * called the row a dish. Choosing 其他 keeps the row uncomputed and hides
- * the buttons; there is no free-text field. Rename the food to change it.
+ * Choosing 全脂牛奶 sets userMilkTypeChoice. Only that flag forces one
+ * whole-milk ingredient, even when the model called the row a dish.
+ * A model row already named 全脂牛奶 is not a choice: oat-carton notes
+ * still fail the plant-milk check. Choosing 其他 stores its note on
+ * otherMilkNotice, hides the buttons, and does not open a text field.
  *
  * Typed manual 鮮奶 and 牛奶 keep the existing product default: fresh milk
  * with no low-fat or plant-milk evidence maps to whole milk. Manual QA
@@ -36,6 +38,8 @@ export const PHOTO_MILK_CHOICES = [
 
 export type PhotoMilkChoice = (typeof PHOTO_MILK_CHOICES)[number];
 export type PhotoMilkChoiceId = PhotoMilkChoice["id"];
+/** Set only when the user taps a chooser button. Never inferred from the name. */
+export type UserMilkTypeChoice = PhotoMilkChoiceId;
 
 /**
  * Vision uncertainty that is only about which milk it might be.
@@ -64,21 +68,21 @@ type MilkSubject = {
   preparationMethod?: string;
   visibleIngredients?: string[];
   notes?: string;
+  userMilkTypeChoice?: UserMilkTypeChoice;
 };
 
 /**
- * A tapped milk-type button, or a model row already named 全脂 / 鮮奶 but
- * filed as a dish. Generic 牛奶 stays generic so the chooser still appears.
- * Item-level plant or low-fat evidence is left alone for 全脂奶 / 鮮奶;
- * the button label 全脂牛奶 is the user's choice and clears that evidence.
+ * A tapped milk-type button forces that ingredient. The flag is the only
+ * signal. A model row named 全脂牛奶 keeps its notes so an oat carton can
+ * still contradict dairy milk. Generic 牛奶 stays generic. A model dish
+ * already named 全脂 or 鮮奶, with no plant or low-fat evidence, is one
+ * whole-milk ingredient so it does not fall through as an unknown dish.
  */
 export function milkResolveSubject<T extends MilkSubject>(food: T): T {
-  const choice = photoMilkChoiceByLabel(food.displayName);
-  if (choice) {
-    // A model can name the row 全脂牛奶 while still saying it could not tell
-    // low-fat or plant milk apart. That doubt stays in force until the card
-    // choice removes it. After that, the label is one ingredient.
-    if (food.uncertaintyReasons.some((reason) => isMilkTypeUncertainty(reason))) return food;
+  const choice = food.userMilkTypeChoice && food.userMilkTypeChoice !== "other"
+    ? PHOTO_MILK_CHOICES.find((item) => item.id === food.userMilkTypeChoice)
+    : undefined;
+  if (choice && choice.id !== "other") {
     return {
       ...food,
       displayName: choice.displayName,
@@ -87,6 +91,7 @@ export function milkResolveSubject<T extends MilkSubject>(food: T): T {
       preparationMethod: undefined,
       visibleIngredients: undefined,
       notes: undefined,
+      uncertaintyReasons: food.uncertaintyReasons.filter((reason) => !isMilkTypeUncertainty(reason)),
     };
   }
   if (food.identityLevel !== "dish") return food;

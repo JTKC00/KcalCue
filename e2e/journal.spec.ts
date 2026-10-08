@@ -1807,9 +1807,10 @@ test("a dish-classified glass of milk always offers a type choice and counts 全
   await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
   await expect.poll(() => backend.records.size).toBe(1);
   const saved = [...backend.records.values()][0];
-  const item = (saved.items as Array<{ displayName: string; identityLevel: string; nutritionMatch?: { includedInTotal?: boolean; profile?: { id?: string } } }>)[0];
+  const item = (saved.items as Array<{ displayName: string; identityLevel: string; userMilkTypeChoice?: string; nutritionMatch?: { includedInTotal?: boolean; profile?: { id?: string } } }>)[0];
   expect(item.displayName).toBe("全脂牛奶");
   expect(item.identityLevel).toBe("ingredient");
+  expect(item.userMilkTypeChoice).toBe("whole");
   expect(item.nutritionMatch?.includedInTotal).toBe(true);
   expect(item.nutritionMatch?.profile?.id).toBe("whole-milk");
 });
@@ -1964,12 +1965,14 @@ test("a production glass that might be milk or plant milk still offers 全脂 an
   const item = (saved.items as Array<{
     displayName: string;
     identityLevel: string;
+    userMilkTypeChoice?: string;
     portionMin: number;
     portionMax: number;
     nutritionMatch?: { includedInTotal?: boolean; profile?: { id?: string }; coverageReason?: string };
   }>)[0];
   expect(item.displayName).toBe("全脂牛奶");
   expect(item.identityLevel).toBe("ingredient");
+  expect(item.userMilkTypeChoice).toBe("whole");
   expect(item.portionMin).toBe(250);
   expect(item.portionMax).toBe(250);
   expect(item.nutritionMatch?.includedInTotal).toBe(true);

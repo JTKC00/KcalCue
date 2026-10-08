@@ -3,6 +3,7 @@ import { DISH_IDENTITIES, type DishIdentity } from "./dish-identity";
 import { dishTemplateIsComplete } from "./recipe-templates";
 import {
   NEGATIVE_MATCH_RULES,
+  PHOTO_MILK_OTHER_REASON,
   PLANT_MILK_CONTEXT_CUES,
   SALAD_NAME_SPELLINGS,
   type NegativeMatchRule,
@@ -589,6 +590,7 @@ const DAIRY_MILK_LABELS = [
   "脫脂奶",
   "脱脂奶",
   "低脂奶",
+  "全脂牛奶",
   "全脂奶",
   "鮮奶",
   "牛奶",
@@ -757,9 +759,15 @@ export function photoGenericMilkNeedsConfirmation(
 }
 
 export function blocksUsdaLiveLookup(
-  food: PlantMilkFood & { entrySource?: "photo" | "manual" },
+  food: PlantMilkFood & {
+    entrySource?: "photo" | "manual";
+    userMilkTypeChoice?: string;
+    otherMilkNotice?: string;
+  },
   context?: MealPlantMilkContext,
 ): boolean {
+  if (food.userMilkTypeChoice === "other" || food.otherMilkNotice === PHOTO_MILK_OTHER_REASON) return true;
+  if (food.uncertaintyReasons?.includes(PHOTO_MILK_OTHER_REASON)) return true;
   return contradictoryDairyMilkLabel(food, context)
     || photoGenericMilkNeedsConfirmation(food, context)
     || chocolateMilkName(food);

@@ -1,6 +1,10 @@
 import type { FoodEstimate } from "@/lib/domain/food-analysis";
 
-export type ResolvableFood = FoodEstimate & { entrySource?: "photo" | "manual" };
+export type ResolvableFood = FoodEstimate & {
+  entrySource?: "photo" | "manual";
+  userMilkTypeChoice?: UserMilkTypeChoice;
+  otherMilkNotice?: string;
+};
 import {
   canonicalizeFood,
   chocolateMilkName,
@@ -21,7 +25,7 @@ import {
   PHOTO_MILK_OTHER_REASON,
   PLANT_MILK_CONTRADICTION_REASON,
 } from "./negative-rules";
-import { milkResolveSubject, photoMilkChoiceByLabel } from "./photo-milk";
+import { milkResolveSubject, type UserMilkTypeChoice } from "./photo-milk";
 import {
   COMPOSITE_GENERIC_FALLBACK_REASON,
   isCompatibleNutritionIdentity,
@@ -261,7 +265,11 @@ export function resolveNutritionMatch(
   catalog: NutritionProfile[],
   mealContext?: MealPlantMilkContext,
 ): NutritionMatch {
-  if (food.uncertaintyReasons.includes(PHOTO_MILK_OTHER_REASON)) {
+  if (
+    food.userMilkTypeChoice === "other" ||
+    food.otherMilkNotice === PHOTO_MILK_OTHER_REASON ||
+    food.uncertaintyReasons.includes(PHOTO_MILK_OTHER_REASON)
+  ) {
     return unmatched({
       profile: null,
       confidence: "low",
@@ -271,7 +279,7 @@ export function resolveNutritionMatch(
     }, "INSUFFICIENT_COVERAGE");
   }
   const subject = milkResolveSubject(food);
-  const explicitChoice = subject !== food && photoMilkChoiceByLabel(food.displayName) !== null;
+  const explicitChoice = food.userMilkTypeChoice != null;
   const identity = canonicalizeFood(subject);
   if (!explicitChoice && contradictoryDairyMilkLabel(food, mealContext)) {
     return unmatched({

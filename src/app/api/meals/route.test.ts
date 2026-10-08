@@ -599,12 +599,14 @@ describe("POST /api/meals bounded input", () => {
         originalPortionMin: 250,
         originalPortionMax: 250,
         entrySource: "photo",
+        userMilkTypeChoice: "whole",
       }],
     })));
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(body.record.items[0].userMilkTypeChoice).toBe("whole");
     expect(body.record.items[0].nutritionMatch.profile.id).toBe("whole-milk");
     expect(body.record.items[0].nutritionMatch.includedInTotal).toBe(true);
     expect(body.record.items[0].nutritionMatch.coverageReason).not.toBe("UNKNOWN_DISH");
@@ -631,16 +633,46 @@ describe("POST /api/meals bounded input", () => {
         originalPortionMin: 250,
         originalPortionMax: 250,
         entrySource: "photo",
+        userMilkTypeChoice: "whole",
       }],
     })));
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(body.record.items[0].userMilkTypeChoice).toBe("whole");
     expect(body.record.items[0].nutritionMatch.profile.id).toBe("whole-milk");
     expect(body.record.items[0].nutritionMatch.includedInTotal).toBe(true);
     expect(body.record.items[0].nutritionMatch.coverageReason).not.toBe("UNKNOWN_DISH");
     expect(body.record.items[0].nutritionMatch.identity.canonicalName).not.toBe("mixed-dish");
+  });
+
+  it("keeps a model 全脂牛奶 label blocked when the carton says oat milk", async () => {
+    clearUsdaCache();
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => Response.json({ foods: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await POST(jsonRequest(JSON.stringify({
+      ...meal,
+      mode: "live",
+      analysis: oatPackagingWholeMilkChoiceAnalysis,
+      items: [{
+        ...wholeMilkChoiceStillDish,
+        id: "model-whole-milk",
+        notes: "紙盒標示燕麥奶",
+        originalPortionMin: 250,
+        originalPortionMax: 250,
+        entrySource: "photo",
+      }],
+    })));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(body.record.items[0].userMilkTypeChoice).toBeUndefined();
+    expect(body.record.items[0].nutritionMatch.profile).toBeNull();
+    expect(body.record.items[0].nutritionMatch.includedInTotal).toBe(false);
+    expect(body.record.items[0].nutritionMatch.reasons[0]).toBe(PLANT_MILK_CONTRADICTION_REASON);
   });
 
   it.each([undefined, "8"])(

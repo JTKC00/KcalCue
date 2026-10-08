@@ -18,7 +18,7 @@ import { dedupeIdenticalContainerMilk } from "@/lib/domain/milk-dedupe";
 import { contradictoryDairyMilkLabel, mealPlantMilkContext, photoGenericMilkNeedsConfirmation, type MealPlantMilkContext } from "@/lib/nutrition/canonical";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { PHOTO_GENERIC_MILK_CONFIRMATION_REASON, PHOTO_MILK_OTHER_REASON, PLANT_MILK_CONTRADICTION_REASON } from "@/lib/nutrition/negative-rules";
-import { isMilkTypeUncertainty, PHOTO_MILK_CHOICES, type PhotoMilkChoiceId } from "@/lib/nutrition/photo-milk";
+import { PHOTO_MILK_CHOICES, type PhotoMilkChoiceId } from "@/lib/nutrition/photo-milk";
 import {
   canReuseNutritionMatchForNameEdit,
   enrichUnresolvedMatches,
@@ -671,6 +671,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
                 const knownIndex = knownFoods.findIndex(entry => entry.index === index);
                 if (knownIndex < 0 || !unchangedFood(item, index) ||
                     matches[knownIndex] === localMatches[index]) return item;
+                if (item.userMilkTypeChoice) return item;
                 if (contradictoryDairyMilkLabel(item, mealContextRef.current)) return item;
                 if (photoGenericMilkNeedsConfirmation(item, mealContextRef.current)) return item;
                 return { ...item, nutritionMatch: matches[knownIndex] };
@@ -758,20 +759,17 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
     return revision;
   };
 
-  const handleNameChange = (id: string, name: string) => {
+  const handleNameChange = (id: string, name: string, milkChoice?: Exclude<PhotoMilkChoiceId, "other">) => {
     const revision = invalidateNameLookup(id);
     const currentItem = items.find((item) => item.id === id);
     if (!currentItem) return;
-    const renamed = renameFoodItem(currentItem, name, originalFoods.get(id) ?? initialDraft?.originalItems.find(food => food.id === id));
-    const confirmedMilkChoice = PHOTO_MILK_CHOICES.some(
-      (choice) => choice.id !== "other" && choice.displayName === name.trim(),
-    );
+    const seeded = milkChoice
+      ? { ...currentItem, userMilkTypeChoice: milkChoice, otherMilkNotice: undefined }
+      : { ...currentItem, userMilkTypeChoice: undefined, otherMilkNotice: undefined };
+    const renamed = renameFoodItem(seeded, name, originalFoods.get(id) ?? initialDraft?.originalItems.find(food => food.id === id));
     const nextFood = {
       ...renamed,
-      uncertaintyReasons: renamed.uncertaintyReasons.filter((reason) =>
-        reason !== PHOTO_MILK_OTHER_REASON &&
-        !(confirmedMilkChoice && isMilkTypeUncertainty(reason)),
-      ),
+      uncertaintyReasons: renamed.uncertaintyReasons.filter((reason) => reason !== PHOTO_MILK_OTHER_REASON),
     };
     const cachedMatch = hasKnownPortion(currentItem) && hasKnownPortion(nextFood) && canReuseNutritionMatchForNameEdit(
       currentItem,
@@ -808,6 +806,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
           if (signal.aborted || nameEditRevisions.current.get(id) !== revision) return;
           updateItem(id, (item) => {
             if (item.displayName !== name) return item;
+            if (item.userMilkTypeChoice) return item;
             if (contradictoryDairyMilkLabel(item, mealContextRef.current)) return item;
             return {
               ...item,
@@ -826,16 +825,23 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
     const choice = PHOTO_MILK_CHOICES.find((item) => item.id === choiceId);
     if (!choice) return;
     if (choice.id === "other") {
-      updateItem(id, (item) => ({
-        ...item,
-        uncertaintyReasons: [
-          PHOTO_MILK_OTHER_REASON,
-          ...item.uncertaintyReasons.filter((reason) => reason !== PHOTO_MILK_OTHER_REASON),
-        ].slice(0, 8),
-      }));
+      updateItem(id, (item) => {
+        const next = {
+          ...item,
+          userMilkTypeChoice: "other" as const,
+          otherMilkNotice: PHOTO_MILK_OTHER_REASON,
+          uncertaintyReasons: item.uncertaintyReasons.filter((reason) => reason !== PHOTO_MILK_OTHER_REASON),
+        };
+        return {
+          ...next,
+          nutritionMatch: hasKnownPortion(next)
+            ? nutritionProvider.resolve(next, mealContextRef.current)
+            : item.nutritionMatch,
+        };
+      });
       return;
     }
-    handleNameChange(id, choice.displayName);
+    handleNameChange(id, choice.displayName, choice.id);
   };
 
   const handlePortionChange = (
