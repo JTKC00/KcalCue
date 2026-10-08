@@ -97,8 +97,8 @@ profile 覆蓋：36/65（55.4%）。
 - `caesar-salad-creamy`：凱撒沙律 / `凱撒沙律` → `creamy-salad`。PR #118 的高脂沙律。計入 creamy-salad 是對的，不是錯誤高信心。
 - `char-siu-rice-plate`：叉燒碟頭飯 / `char siu rice plate` → `template:char-siu-rice-plate`。N1 把叉燒碟頭飯收到 rice-plate。N2 用碟頭飯模板計算，profile 不是 siu-mei-rice。
 - `plain-noodle-soup`：陽春麵 / `plain noodle soup` → `template:plain-noodle-soup`。N1 把陽春麵收到茶餐廳麵。N2 用茶餐廳麵模板計算，profile 不是 noodle-soup。
-- `sesame-dressing-not-lean`：雞胸胡麻醬沙律 / `chicken breast salad with sesame dressing` → `—`。胡麻醬沒有營養 profile，離開瘦身範圍後不計算。
-- `vinaigrette-not-lean`：油醋汁沙律 / `vinaigrette salad` → `—`。油醋汁沒有營養 profile，離開瘦身範圍後不計算。
+- `sesame-dressing-not-lean`：雞胸胡麻醬沙律 / `chicken breast salad with sesame dressing` → `—`。胡麻醬沒有營養 profile。原因碼 DISH_KNOWN_NO_PROFILE，畫面仍是暫未能計算。醬量未定，這次不加沙律醬模板。
+- `vinaigrette-not-lean`：油醋汁沙律 / `vinaigrette salad` → `—`。油醋汁沒有營養 profile。原因碼 DISH_KNOWN_NO_PROFILE，畫面仍是暫未能計算。醬量未定，這次不加沙律醬模板。
 - `thousand-island-not-lean`：千島醬沙律 / `thousand island salad` → `creamy-salad`。千島醬走 creamy-salad，不是 60–160 的瘦身沙律。
 - `egg-yolk-sauce-not-lean`：蛋黃醬沙律 / `mayonnaise salad` → `creamy-salad`。蛋黃醬走 creamy-salad。
 
@@ -264,6 +264,16 @@ R > 3、未完成：（無）。
 ## 授權
 
 這次只用 USDA FoodData Central SR Legacy（2018-04），公有領域／CC0 1.0。台灣食藥署開放資料、日本八訂成分表、加拿大 CNF 的條款仍以研究文件為準，這次沒有匯入，所以沒有觸發它們的顯名義務。香港食安中心營養資料庫只限個人非商業使用，Open Food Facts 是 ODbL，兩者都沒有用。
+
+## 生產 QA 跟進
+
+65 個名稱的安全覆蓋、profile 覆蓋、身份覆蓋和錯誤高信心配對沒有因為這次 QA 修正而改變。忌廉通粉不在這 65 個名稱裡。
+
+忌廉通粉、通粉沙律、macaroni salad 接到既有 `creamy-salad`。目錄下限仍是 63 kcal／100 g（FDC 2706818）。畫面把一份的 kcal 向下取整到 5，所以 100 g 會顯示 60，而不是 63。份量約 95–98 g 時，未進位的下限大約是 60–62 kcal。這是顯示進位，目錄數字沒有改。
+
+胡麻醬沙律和油醋汁沙律維持不計算，原因碼是 `DISH_KNOWN_NO_PROFILE`。使用者句子說明還沒有營養 profile。醬量足以把 R 推過 3，而且不在這五個試點家族，所以這次不加模板。
+
+名稱是牛奶或 milk，而備註、可見食材或不確定原因指向燕麥、黃豆或杏仁時，不配對 whole-milk，也不把這個項目交給 USDA live client。若模型只在餐點層的 visibleEvidence 寫植物奶，食物本身沒有這些欄位，這個缺口仍然存在。
 
 ## 重現
 

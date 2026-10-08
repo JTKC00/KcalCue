@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import type { FoodEstimate } from "@/lib/domain/food-analysis";
-import { canonicalizeFood, profileBlockedByNegativeRule } from "./canonical";
+import { canonicalizeFood, contradictoryDairyMilkLabel, profileBlockedByNegativeRule } from "./canonical";
 import { localNutritionProfiles } from "./local-data";
 import { LocalNutritionProvider } from "./local-provider";
-import { NEGATIVE_MATCH_RULES, SALAD_NAME_SPELLINGS, negativeRuleById } from "./negative-rules";
+import {
+  DRESSED_SALAD_UNCALCULATED_REASON,
+  NEGATIVE_MATCH_RULES,
+  PLANT_MILK_CONTRADICTION_REASON,
+  SALAD_NAME_SPELLINGS,
+  negativeRuleById,
+} from "./negative-rules";
 
 function food(
   displayName: string,
@@ -90,7 +96,46 @@ describe("negative match rules", () => {
       expect(match.includedInTotal, displayName).toBe(false);
       expect(match.coverageReason, displayName).toBe("DISH_KNOWN_NO_PROFILE");
       expect(match.identity.dishId, displayName).toBe("dressed-salad");
+      expect(match.reasons[0], displayName).toBe(DRESSED_SALAD_UNCALCULATED_REASON);
     }
+
+    const englishOnly = provider.resolve(food("sesame dressing salad", "vinaigrette salad"));
+    expect(englishOnly.includedInTotal).toBe(false);
+    expect(englishOnly.coverageReason).toBe("DISH_KNOWN_NO_PROFILE");
+    expect(englishOnly.reasons[0]).toBe(DRESSED_SALAD_UNCALCULATED_REASON);
+  });
+
+  it("does not treat dairy milk as whole milk when the description says plant milk", () => {
+    const plain = food("牛奶", "whole milk", "ingredient");
+    expect(contradictoryDairyMilkLabel(plain)).toBe(false);
+    expect(provider.resolve(plain).profile?.id).toBe("whole-milk");
+
+    const cases = [
+      food("牛奶", "milk", "ingredient"),
+      food("牛奶", "whole milk", "ingredient"),
+      food("全脂奶", "milk", "ingredient"),
+    ];
+    cases[0] = { ...cases[0], notes: "oat milk in a glass" };
+    cases[1] = { ...cases[1], visibleIngredients: ["oats"] };
+    cases[2] = { ...cases[2], uncertaintyReasons: ["可能是杏仁奶"] };
+
+    for (const item of cases) {
+      expect(contradictoryDairyMilkLabel(item), item.displayName).toBe(true);
+      const match = provider.resolve(item);
+      expect(match.profile?.id, item.displayName).not.toBe("whole-milk");
+      expect(match.includedInTotal, item.displayName).toBe(false);
+      expect(match.coverageReason, item.displayName).toBe("INSUFFICIENT_COVERAGE");
+      expect(match.reasons[0], item.displayName).toBe(PLANT_MILK_CONTRADICTION_REASON);
+      expect(canonicalizeFood(item).canonicalName, item.displayName).not.toBe("milk");
+    }
+
+    const namedOat = food("燕麥奶", "oat milk", "ingredient");
+    expect(contradictoryDairyMilkLabel(namedOat)).toBe(false);
+    expect(provider.resolve(namedOat).profile?.id).not.toBe("whole-milk");
+
+    const evidenceOnly = food("牛奶", "milk", "ingredient");
+    expect(contradictoryDairyMilkLabel(evidenceOnly)).toBe(false);
+    expect(provider.resolve(evidenceOnly).profile?.id).toBe("whole-milk");
   });
 
   it("does not resolve a composite dish to a single ingredient profile", () => {

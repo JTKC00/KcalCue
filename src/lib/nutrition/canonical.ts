@@ -3,6 +3,7 @@ import { DISH_IDENTITIES, type DishIdentity } from "./dish-identity";
 import { dishTemplateIsComplete } from "./recipe-templates";
 import {
   NEGATIVE_MATCH_RULES,
+  PLANT_MILK_CONTEXT_CUES,
   SALAD_NAME_SPELLINGS,
   type NegativeMatchRule,
 } from "./negative-rules";
@@ -197,8 +198,15 @@ function matchingSaladDressingRule(name: string): NegativeMatchRule | null {
  * guesses and must not move a lean salad into this profile. 「沙律醬」 is the
  * dressing, not a salad: the salad word does not match when 醬 follows it.
  */
+/** Cream macaroni often arrives without the word 沙律. Soup stays on its own identity. */
+function isNamedCreamyMacaroni(name: string): boolean {
+  if (/(?:^|\s)soup(?:$|\s)|湯/.test(name)) return false;
+  return /忌廉通粉|忌廉通心粉|(?:^|\s)(?:cream|creamy) macaroni(?:$|\s)/.test(name);
+}
+
 function isCreamySalad(food: FoodEstimate): boolean {
   const name = saladSearchName(food);
+  if (isNamedCreamyMacaroni(name)) return true;
   if (!SALAD_WORD.test(name)) return false;
   return matchingSaladDressingRule(name)?.routeCanonicalName === "creamy-salad";
 }
@@ -531,15 +539,74 @@ function isSimpleRemainder(text: string, modifiers: string[]): boolean {
   return stripTokens(text, [...modifiers, ...preparationTokens]).length === 0;
 }
 
+const BARE_DAIRY_MILK_NAMES = new Set(["milk", "whole milk", "牛奶", "全脂奶"]);
+
 function plantMilkBlocksWholeMilk(text: string): boolean {
   const rule = NEGATIVE_MATCH_RULES.find((item) => item.id === "plant-milk-not-whole-milk");
-  return rule ? ruleMatchesName(rule, text) : false;
+  if (rule && ruleMatchesName(rule, text)) return true;
+  return PLANT_MILK_CONTEXT_CUES.some((cue) =>
+    textContainsKey(text, cue, { skipLongerAliasShadow: true }),
+  );
 }
 
-function collectIdentityHits(text: string): IdentityHit[] {
+function plantMilkSearchText(food: {
+  displayName: string;
+  normalizedName: string;
+  preparationMethod?: string;
+  notes?: string;
+  visibleIngredients?: readonly string[];
+  uncertaintyReasons?: readonly string[];
+}): string {
+  return normalizeFoodName(
+    [
+      food.displayName,
+      food.normalizedName,
+      food.preparationMethod ?? "",
+      food.notes ?? "",
+      ...(food.visibleIngredients ?? []),
+      ...(food.uncertaintyReasons ?? []),
+    ].join(" "),
+  );
+}
+
+function bareDairyMilkName(name: string): boolean {
+  return BARE_DAIRY_MILK_NAMES.has(normalizeFoodName(name));
+}
+
+/**
+ * The photo name is dairy milk, but notes, ingredients, or the other name
+ * say oat, soy, or almond. Meal-level visibleEvidence is not on the food
+ * and is not read here.
+ */
+export function contradictoryDairyMilkLabel(food: {
+  displayName: string;
+  normalizedName: string;
+  preparationMethod?: string;
+  notes?: string;
+  visibleIngredients?: readonly string[];
+  uncertaintyReasons?: readonly string[];
+}): boolean {
+  const displayIsDairy = bareDairyMilkName(food.displayName);
+  const normalizedIsDairy = bareDairyMilkName(food.normalizedName);
+  if (!displayIsDairy && !normalizedIsDairy) return false;
+  const context = normalizeFoodName(
+    [
+      displayIsDairy ? "" : food.displayName,
+      normalizedIsDairy ? "" : food.normalizedName,
+      food.preparationMethod ?? "",
+      food.notes ?? "",
+      ...(food.visibleIngredients ?? []),
+      ...(food.uncertaintyReasons ?? []),
+    ].join(" "),
+  );
+  return plantMilkBlocksWholeMilk(context);
+}
+
+function collectIdentityHits(text: string, food: FoodEstimate): IdentityHit[] {
   const hits: IdentityHit[] = [];
+  const blockDairyMilk = plantMilkBlocksWholeMilk(plantMilkSearchText(food));
   for (const rule of IDENTITY_RULES) {
-    if (rule.canonicalName === "milk" && plantMilkBlocksWholeMilk(text)) continue;
+    if (rule.canonicalName === "milk" && blockDairyMilk) continue;
     const matchedKey = findLongestMatch(text, rule.keys, {
       singleCjkKeyMustBeStandalone: true,
     });
@@ -784,7 +851,7 @@ export function canonicalizeFood(food: FoodEstimate): CanonicalFoodIdentity {
     return identityFromDish(curated.identity, preparation);
   }
 
-  const identityHits = collectIdentityHits(text);
+  const identityHits = collectIdentityHits(text, food);
   const saladName = saladSearchName(food);
   const dressingRule = SALAD_WORD.test(saladName) ? matchingSaladDressingRule(saladName) : null;
   if (!hasNamedDish(identityHits)) {
@@ -916,7 +983,10 @@ export function profileBlockedByNegativeRule(
       if (isCompositeIdentity(identity) && profile.composite !== true) return true;
       continue;
     }
-    if (!ruleMatchesName(rule, name)) continue;
+    const described = rule.id === "plant-milk-not-whole-milk"
+      ? plantMilkBlocksWholeMilk(plantMilkSearchText(food))
+      : ruleMatchesName(rule, name);
+    if (!described) continue;
     if (
       rule.blockProfileIds.includes(profile.id) ||
       rule.blockCanonicalNames.includes(profile.canonicalName)

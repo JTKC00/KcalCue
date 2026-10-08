@@ -4146,7 +4146,7 @@
       "identityLevel": "dish",
       "rule": "胡麻醬不得落到 protein-vegetable-salad",
       "knownFalseConfidentMatch": false,
-      "note": "胡麻醬沒有營養 profile，離開瘦身範圍後不計算。",
+      "note": "胡麻醬沒有營養 profile。原因碼 DISH_KNOWN_NO_PROFILE，畫面仍是暫未能計算。醬量未定，這次不加沙律醬模板。",
       "violation": false,
       "includedInTotal": false,
       "profileId": null,
@@ -4154,7 +4154,7 @@
       "canonicalName": "dressed-salad",
       "coverage": "none",
       "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。"
+      "userFacingReason": "胡麻醬或油醋汁還沒有營養 profile，因此這道沙律不計算。"
     },
     {
       "id": "vinaigrette-not-lean",
@@ -4163,7 +4163,7 @@
       "identityLevel": "dish",
       "rule": "油醋汁不得落到 protein-vegetable-salad",
       "knownFalseConfidentMatch": false,
-      "note": "油醋汁沒有營養 profile，離開瘦身範圍後不計算。",
+      "note": "油醋汁沒有營養 profile。原因碼 DISH_KNOWN_NO_PROFILE，畫面仍是暫未能計算。醬量未定，這次不加沙律醬模板。",
       "violation": false,
       "includedInTotal": false,
       "profileId": null,
@@ -4171,7 +4171,7 @@
       "canonicalName": "dressed-salad",
       "coverage": "none",
       "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。"
+      "userFacingReason": "胡麻醬或油醋汁還沒有營養 profile，因此這道沙律不計算。"
     },
     {
       "id": "thousand-island-not-lean",

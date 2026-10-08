@@ -92,7 +92,7 @@ export const NEGATIVE_MATCH_RULES: readonly NegativeMatchRule[] = [
     id: "sesame-or-vinaigrette-not-lean-salad",
     description: "胡麻醬與油醋汁不是瘦身沙律，也沒有對應的營養 profile，因此不計算。",
     kind: "salad-dressing",
-    patterns: ["胡麻醬", "胡麻酱", "油醋汁"],
+    patterns: ["胡麻醬", "胡麻酱", "油醋汁", "sesame dressing", "vinaigrette"],
     blockCanonicalNames: ["protein-vegetable-salad", "creamy-salad"],
     blockProfileIds: ["protein-vegetable-salad", "creamy-salad"],
     routeCanonicalName: null,
@@ -107,6 +107,29 @@ export const NEGATIVE_MATCH_RULES: readonly NegativeMatchRule[] = [
     routeCanonicalName: null,
   },
 ];
+
+/**
+ * Shorter cues used only when the dish name itself says dairy milk.
+ * The name-only patterns above still decide 燕麥奶 / oat milk.
+ */
+export const PLANT_MILK_CONTEXT_CUES = [
+  "oat",
+  "oats",
+  "燕麥",
+  "燕麦",
+  "almond",
+  "杏仁",
+  "soy",
+  "soya",
+  "植物奶",
+  "plant milk",
+] as const;
+
+export const DRESSED_SALAD_UNCALCULATED_REASON =
+  "胡麻醬或油醋汁還沒有營養 profile，因此這道沙律不計算。";
+
+export const PLANT_MILK_CONTRADICTION_REASON =
+  "名稱是牛奶，但備註、可見食材或描述指向燕麥、黃豆或杏仁，因此不配對全脂奶。";
 
 export function negativeRuleById(id: string): NegativeMatchRule {
   const rule = NEGATIVE_MATCH_RULES.find((item) => item.id === id);

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { authenticated, apiError } from "@/lib/server/auth";
 import { foodEstimateSchema } from "@/lib/domain/food-analysis";
-import { isCompositeIdentity } from "@/lib/nutrition/canonical";
+import { contradictoryDairyMilkLabel, isCompositeIdentity } from "@/lib/nutrition/canonical";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { supportsUsdaPortionUnit, UsdaNutritionClient, UsdaNutritionError } from "@/lib/nutrition/usda";
 import { getNutritionApiKey } from "@/lib/server/env";
@@ -78,7 +78,8 @@ export async function POST(request: Request) {
     const remoteIndexes = apiKey ? matches.flatMap((match, index) =>
       !match.includedInTotal &&
       supportsUsdaPortionUnit(parsed.data.foods[index].unit) &&
-      !isCompositeIdentity(match.identity) ? [index] : []) : [];
+      !isCompositeIdentity(match.identity) &&
+      !contradictoryDairyMilkLabel(parsed.data.foods[index]) ? [index] : []) : [];
     if (apiKey && remoteIndexes.length > 0 && !request.signal.aborted) {
       const deadline = new AbortController();
       const timeout = setTimeout(() => deadline.abort(), USDA_ENRICHMENT_DEADLINE_MS);

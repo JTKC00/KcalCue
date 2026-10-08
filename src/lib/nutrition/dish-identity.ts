@@ -448,6 +448,14 @@ export const DISH_IDENTITIES: readonly DishIdentity[] = [
     english: ["fish and chips", "fish fillet and fries"],
   }),
   dish({
+    id: "creamy-macaroni-salad",
+    familyId: "salad",
+    nutritionCanonicalName: "creamy-salad",
+    traditional: ["忌廉通粉", "通粉沙律"],
+    variant: ["忌廉通心粉", "忌廉通粉沙律"],
+    english: ["macaroni salad", "cream macaroni", "creamy macaroni"],
+  }),
+  dish({
     id: "char-siu-rice",
     familyId: "siu-mei-rice",
     nutritionCanonicalName: "siu-mei-rice",

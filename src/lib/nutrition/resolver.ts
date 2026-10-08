@@ -1,10 +1,15 @@
 import type { FoodEstimate } from "@/lib/domain/food-analysis";
 import {
   canonicalizeFood,
+  contradictoryDairyMilkLabel,
   isCompositeIdentity,
   normalizeFoodName,
   profileBlockedByNegativeRule,
 } from "./canonical";
+import {
+  DRESSED_SALAD_UNCALCULATED_REASON,
+  PLANT_MILK_CONTRADICTION_REASON,
+} from "./negative-rules";
 import {
   COMPOSITE_GENERIC_FALLBACK_REASON,
   isCompatibleNutritionIdentity,
@@ -186,7 +191,7 @@ function classifyMatch(
   }
 
   if (isCompositeIdentity(identity) || !isCompatibleNutritionIdentity(identity, profile)) {
-    reasons.push(COMPOSITE_GENERIC_FALLBACK_REASON);
+    reasons.push(compositeUnmatchedReason(identity));
     return { matchType: "unresolved", confidence: "low", reasons };
   }
 
@@ -214,11 +219,27 @@ function unmatched(
   return { ...match, includedInTotal: false, coverageReason };
 }
 
+function compositeUnmatchedReason(identity: CanonicalFoodIdentity): string {
+  if (identity.canonicalName === "dressed-salad" || identity.dishId === "dressed-salad") {
+    return DRESSED_SALAD_UNCALCULATED_REASON;
+  }
+  return COMPOSITE_GENERIC_FALLBACK_REASON;
+}
+
 export function resolveNutritionMatch(
   food: FoodEstimate,
   catalog: NutritionProfile[],
 ): NutritionMatch {
   const identity = canonicalizeFood(food);
+  if (contradictoryDairyMilkLabel(food)) {
+    return unmatched({
+      profile: null,
+      confidence: "low",
+      matchType: "unresolved",
+      reasons: [PLANT_MILK_CONTRADICTION_REASON],
+      identity,
+    }, "INSUFFICIENT_COVERAGE");
+  }
   if (identity.qualifiers.includes("ambiguous")) {
     return unmatched({
       profile: null,
@@ -253,7 +274,7 @@ export function resolveNutritionMatch(
       profile: null,
       confidence: "low",
       matchType: "unresolved",
-      reasons: [COMPOSITE_GENERIC_FALLBACK_REASON],
+      reasons: [compositeUnmatchedReason(identity)],
       identity,
     }, compositeDishCoverageReason(identity));
   }

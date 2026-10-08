@@ -538,6 +538,9 @@ describe("high-fat salad profile", () => {
     ["芝士通粉沙律", "cheese macaroni salad"],
     ["千島醬沙律", "thousand island salad"],
     ["通粉沙律", "macaroni salad"],
+    ["忌廉通粉", "macaroni salad"],
+    ["忌廉通粉", "cream macaroni"],
+    ["忌廉通心粉", "creamy macaroni"],
     ["chicken mayo salad", "chicken mayo salad"],
   ])("estimates %s above the lean salad cap", (displayName, normalizedName) => {
     const food = makeFood({
@@ -587,6 +590,35 @@ describe("high-fat salad profile", () => {
     }
     expect(band.fat.max).toBeLessThan(74.85);
     expect(band.calories.max).toBeLessThan(680);
+  });
+
+  it("keeps the cited 63 kcal floor while a 100 g serving displays 60 after 5 kcal rounding", () => {
+    const food = makeFood({
+      displayName: "通粉沙律",
+      normalizedName: "macaroni salad",
+      identityLevel: "dish",
+      portionMin: 100,
+      portionMax: 100,
+      unit: "g",
+    });
+    const calculated = service.calculateMeal([food]).foods[0];
+    expect(calculated?.profile?.nutrientsPer100g.calories.min).toBe(63);
+    expect(calculated?.ranges?.calories).toEqual({ min: 63, max: 257 });
+    expect(roundRange(calculated?.ranges?.calories ?? { min: 0, max: 0 }, 5)).toEqual({
+      min: 60,
+      max: 260,
+    });
+    const slightlyUnder = calculateNutritionRanges(
+      calculated?.profile?.nutrientsPer100g ?? {
+        calories: { min: 63, max: 257 },
+        protein: { min: 0, max: 0 },
+        carbs: { min: 0, max: 0 },
+        fat: { min: 0, max: 0 },
+      },
+      { min: 98, max: 98 },
+    );
+    expect(slightlyUnder.calories.min).toBeCloseTo(61.74, 2);
+    expect(Math.round(slightlyUnder.calories.min)).toBe(62);
   });
 
   it("does not let a guessed dressing ingredient move the lean production bowl", () => {
