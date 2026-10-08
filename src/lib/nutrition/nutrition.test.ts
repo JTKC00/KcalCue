@@ -488,4 +488,145 @@ describe("recognised protein vegetable salad estimation", () => {
     expect(meal.totalCount).toBe(0);
     expect(mealShowsTotal(meal.coverage)).toBe(false);
   });
+
+  it.each([
+    ["雞胸沙拉", "chicken breast salad"],
+    ["雜菜沙律", "mixed vegetable salad"],
+    ["chicken salad no dressing", "chicken salad no dressing"],
+  ])("keeps lean salad %s on the 60–160 profile", (displayName, normalizedName) => {
+    const food = makeFood({ displayName, normalizedName, identityLevel: "dish" });
+    const match = provider.resolve(food);
+
+    expect(match.includedInTotal).toBe(true);
+    expect(match.profile?.id).toBe("protein-vegetable-salad");
+    expect(match.profile?.nutrientsPer100g.calories).toEqual({ min: 60, max: 160 });
+  });
+
+  it.each([
+    ["沙律碗", "salad bowl"],
+    ["沙律醬", "mayonnaise"],
+    ["意粉沙律", "pasta salad"],
+    ["雞肉沙律伴醬", "chicken salad with dressing"],
+  ])("does not estimate %s", (displayName, normalizedName) => {
+    const food = makeFood({ displayName, normalizedName, identityLevel: "dish" });
+    const meal = service.calculateMeal([food]);
+
+    expect(meal.coverage).toBe("none");
+    expect(meal.foods[0]?.profile?.id).not.toBe("protein-vegetable-salad");
+    expect(meal.foods[0]?.profile?.id).not.toBe("creamy-salad");
+  });
+});
+
+describe("high-fat salad profile", () => {
+  const provider = new LocalNutritionProvider();
+  const service = new NutritionService(provider);
+  const cited = [
+    { id: "2706818", calories: 63, protein: 8.52, carbs: 2.99, fat: 1.94 },
+    { id: "2709591", calories: 77, protein: 4, carbs: 7.49, fat: 3.41 },
+    { id: "2708932", calories: 221, protein: 4.46, carbs: 24.6, fat: 11.5 },
+    { id: "2708947", calories: 246, protein: 6.89, carbs: 21.8, fat: 14.4 },
+    { id: "2707182", calories: 257, protein: 10.26, carbs: 1.01, fat: 23.14 },
+  ] as const;
+
+  it.each([
+    ["凱撒沙律", "caesar salad"],
+    ["凱撒雞沙律", "chicken caesar salad"],
+    ["吞拿魚通粉沙律", "tuna macaroni salad"],
+    ["蛋黃醬薯仔沙律", "potato salad with mayonnaise"],
+    ["蛋黃醬蛋沙律", "egg mayo salad"],
+    ["雜菜沙律伴沙律醬", "vegetable salad with mayonnaise"],
+    ["芝士通粉沙律", "cheese macaroni salad"],
+    ["千島醬沙律", "thousand island salad"],
+    ["通粉沙律", "macaroni salad"],
+    ["chicken mayo salad", "chicken mayo salad"],
+  ])("estimates %s above the lean salad cap", (displayName, normalizedName) => {
+    const food = makeFood({
+      displayName,
+      normalizedName,
+      identityLevel: "dish",
+      portionMin: 100,
+      portionMax: 100,
+    });
+    const match = provider.resolve(food);
+    const meal = service.calculateMeal([food]);
+    const calories = match.profile?.nutrientsPer100g.calories;
+
+    expect(canonicalizeFood(food).canonicalName).toBe("creamy-salad");
+    expect(match.includedInTotal).toBe(true);
+    expect(match.confidence).toBe("medium");
+    expect(match.profile?.id).toBe("creamy-salad");
+    expect(match.profile?.id).not.toBe("protein-vegetable-salad");
+    expect(calories?.max).toBeGreaterThanOrEqual(246);
+    expect(calories?.max).toBeGreaterThanOrEqual(257);
+    expect(calories?.min).toBeLessThanOrEqual(63);
+    expect(meal.coverage).toBe("complete");
+    expect(meal.totals.calories.max).toBeGreaterThanOrEqual(246);
+  });
+
+  it("brackets the cited FDC points without treating the dish as pure mayonnaise", () => {
+    const profile = provider.resolve(makeFood({
+      displayName: "凱撒雞沙律",
+      normalizedName: "chicken caesar salad",
+      identityLevel: "dish",
+    })).profile;
+    expect(profile?.source.sourceId).toContain("2708947");
+    expect(profile?.source.retrievedAt).toBe("2026-10-08");
+    expect(profile?.source.attribution).toContain("FoodData Central");
+    const band = profile?.nutrientsPer100g;
+    expect(band).toBeTruthy();
+    if (!band) return;
+    for (const point of cited) {
+      expect(band.calories.min).toBeLessThanOrEqual(point.calories);
+      expect(band.calories.max).toBeGreaterThanOrEqual(point.calories);
+      expect(band.protein.min).toBeLessThanOrEqual(point.protein);
+      expect(band.protein.max).toBeGreaterThanOrEqual(point.protein);
+      expect(band.carbs.min).toBeLessThanOrEqual(point.carbs);
+      expect(band.carbs.max).toBeGreaterThanOrEqual(point.carbs);
+      expect(band.fat.min).toBeLessThanOrEqual(point.fat);
+      expect(band.fat.max).toBeGreaterThanOrEqual(point.fat);
+    }
+    expect(band.fat.max).toBeLessThan(74.85);
+    expect(band.calories.max).toBeLessThan(680);
+  });
+
+  it("does not let a guessed dressing ingredient move the lean production bowl", () => {
+    const food = makeFood({
+      displayName: "燒烤蛋白質雜菜沙律碗",
+      normalizedName: "grilled protein mixed vegetable salad bowl",
+      identityLevel: "dish",
+      visibleIngredients: ["grilled chicken", "mixed vegetables", "dressing"],
+      portionMin: 450,
+      portionMax: 700,
+    });
+    const meal = service.calculateMeal([food]);
+
+    expect(provider.resolve(food).profile?.id).toBe("protein-vegetable-salad");
+    expect(meal.totals.calories).toEqual({ min: 270, max: 1120 });
+  });
+
+  it("does not treat soy milk as whole milk", () => {
+    const soy = provider.resolve(makeFood({ displayName: "豆漿", normalizedName: "soy milk" }));
+    const milk = provider.resolve(makeFood({ displayName: "牛奶", normalizedName: "whole milk" }));
+    const tea = provider.resolve(makeFood({
+      displayName: "港式奶茶",
+      normalizedName: "hong kong milk tea",
+      identityLevel: "dish",
+    }));
+
+    expect(soy.includedInTotal).toBe(false);
+    expect(soy.profile?.id).not.toBe("whole-milk");
+    expect(canonicalizeFood(makeFood({ displayName: "豆漿", normalizedName: "soy milk" })).canonicalName).not.toBe("milk");
+    expect(milk.profile?.id).toBe("whole-milk");
+    expect(provider.resolve(makeFood({ displayName: "牛奶", normalizedName: "milk" })).profile?.id).toBe("whole-milk");
+    expect(tea.profile?.id).toBe("milk-tea");
+    for (const [displayName, normalizedName] of [
+      ["燕麥奶", "oat milk"],
+      ["椰奶", "coconut milk"],
+      ["杏仁奶", "almond milk"],
+    ] as const) {
+      const match = provider.resolve(makeFood({ displayName, normalizedName }));
+      expect(match.profile?.id).not.toBe("whole-milk");
+      expect(match.includedInTotal).toBe(false);
+    }
+  });
 });
