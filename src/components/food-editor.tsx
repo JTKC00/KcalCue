@@ -10,6 +10,10 @@ import {
 import type { EditableFoodItem, PortionPreset } from "@/lib/domain/editable-meal";
 import { roundRange, type CalculatedFood } from "@/lib/nutrition/calculation";
 import { templateRangeNeedsFollowUp } from "@/lib/nutrition/recipe-templates";
+import { MERGED_DUPLICATE_MILK_NOTICE } from "@/lib/domain/milk-dedupe";
+import { photoGenericMilkNeedsConfirmation } from "@/lib/nutrition/canonical";
+import { PHOTO_MILK_CHOICES, type PhotoMilkChoiceId } from "@/lib/nutrition/photo-milk";
+import { portionValueAfterProgrammaticFill } from "./portion-fill";
 import { TrashIcon } from "./icons";
 
 export interface RecognitionBadge {
@@ -25,6 +29,7 @@ interface FoodEditorProps {
   onUnitChange: (unit: PortionUnit) => void;
   onPreset: (preset: PortionPreset) => void;
   onDelete: () => void;
+  onMilkChoice?: (choice: PhotoMilkChoiceId) => void;
 }
 
 const presetLabels: Record<PortionPreset, string> = {
@@ -43,11 +48,28 @@ function PortionInput({ id, value, onCommit }: { id: string; value: number | nul
   const shown = editing ?? (value == null ? "" : String(value));
   return <><input id={id} type="number" inputMode="decimal" min="0.1" max="5000" step="any"
     value={shown} placeholder="未知" aria-invalid={error || undefined} aria-describedby={error ? `${id}-error` : undefined}
-    onFocus={event => { selectPortion(event.currentTarget); }}
+    onFocus={event => {
+      event.currentTarget.dataset.portionOnFocus = event.currentTarget.value;
+      selectPortion(event.currentTarget);
+    }}
     onClick={event => { selectPortion(event.currentTarget); }}
     // A click otherwise drops the caret at the end, so the next digit appends to 150.
     onMouseUp={event => { event.preventDefault(); }}
-    onChange={event => { setEditing(event.currentTarget.value); setError(false); }}
+    onChange={event => {
+      const input = event.currentTarget;
+      const native = event.nativeEvent;
+      const inserted = native instanceof InputEvent ? native.data : null;
+      const inputType = native instanceof InputEvent ? native.inputType : "";
+      const next = portionValueAfterProgrammaticFill(
+        input.dataset.portionOnFocus ?? "",
+        input.value,
+        inserted,
+        inputType,
+      );
+      input.dataset.portionOnFocus = next;
+      setEditing(next);
+      setError(false);
+    }}
     onBlur={event => {
       const raw = event.currentTarget.value;
       const number = Number(raw);
@@ -72,9 +94,13 @@ export function FoodEditor({
   onUnitChange,
   onPreset,
   onDelete,
+  onMilkChoice,
 }: FoodEditorProps) {
   const nutrition = calculation.match;
   const fieldId = `food-${item.id}`;
+  const confirmMilk = photoGenericMilkNeedsConfirmation(item);
+  const mergedMilk = item.uncertaintyReasons.includes(MERGED_DUPLICATE_MILK_NOTICE);
+  const otherUncertainty = item.uncertaintyReasons.find((reason) => reason !== MERGED_DUPLICATE_MILK_NOTICE);
 
   return (
     <article className="food-card">
@@ -123,6 +149,19 @@ export function FoodEditor({
             : copy.nutritionUnavailable}
         </span>
       </div>
+
+      {confirmMilk ? (
+        <fieldset className="preset-fieldset">
+          <legend>請選擇這杯飲品的種類</legend>
+          <div className="milk-choice-control">
+            {PHOTO_MILK_CHOICES.map((choice) => (
+              <button key={choice.id} type="button" onClick={() => onMilkChoice?.(choice.id)}>
+                {choice.label}
+              </button>
+            ))}
+          </div>
+        </fieldset>
+      ) : null}
 
       <fieldset className="preset-fieldset">
         <legend>快速調整份量</legend>
@@ -190,10 +229,14 @@ export function FoodEditor({
         </p>
       ) : null}
 
-      {item.uncertaintyReasons.length > 0 ? (
+      {mergedMilk ? (
+        <p className="food-uncertainty" role="status">{MERGED_DUPLICATE_MILK_NOTICE}</p>
+      ) : null}
+
+      {otherUncertainty ? (
         <p className="food-uncertainty">
           <span>留意：</span>
-          {item.uncertaintyReasons[0]}
+          {otherUncertainty}
         </p>
       ) : null}
     </article>

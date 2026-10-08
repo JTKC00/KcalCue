@@ -149,7 +149,7 @@ export const foodAnalysisJsonSchema = {
           },
           notes: {
             type: ["string", "null"],
-            description: "Item note. For a plant-milk carton, repeat 燕麥奶, 豆漿, or 杏仁奶 here when that is what the package shows.",
+            description: "Item note. Quote readable carton or label text, including the brand and 燕麥奶, 豆漿, 杏仁奶, 低脂, or 全脂 when the package shows those words.",
           },
         },
         required: [
@@ -175,7 +175,7 @@ export const foodAnalysisJsonSchema = {
     },
     visibleEvidence: {
       type: "array",
-      description: "Visible wording and objects. When a drink carton suggests plant milk, include 燕麥奶, 豆漿, or 杏仁奶 here instead of calling the drink 牛奶.",
+      description: "Visible wording and objects. Quote readable carton, bottle, brand, and label text. When packaging shows 燕麥奶, 豆漿, 杏仁奶, 低脂, or 全脂, include those words here even if the drink name is 牛奶.",
       items: { type: "string" },
     },
     estimatedInformation: {

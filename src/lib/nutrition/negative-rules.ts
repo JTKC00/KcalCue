@@ -50,6 +50,24 @@ export const NEGATIVE_MATCH_RULES: readonly NegativeMatchRule[] = [
     routeCanonicalName: null,
   },
   {
+    id: "chocolate-milk-not-whole-milk",
+    description: "朱古力奶不是全脂奶，也不是相片上泛稱牛奶的確認選項。目錄沒有朱古力奶，所以不計算。",
+    kind: "block-profile",
+    patterns: [
+      "chocolate milk",
+      "milk chocolate",
+      "朱古力奶",
+      "朱古力牛奶",
+      "牛奶朱古力",
+      "巧克力奶",
+      "巧克力牛奶",
+      "牛奶巧克力",
+    ],
+    blockCanonicalNames: ["milk"],
+    blockProfileIds: ["whole-milk"],
+    routeCanonicalName: null,
+  },
+  {
     id: "chicken-breast-salad-not-creamy",
     description: "雞胸沙拉／雞胸沙律維持瘦身沙律，不得落到 creamy-salad。",
     kind: "block-profile",
@@ -130,6 +148,18 @@ export const DRESSED_SALAD_UNCALCULATED_REASON =
 
 export const PLANT_MILK_CONTRADICTION_REASON =
   "名稱像牛奶、鮮奶或低脂奶，但餐點備註、相片證據、不確定說明、項目備註或可見食材指向燕麥奶、豆漿或杏仁奶，因此不配對乳製奶，也不交給 USDA。";
+
+export const PHOTO_GENERIC_MILK_CONFIRMATION_REASON =
+  "相片只辨識到牛奶，未能分辨全脂、低脂或植物奶。請先選擇種類，因此暫不計算。";
+
+export const LOW_FAT_MILK_UNCALCULATED_REASON =
+  "低脂或脫脂奶在本地目錄沒有對應的 USDA 減脂奶資料，因此暫不計算。";
+
+export const PHOTO_MILK_OTHER_REASON =
+  "已標為其他。沒有對應營養資料，因此不計算。";
+
+export const CHOCOLATE_MILK_UNCALCULATED_REASON =
+  "朱古力奶沒有本地營養資料，因此不配對全脂奶，也不計算。";
 
 export const CREAM_MACARONI_UNCALCULATED_REASON =
   "忌廉通粉沒有沙律或凍食的說明。熱食、焗或忌廉汁不能用高脂沙律的範圍，因此不計算。";

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { authenticated, apiError } from "@/lib/server/auth";
 import { foodEstimateSchema } from "@/lib/domain/food-analysis";
-import { contradictoryDairyMilkLabel, isCompositeIdentity, type MealPlantMilkContext } from "@/lib/nutrition/canonical";
+import { blocksUsdaLiveLookup, isCompositeIdentity, type MealPlantMilkContext } from "@/lib/nutrition/canonical";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { supportsUsdaPortionUnit, UsdaNutritionClient, UsdaNutritionError } from "@/lib/nutrition/usda";
 import { getNutritionApiKey } from "@/lib/server/env";
@@ -29,8 +29,11 @@ const mealContextSchema = z.object({
   uncertaintyText: z.array(z.string().trim().min(1).max(180)).max(36).optional(),
   mealNote: z.string().max(2000).nullable().optional(),
 }).strict();
+const resolveFoodSchema = foodEstimateSchema.safeExtend({
+  entrySource: z.enum(["photo", "manual"]).optional(),
+});
 const requestSchema = z.object({
-  foods: z.array(foodEstimateSchema).max(12),
+  foods: z.array(resolveFoodSchema).max(12),
   mealContext: mealContextSchema.optional(),
 });
 const MAX_PARALLEL_USDA_LOOKUPS = 3;
@@ -86,7 +89,7 @@ export async function POST(request: Request) {
       !match.includedInTotal &&
       supportsUsdaPortionUnit(parsed.data.foods[index].unit) &&
       !isCompositeIdentity(match.identity) &&
-      !contradictoryDairyMilkLabel(parsed.data.foods[index], mealContext) ? [index] : []) : [];
+      !blocksUsdaLiveLookup(parsed.data.foods[index], mealContext) ? [index] : []) : [];
     if (apiKey && remoteIndexes.length > 0 && !request.signal.aborted) {
       const deadline = new AbortController();
       const timeout = setTimeout(() => deadline.abort(), USDA_ENRICHMENT_DEADLINE_MS);

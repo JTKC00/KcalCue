@@ -1,15 +1,23 @@
 import type { FoodEstimate } from "@/lib/domain/food-analysis";
+
+export type ResolvableFood = FoodEstimate & { entrySource?: "photo" | "manual" };
 import {
   canonicalizeFood,
+  chocolateMilkName,
   contradictoryDairyMilkLabel,
+  explicitLowFatMilk,
   isCompositeIdentity,
   normalizeFoodName,
+  photoGenericMilkNeedsConfirmation,
   profileBlockedByNegativeRule,
   type MealPlantMilkContext,
 } from "./canonical";
 import {
+  CHOCOLATE_MILK_UNCALCULATED_REASON,
   CREAM_MACARONI_UNCALCULATED_REASON,
   DRESSED_SALAD_UNCALCULATED_REASON,
+  LOW_FAT_MILK_UNCALCULATED_REASON,
+  PHOTO_GENERIC_MILK_CONFIRMATION_REASON,
   PLANT_MILK_CONTRADICTION_REASON,
 } from "./negative-rules";
 import {
@@ -46,6 +54,17 @@ const PREPARATION_FAMILY: Record<FoodPreparation, FoodPreparation[]> = {
 
 function namesOf(profile: NutritionProfile): string[] {
   return [profile.id, profile.displayName, profile.canonicalName, ...profile.aliases];
+}
+
+function isLowFatMilkProfile(profile: NutritionProfile): boolean {
+  if (profile.id === "whole-milk") return false;
+  const text = normalizeFoodName(namesOf(profile).join(" "));
+  const lowFat = /低脂|脫脂|脱脂|low fat|reduced fat|skim/.test(text);
+  return lowFat && /奶|milk/.test(text);
+}
+
+export function findLowFatMilkProfile(catalog: NutritionProfile[]): NutritionProfile | null {
+  return catalog.find((profile) => isLowFatMilkProfile(profile)) ?? null;
 }
 
 function exactAliasHit(name: string, profile: NutritionProfile): boolean {
@@ -236,7 +255,7 @@ function compositeUnmatchedReason(identity: CanonicalFoodIdentity): string {
 }
 
 export function resolveNutritionMatch(
-  food: FoodEstimate,
+  food: ResolvableFood,
   catalog: NutritionProfile[],
   mealContext?: MealPlantMilkContext,
 ): NutritionMatch {
@@ -249,6 +268,54 @@ export function resolveNutritionMatch(
       reasons: [PLANT_MILK_CONTRADICTION_REASON],
       identity,
     }, "INSUFFICIENT_COVERAGE");
+  }
+  if (chocolateMilkName(food)) {
+    return unmatched({
+      profile: null,
+      confidence: "low",
+      matchType: "unresolved",
+      reasons: [CHOCOLATE_MILK_UNCALCULATED_REASON],
+      identity,
+    }, "INSUFFICIENT_COVERAGE");
+  }
+  if (explicitLowFatMilk(food)) {
+    const lowFatProfile = findLowFatMilkProfile(catalog);
+    if (!lowFatProfile) {
+      return unmatched({
+        profile: null,
+        confidence: "low",
+        matchType: "unresolved",
+        reasons: [LOW_FAT_MILK_UNCALCULATED_REASON],
+        identity,
+      }, "INSUFFICIENT_COVERAGE");
+    }
+    const gramsPerUnit = lowFatProfile.gramsPerUnit[food.unit];
+    if (typeof gramsPerUnit !== "number" || !Number.isFinite(gramsPerUnit) || gramsPerUnit <= 0) {
+      return unmatched({
+        profile: null,
+        confidence: "low",
+        matchType: "unresolved",
+        reasons: [`未有 ${food.unit} 的可靠克重換算，因此不納入總數。`],
+        identity,
+      }, "UNIT_CONVERSION_MISSING");
+    }
+    return {
+      profile: lowFatProfile,
+      confidence: "high",
+      matchType: "exact_canonical",
+      reasons: ["名稱對應目錄中的低脂或減脂奶。"],
+      identity,
+      includedInTotal: true,
+    };
+  }
+  if (photoGenericMilkNeedsConfirmation(food, mealContext)) {
+    return unmatched({
+      profile: null,
+      confidence: "low",
+      matchType: "unresolved",
+      reasons: [PHOTO_GENERIC_MILK_CONFIRMATION_REASON],
+      identity,
+    }, "AMBIGUOUS_MATCH");
   }
   if (identity.qualifiers.includes("ambiguous")) {
     return unmatched({

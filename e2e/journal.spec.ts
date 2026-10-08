@@ -1658,6 +1658,150 @@ test("a recognised protein salad photo shows a kcal range instead of an empty to
   await expect(page.getByRole("combobox", { name: "食物名稱", exact: true })).toHaveValue("燒烤蛋白質雜菜沙律碗");
 });
 
+test("a duplicated generic milk carton stays one item until a dairy choice", async ({ page, context }) => {
+  const backend = cloud();
+  await backend.install(context);
+  let nutritionLookups = 0;
+  await page.route("**/api/nutrition/resolve", async (route) => {
+    nutritionLookups += 1;
+    await route.fulfill({ status: 500, json: { error: { code: "unexpected_nutrition" } } });
+  });
+  await page.route("**/api/analyze", (route) => route.fulfill({
+    json: {
+      mode: "live",
+      analysis: {
+        analysisStatus: "success",
+        foods: [
+          {
+            displayName: "牛奶",
+            normalizedName: "milk",
+            identityLevel: "ingredient",
+            portionMin: null,
+            portionMax: null,
+            unit: "ml",
+            recognitionConfidence: 0.7,
+            portionConfidence: 0.2,
+            uncertaintyReasons: ["未能讀到紙盒上的種類。"],
+            preparationMethod: "紙盒飲品",
+          },
+          {
+            displayName: "牛奶",
+            normalizedName: "milk",
+            identityLevel: "ingredient",
+            portionMin: null,
+            portionMax: null,
+            unit: "ml",
+            recognitionConfidence: 0.66,
+            portionConfidence: 0.2,
+            uncertaintyReasons: ["同一紙盒被分成兩項。"],
+            preparationMethod: "紙盒飲品",
+          },
+        ],
+        uncertaintyReasons: ["紙盒飲品的種類未能確認。"],
+        visibleEvidence: ["一盒飲品。"],
+        estimatedInformation: [],
+        unknownInformation: ["紙盒上的品牌與種類未能讀到。"],
+      },
+    },
+  }));
+  await page.goto("/");
+  await login(page);
+  await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
+  const png = await sharp({
+    create: { width: 80, height: 60, channels: 3, background: "white" },
+  }).png().toBuffer();
+  await page.locator('input[type="file"]').nth(1).setInputFiles({
+    name: "oat-carton.png", mimeType: "image/png", buffer: png,
+  });
+  await page.getByRole("button", { name: "開始分析", exact: true }).click();
+
+  await expect(page.getByRole("heading", { name: "暫未能計算", exact: true })).toBeVisible();
+  await expect(page.locator(".food-card").getByText("已合併重複嘅牛奶項目，如果係兩杯可以再加返", { exact: true })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "食物名稱", exact: true })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "全脂牛奶", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "低脂牛奶", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "燕麥奶", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "豆漿", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "其他", exact: true })).toBeVisible();
+
+  const minimum = page.getByRole("spinbutton", { name: "最少份量", exact: true });
+  const maximum = page.getByRole("spinbutton", { name: "最多份量", exact: true });
+  await minimum.fill("250");
+  await minimum.press("Tab");
+  await expect(page.getByText("相片只辨識到牛奶，未能分辨全脂、低脂或植物奶。請先選擇種類，因此暫不計算。")).toBeVisible();
+  await expect(page.getByText("155–160")).toHaveCount(0);
+  await expect(maximum).toHaveValue("250");
+  expect(nutritionLookups).toBe(0);
+
+  await page.getByRole("button", { name: "全脂牛奶", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "約 155–160 kcal", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "燕麥奶", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("combobox", { name: "食物名稱", exact: true })).toHaveValue("全脂牛奶");
+
+  await maximum.fill("300");
+  await maximum.press("Tab");
+  await expect(maximum).toHaveValue("300");
+  await expect(page.getByRole("heading", { name: "約 155–160 kcal", exact: true })).toHaveCount(0);
+  await expect(page.locator(".food-card").getByText("已合併重複嘅牛奶項目，如果係兩杯可以再加返", { exact: true })).toBeVisible();
+  expect(nutritionLookups).toBe(0);
+  expect(backend.records.size).toBe(0);
+});
+
+test("choosing 全脂牛奶 counts when the photo could not tell whole milk from low-fat", async ({ page, context }) => {
+  const backend = cloud();
+  await backend.install(context);
+  await page.route("**/api/nutrition/resolve", (route) => route.fulfill({
+    status: 500,
+    json: { error: { code: "unexpected_nutrition" } },
+  }));
+  await page.route("**/api/analyze", (route) => route.fulfill({
+    json: {
+      mode: "live",
+      analysis: {
+        analysisStatus: "success",
+        foods: [{
+          displayName: "牛奶",
+          normalizedName: "milk",
+          identityLevel: "ingredient",
+          portionMin: null,
+          portionMax: null,
+          unit: "ml",
+          recognitionConfidence: 0.7,
+          portionConfidence: 0.2,
+          uncertaintyReasons: ["未能分辨全脂或低脂"],
+          preparationMethod: "紙盒飲品",
+        }],
+        uncertaintyReasons: ["紙盒飲品的種類未能確認。"],
+        visibleEvidence: ["一盒飲品。"],
+        estimatedInformation: [],
+        unknownInformation: ["紙盒上的品牌與種類未能讀到。"],
+      },
+    },
+  }));
+  await page.goto("/");
+  await login(page);
+  await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
+  const png = await sharp({
+    create: { width: 80, height: 60, channels: 3, background: "white" },
+  }).png().toBuffer();
+  await page.locator('input[type="file"]').nth(1).setInputFiles({
+    name: "ambiguous-milk.png", mimeType: "image/png", buffer: png,
+  });
+  await page.getByRole("button", { name: "開始分析", exact: true }).click();
+
+  await expect(page.getByRole("button", { name: "全脂牛奶", exact: true })).toBeVisible();
+  await page.getByRole("spinbutton", { name: "最少份量", exact: true }).fill("250");
+  await page.getByRole("spinbutton", { name: "最少份量", exact: true }).press("Tab");
+  await expect(page.getByText("低脂或脫脂奶在本地目錄沒有對應的 USDA 減脂奶資料，因此暫不計算。")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "約 155–160 kcal", exact: true })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "全脂牛奶", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "約 155–160 kcal", exact: true })).toBeVisible();
+  await expect(page.getByText("未能分辨全脂或低脂")).toHaveCount(0);
+  await expect(page.getByText("低脂或脫脂奶在本地目錄沒有對應的 USDA 減脂奶資料，因此暫不計算。")).toHaveCount(0);
+  expect(backend.records.size).toBe(0);
+});
+
 async function expectFieldsInsideCard(page: Page) {
   const card = page.locator(".meal-metadata");
   const date = page.getByLabel("日期", { exact: true });

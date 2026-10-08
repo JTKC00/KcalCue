@@ -1,4 +1,4 @@
-import type { FoodEstimate, ObservedFood, PortionUnit } from "./food-analysis";
+import type { FoodAnalysis, FoodEstimate, ObservedFood, PortionUnit } from "./food-analysis";
 import type { NutritionMatch, NutritionProfile } from "@/lib/nutrition/types";
 import { normalizeFoodName } from "@/lib/nutrition/canonical";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
@@ -10,6 +10,11 @@ export interface EditableFoodItem extends ObservedFood {
   originalPortionMin: number | null;
   originalPortionMax: number | null;
   nutritionMatch?: NutritionMatch | null;
+  /**
+   * Photo items come from a vision analysis. Manual items are typed.
+   * Absent on meals saved before the photo milk confirmation.
+   */
+  entrySource?: "photo" | "manual";
 }
 
 export function hasKnownPortion<T extends ObservedFood>(food: T): food is T & FoodEstimate {
@@ -47,6 +52,21 @@ export function renameFoodItem(
 function roundPortion(value: number, unit: PortionUnit): number {
   const precision = unit === "g" || unit === "ml" ? 1 : 10;
   return Math.max(0.1, Math.round(value * precision) / precision);
+}
+
+export function assignEntrySource(
+  items: EditableFoodItem[],
+  analysis: FoodAnalysis | null,
+): EditableFoodItem[] {
+  const photoIds = new Set(createEditableFoodItems(analysis?.foods ?? []).map((item) => item.id));
+  let changed = false;
+  const next = items.map((item) => {
+    if (item.entrySource) return item;
+    changed = true;
+    const entrySource = item.id.startsWith("manual-") || !photoIds.has(item.id) ? "manual" as const : "photo" as const;
+    return { ...item, entrySource };
+  });
+  return changed ? next : items;
 }
 
 export function createEditableFoodItems(

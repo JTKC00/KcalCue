@@ -17,6 +17,8 @@ Every food object must include identityLevel. Use identityLevel "dish" for a nam
 
 When a carton, label, or the colour of a drink suggests plant milk, name that drink explicitly. Use displayName 燕麥奶, 豆漿, or 杏仁奶 and normalizedName "oat milk", "soy milk", or "almond milk". Do not name it 牛奶 or milk, and do not use normalizedName "milk" or "whole milk", unless the label shows dairy milk. If the plant type is visible, also put that wording in visibleEvidence and in the food notes. If the carton suggests plant milk but the type is unclear, still do not default the name to 牛奶; say so in visibleEvidence and uncertaintyReasons.
 
+When a carton, bottle, cup, or label is visible, copy the readable packaging into visibleEvidence and into that food's notes. Include the brand and any words you can actually read, such as 燕麥, 燕麥奶, oat, 豆漿, soy, 杏仁, almond, 低脂, 脫脂, 全脂, or the brand name. Do this even if the drink name stays 牛奶. If packaging text is readable, visibleEvidence must not be empty. Never invent wording that is not visible. A single carton or bottle is one food, not two copies of the same drink.
+
 If the foods themselves cannot be identified reliably, set analysisStatus to "unable_to_identify", return an empty foods array, and explain how the user can take a clearer photo. Do not guess.
 `.trim();
 

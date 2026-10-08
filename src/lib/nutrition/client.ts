@@ -1,5 +1,6 @@
 import type { FoodEstimate } from "@/lib/domain/food-analysis";
-import { canonicalizeFood, normalizeFoodName, type MealPlantMilkContext } from "./canonical";
+import type { ResolvableFood } from "./resolver";
+import { canonicalizeFood, normalizeFoodName, photoGenericMilkNeedsConfirmation, type MealPlantMilkContext } from "./canonical";
 import type { NutritionMatch } from "./types";
 import { copy } from "@/content/zh-HK";
 import { nutritionMatchResponseSchema } from "./response-schema";
@@ -56,13 +57,17 @@ export function canReuseNutritionMatchForNameEdit(
 }
 
 export async function enrichUnresolvedMatches(
-  foods: FoodEstimate[],
+  foods: ResolvableFood[],
   localMatches: NutritionMatch[],
   signal?: AbortSignal,
   mealContext?: MealPlantMilkContext,
 ): Promise<NutritionMatch[]> {
   const unresolvedIndexes = localMatches
-    .map((match, index) => (match.includedInTotal ? -1 : index))
+    .map((match, index) => (
+      match.includedInTotal || photoGenericMilkNeedsConfirmation(foods[index] ?? { displayName: "", normalizedName: "" }, mealContext)
+        ? -1
+        : index
+    ))
     .filter((index) => index >= 0);
 
   if (unresolvedIndexes.length === 0) return localMatches;
@@ -100,6 +105,7 @@ export async function enrichUnresolvedMatches(
             preparationMethod: food.preparationMethod,
             visibleIngredients: food.visibleIngredients,
             notes: food.notes,
+            ...(food.entrySource ? { entrySource: food.entrySource } : {}),
           };
         }),
       }),

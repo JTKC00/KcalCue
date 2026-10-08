@@ -17,7 +17,7 @@ import { getNutritionApiKey } from "@/lib/server/env";
 import { authenticated, HttpError } from "@/lib/server/auth";
 import { NUTRITION_RATE_LIMIT, clearRateLimitStore } from "@/lib/server/rate-limit";
 import { clearUsdaCache } from "@/lib/nutrition/usda";
-import { PLANT_MILK_CONTRADICTION_REASON } from "@/lib/nutrition/negative-rules";
+import { PHOTO_GENERIC_MILK_CONFIRMATION_REASON, PLANT_MILK_CONTRADICTION_REASON } from "@/lib/nutrition/negative-rules";
 import { oatMilkCartonPhotoAnalysis } from "@/lib/nutrition/oat-milk-photo.fixture";
 import { reserveHourlyUsdaCall } from "@/lib/server/durable-nutrition-quota";
 import { POST } from "./route";
@@ -714,6 +714,30 @@ describe("POST /api/nutrition/resolve", () => {
     expect(body.matches[0].includedInTotal).toBe(true);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(reserveHourlyUsdaCall).not.toHaveBeenCalled();
+  });
+
+  it("does not look up USDA for a photo labelled only 牛奶", async () => {
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    const fetchMock = vi.fn(async () => Response.json({ foods: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await POST(new Request("http://localhost/api/nutrition/resolve", {
+      method: "POST",
+      body: JSON.stringify({
+        foods: [{
+          ...remoteFood("牛奶"),
+          displayName: "牛奶",
+          normalizedName: "milk",
+          unit: "ml",
+          entrySource: "photo",
+        }],
+      }),
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(body.matches[0].includedInTotal).toBe(false);
+    expect(body.matches[0].reasons[0]).toBe(PHOTO_GENERIC_MILK_CONFIRMATION_REASON);
   });
 
   it("returns a controlled error for an interrupted input stream", async () => {

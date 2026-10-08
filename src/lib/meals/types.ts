@@ -115,6 +115,7 @@ export const mealInputSchema = z.object({
         id: z.string().min(1).max(180),
         originalPortionMin: z.number().positive().max(5000).nullable(),
         originalPortionMax: z.number().positive().max(5000).nullable(),
+        entrySource: z.enum(["photo", "manual"]).optional(),
       }).refine(item => (item.originalPortionMin === null) === (item.originalPortionMax === null), {
         message: "original portions must both be null or both be numbers",
         path: ["originalPortionMax"],
