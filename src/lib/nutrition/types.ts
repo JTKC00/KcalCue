@@ -43,6 +43,17 @@ export type NutritionProviderId = "kcalcue-reference" | "usda-fdc" | "demo";
 
 export type MealCoverage = "complete" | "partial" | "insufficient" | "none";
 
+/**
+ * Why a local match was not included in the meal total.
+ * Diagnostic only: user-facing copy stays in `reasons`.
+ */
+export type NutritionCoverageReason =
+  | "UNKNOWN_DISH"
+  | "COMPOSITE_UNSUPPORTED"
+  | "TYPE_MISMATCH"
+  | "AMBIGUOUS_MATCH"
+  | "INSUFFICIENT_COVERAGE";
+
 export interface CanonicalFoodIdentity {
   canonicalName: string;
   category: FoodCategory;
@@ -92,6 +103,11 @@ export interface NutritionMatch {
   reasons: string[];
   identity: CanonicalFoodIdentity;
   includedInTotal: boolean;
+  /**
+   * Set only when `includedInTotal` is false. Absent on included matches and
+   * on records saved before this diagnostic existed.
+   */
+  coverageReason?: NutritionCoverageReason;
 }
 
 export interface NutritionProvider {

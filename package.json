@@ -14,6 +14,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "eval": "vitest run src/lib/evaluation/evaluation.test.ts --reporter=dot",
+    "coverage:report": "vitest run src/lib/nutrition/coverage-benchmark.test.ts -t \"matches the committed baseline\" --reporter=dot --disableConsoleIntercept",
     "trial:cloud": "node scripts/cloud-run.mjs",
     "check:codecs": "node scripts/check-codecs.mjs",
     "test:watch": "vitest",

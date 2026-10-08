@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { portionUnits } from "@/lib/domain/food-analysis";
+import { NUTRITION_COVERAGE_REASONS } from "./coverage-reason";
 import type { NutritionMatch } from "./types";
 
 const category = z.enum([
@@ -56,4 +57,5 @@ export const nutritionMatchResponseSchema: z.ZodType<NutritionMatch> = z.object(
     qualifiers: z.array(z.string()),
   }),
   includedInTotal: z.boolean(),
+  coverageReason: z.enum(NUTRITION_COVERAGE_REASONS).optional(),
 }).refine(match => !match.includedInTotal || (match.profile !== null && match.confidence !== "low"));
