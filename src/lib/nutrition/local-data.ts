@@ -605,8 +605,6 @@ const baseNutritionProfiles: NutritionProfile[] = [
     aliases: [
       "creamy salad",
       "macaroni salad",
-      "cream macaroni",
-      "creamy macaroni",
       "tuna macaroni salad",
       "chicken caesar salad",
       "caesar salad",
@@ -614,8 +612,6 @@ const baseNutritionProfiles: NutritionProfile[] = [
       "egg mayo salad",
       "egg salad with mayonnaise",
       "通粉沙律",
-      "忌廉通粉",
-      "忌廉通心粉",
       "忌廉通粉沙律",
       "吞拿魚通粉沙律",
       "凱撒沙律",

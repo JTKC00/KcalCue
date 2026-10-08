@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { FoodEstimate } from "@/lib/domain/food-analysis";
-import { canonicalizeFood, contradictoryDairyMilkLabel, profileBlockedByNegativeRule } from "./canonical";
+import { canonicalizeFood, contradictoryDairyMilkLabel, isCompositeIdentity, profileBlockedByNegativeRule } from "./canonical";
 import { localNutritionProfiles } from "./local-data";
 import { LocalNutritionProvider } from "./local-provider";
 import {
@@ -136,6 +136,47 @@ describe("negative match rules", () => {
     const evidenceOnly = food("牛奶", "milk", "ingredient");
     expect(contradictoryDairyMilkLabel(evidenceOnly)).toBe(false);
     expect(provider.resolve(evidenceOnly).profile?.id).toBe("whole-milk");
+  });
+
+  it("blocks fresh, skim, and low-fat dairy labels before a USDA live lookup", () => {
+    const reachesUsdaLive = (item: FoodEstimate) => {
+      const match = provider.resolve(item);
+      return !match.includedInTotal
+        && item.unit === "g"
+        && !isCompositeIdentity(match.identity)
+        && !contradictoryDairyMilkLabel(item);
+    };
+
+    const plain = [
+      food("鮮奶", "鮮奶", "ingredient"),
+      food("低脂奶", "低脂奶", "ingredient"),
+    ];
+    for (const item of plain) {
+      expect(contradictoryDairyMilkLabel(item), item.displayName).toBe(false);
+      expect(provider.resolve(item).profile?.id, item.displayName).not.toBe("whole-milk");
+      expect(reachesUsdaLive(item), item.displayName).toBe(true);
+    }
+
+    const guarded = [
+      food("鮮奶", "fresh milk", "ingredient"),
+      food("低脂奶", "low-fat milk", "ingredient"),
+      food("鮮奶", "skim milk", "ingredient"),
+      food("低脂奶", "semi-skimmed milk", "ingredient"),
+    ];
+    guarded[0] = { ...guarded[0], notes: "oat" };
+    guarded[1] = { ...guarded[1], visibleIngredients: ["soy milk"] };
+    guarded[2] = { ...guarded[2], uncertaintyReasons: ["杏仁奶"] };
+    guarded[3] = { ...guarded[3], preparationMethod: "植物奶" };
+
+    for (const item of guarded) {
+      const match = provider.resolve(item);
+      expect(contradictoryDairyMilkLabel(item), item.displayName).toBe(true);
+      expect(match.profile?.id, item.normalizedName).not.toBe("whole-milk");
+      expect(match.includedInTotal, item.normalizedName).toBe(false);
+      expect(match.coverageReason, item.normalizedName).toBe("INSUFFICIENT_COVERAGE");
+      expect(match.reasons[0], item.normalizedName).toBe(PLANT_MILK_CONTRADICTION_REASON);
+      expect(reachesUsdaLive(item), item.normalizedName).toBe(false);
+    }
   });
 
   it("does not resolve a composite dish to a single ingredient profile", () => {

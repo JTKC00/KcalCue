@@ -10,7 +10,8 @@ import {
   portionRangeToGrams,
   roundRange,
 } from "./calculation";
-import { canonicalizeFood, normalizeFoodName } from "./canonical";
+import { canonicalizeFood, contradictoryDairyMilkLabel, normalizeFoodName } from "./canonical";
+import { CREAM_MACARONI_UNCALCULATED_REASON } from "./negative-rules";
 import { LocalNutritionProvider } from "./local-provider";
 import { resolveNutritionMatch } from "./resolver";
 import { localNutritionProfiles } from "./local-data";
@@ -539,8 +540,8 @@ describe("high-fat salad profile", () => {
     ["千島醬沙律", "thousand island salad"],
     ["通粉沙律", "macaroni salad"],
     ["忌廉通粉", "macaroni salad"],
-    ["忌廉通粉", "cream macaroni"],
-    ["忌廉通心粉", "creamy macaroni"],
+    ["忌廉通粉沙律", "macaroni salad"],
+    ["凍忌廉通粉", "cold cream macaroni"],
     ["chicken mayo salad", "chicken mayo salad"],
   ])("estimates %s above the lean salad cap", (displayName, normalizedName) => {
     const food = makeFood({
@@ -636,6 +637,66 @@ describe("high-fat salad profile", () => {
     expect(meal.totals.calories).toEqual({ min: 270, max: 1120 });
   });
 
+  it("does not calculate hot or unspecified cream macaroni as a creamy salad", () => {
+    const cases = [
+      ["粟米忌廉通粉", "corn cream macaroni"],
+      ["焗忌廉通粉", "baked cream macaroni"],
+      ["忌廉汁通粉", "macaroni in cream sauce"],
+      ["忌廉通粉", "cream macaroni"],
+      ["忌廉通心粉", "creamy macaroni"],
+      ["焗忌廉通粉沙律", "baked macaroni salad"],
+      ["粟米忌廉通粉", "macaroni salad"],
+    ] as const;
+
+    for (const [displayName, normalizedName] of cases) {
+      const food = makeFood({
+        displayName,
+        normalizedName,
+        identityLevel: "dish",
+        portionMin: 100,
+        portionMax: 100,
+      });
+      const match = provider.resolve(food);
+      const meal = service.calculateMeal([food]);
+      expect(canonicalizeFood(food).canonicalName, displayName).toBe("cream-macaroni");
+      expect(match.identity.dishId, displayName).toBe("cream-macaroni");
+      expect(match.identity.hasNutritionProfile, displayName).toBe(false);
+      expect(match.profile, displayName).toBeNull();
+      expect(match.includedInTotal, displayName).toBe(false);
+      expect(match.matchType, displayName).toBe("unresolved");
+      expect(match.coverageReason, displayName).toBe("DISH_KNOWN_NO_PROFILE");
+      expect(match.reasons[0], displayName).toBe(CREAM_MACARONI_UNCALCULATED_REASON);
+      expect(meal.coverage, displayName).toBe("none");
+      expect(meal.totals.calories).toEqual({ min: 0, max: 0 });
+    }
+  });
+
+  it("uses the creamy salad when cream macaroni is explicitly cold", () => {
+    const noted = makeFood({
+      displayName: "忌廉通粉",
+      normalizedName: "cream macaroni",
+      identityLevel: "dish",
+      notes: "沙律",
+      portionMin: 100,
+      portionMax: 100,
+    });
+    const prepared = makeFood({
+      displayName: "忌廉通心粉",
+      normalizedName: "creamy macaroni",
+      identityLevel: "dish",
+      preparationMethod: "冷盤",
+      portionMin: 100,
+      portionMax: 100,
+    });
+    for (const food of [noted, prepared]) {
+      const match = provider.resolve(food);
+      expect(canonicalizeFood(food).canonicalName, food.displayName).toBe("creamy-salad");
+      expect(match.profile?.id, food.displayName).toBe("creamy-salad");
+      expect(match.includedInTotal, food.displayName).toBe(true);
+      expect(service.calculateMeal([food]).coverage, food.displayName).toBe("complete");
+    }
+  });
+
   it("does not treat soy milk as whole milk", () => {
     const soy = provider.resolve(makeFood({ displayName: "豆漿", normalizedName: "soy milk" }));
     const milk = provider.resolve(makeFood({ displayName: "牛奶", normalizedName: "whole milk" }));
@@ -660,5 +721,49 @@ describe("high-fat salad profile", () => {
       expect(match.profile?.id).not.toBe("whole-milk");
       expect(match.includedInTotal).toBe(false);
     }
+  });
+
+  it("keeps dairy milk when oats or cereal are a separate food", () => {
+    for (const [displayName, normalizedName, identityLevel] of [
+      ["燕麥牛奶粥", "oatmeal with milk", "dish"],
+      ["燕麥牛奶粥", "oatmeal with milk", "ingredient"],
+      ["麥片加牛奶", "cereal with milk", "dish"],
+      ["麥片加牛奶", "cereal with milk", "ingredient"],
+    ] as const) {
+      const item = makeFood({
+        displayName,
+        normalizedName,
+        identityLevel,
+        portionMin: 100,
+        portionMax: 100,
+        visibleIngredients: displayName.includes("麥片") ? ["麥片", "牛奶"] : ["燕麥", "牛奶"],
+      });
+      const match = provider.resolve(item);
+      expect(contradictoryDairyMilkLabel(item), displayName).toBe(false);
+      expect(canonicalizeFood(item).canonicalName, `${displayName} ${identityLevel}`).toBe("milk");
+      expect(match.profile?.id, displayName).toBe("whole-milk");
+      expect(match.includedInTotal, displayName).toBe(true);
+    }
+
+    const porridgeWithAlmond = makeFood({
+      displayName: "燕麥牛奶粥",
+      normalizedName: "oatmeal with milk",
+      identityLevel: "dish",
+      notes: "杏仁奶",
+    });
+    expect(contradictoryDairyMilkLabel(porridgeWithAlmond)).toBe(true);
+    expect(provider.resolve(porridgeWithAlmond).profile?.id).not.toBe("whole-milk");
+
+    const oats = makeFood({ displayName: "燕麥", normalizedName: "oats", portionMin: 40, portionMax: 40 });
+    const dairy = makeFood({ displayName: "牛奶", normalizedName: "whole milk", portionMin: 100, portionMax: 100 });
+    const cereal = makeFood({ displayName: "麥片", normalizedName: "cereal", portionMin: 40, portionMax: 40 });
+    const separate = service.calculateMeal([oats, dairy, cereal]);
+    expect(provider.resolve(oats).profile?.id).not.toBe("whole-milk");
+    expect(provider.resolve(cereal).profile?.id).not.toBe("whole-milk");
+    expect(provider.resolve(dairy).profile?.id).toBe("whole-milk");
+    expect(separate.foods[1]?.includedInTotal).toBe(true);
+    expect(separate.foods[1]?.ranges?.calories).toEqual({ min: 61, max: 61 });
+    expect(separate.totals.calories).toEqual({ min: 61, max: 61 });
+    expect(separate.includedCount).toBe(1);
   });
 });

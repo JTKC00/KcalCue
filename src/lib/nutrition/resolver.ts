@@ -7,6 +7,7 @@ import {
   profileBlockedByNegativeRule,
 } from "./canonical";
 import {
+  CREAM_MACARONI_UNCALCULATED_REASON,
   DRESSED_SALAD_UNCALCULATED_REASON,
   PLANT_MILK_CONTRADICTION_REASON,
 } from "./negative-rules";
@@ -222,6 +223,9 @@ function unmatched(
 function compositeUnmatchedReason(identity: CanonicalFoodIdentity): string {
   if (identity.canonicalName === "dressed-salad" || identity.dishId === "dressed-salad") {
     return DRESSED_SALAD_UNCALCULATED_REASON;
+  }
+  if (identity.canonicalName === "cream-macaroni" || identity.dishId === "cream-macaroni") {
+    return CREAM_MACARONI_UNCALCULATED_REASON;
   }
   return COMPOSITE_GENERIC_FALLBACK_REASON;
 }
