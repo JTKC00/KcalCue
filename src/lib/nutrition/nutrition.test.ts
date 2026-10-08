@@ -642,6 +642,7 @@ describe("high-fat salad profile", () => {
       ["粟米忌廉通粉", "corn cream macaroni"],
       ["焗忌廉通粉", "baked cream macaroni"],
       ["忌廉汁通粉", "macaroni in cream sauce"],
+      ["忌廉通粉", "hot cream macaroni"],
       ["忌廉通粉", "cream macaroni"],
       ["忌廉通心粉", "creamy macaroni"],
       ["焗忌廉通粉沙律", "baked macaroni salad"],
@@ -712,17 +713,44 @@ describe("high-fat salad profile", () => {
       portionMin: 100,
       portionMax: 100,
     });
-    for (const food of [noted, prepared, calorieNote, creamCalorieNote]) {
+    const hotEnglishNote = makeFood({
+      displayName: "忌廉通粉",
+      normalizedName: "cream macaroni",
+      identityLevel: "dish",
+      notes: "hot",
+      portionMin: 100,
+      portionMax: 100,
+    });
+    const cornAlone = makeFood({
+      displayName: "凍忌廉通粉",
+      normalizedName: "cold cream macaroni",
+      identityLevel: "dish",
+      notes: "corn",
+      portionMin: 100,
+      portionMax: 100,
+    });
+    const cornCjkAlone = makeFood({
+      displayName: "凍忌廉通粉",
+      normalizedName: "cold cream macaroni",
+      identityLevel: "dish",
+      notes: "粟米",
+      portionMin: 100,
+      portionMax: 100,
+    });
+    for (const food of [noted, prepared, calorieNote, creamCalorieNote, cornAlone, cornCjkAlone]) {
+      const label = `${food.displayName} / ${food.notes ?? food.preparationMethod ?? ""}`;
       const match = provider.resolve(food);
-      expect(canonicalizeFood(food).canonicalName, food.displayName).toBe("creamy-salad");
-      expect(match.profile?.id, food.displayName).toBe("creamy-salad");
-      expect(match.includedInTotal, food.displayName).toBe(true);
-      expect(service.calculateMeal([food]).coverage, food.displayName).toBe("complete");
+      expect(canonicalizeFood(food).canonicalName, label).toBe("creamy-salad");
+      expect(match.profile?.id, label).toBe("creamy-salad");
+      expect(match.includedInTotal, label).toBe(true);
+      expect(service.calculateMeal([food]).coverage, label).toBe("complete");
     }
-    const hot = provider.resolve(hotNote);
-    expect(canonicalizeFood(hotNote).canonicalName).toBe("cream-macaroni");
-    expect(hot.includedInTotal).toBe(false);
-    expect(hot.coverageReason).toBe("DISH_KNOWN_NO_PROFILE");
+    for (const food of [hotNote, hotEnglishNote]) {
+      const hot = provider.resolve(food);
+      expect(canonicalizeFood(food).canonicalName, food.notes).toBe("cream-macaroni");
+      expect(hot.includedInTotal, food.notes).toBe(false);
+      expect(hot.coverageReason, food.notes).toBe("DISH_KNOWN_NO_PROFILE");
+    }
   });
 
   it("does not treat soy milk as whole milk", () => {

@@ -215,6 +215,39 @@ describe("negative match rules", () => {
       expect(cereal.includedInTotal, identityLevel).toBe(true);
     }
 
+    const modifiedMilk = [
+      food("熱牛奶", "hot milk", "ingredient"),
+      food("凍鮮奶", "iced milk", "ingredient"),
+      food("大牛奶", "cold milk", "ingredient"),
+      food("細鮮奶", "warm milk", "ingredient"),
+      food("暫鮮奶", "a glass of milk", "ingredient"),
+    ];
+    modifiedMilk[0] = { ...modifiedMilk[0], notes: "燕麥奶" };
+    modifiedMilk[1] = { ...modifiedMilk[1], notes: "oat milk" };
+    modifiedMilk[2] = { ...modifiedMilk[2], visibleIngredients: ["soy milk"] };
+    modifiedMilk[3] = { ...modifiedMilk[3], uncertaintyReasons: ["杏仁奶"] };
+    modifiedMilk[4] = { ...modifiedMilk[4], preparationMethod: "植物奶" };
+    for (const item of modifiedMilk) {
+      expect(contradictoryDairyMilkLabel(item), item.displayName).toBe(true);
+      const match = provider.resolve(item);
+      expect(match.profile?.id, item.displayName).not.toBe("whole-milk");
+      expect(match.includedInTotal, item.displayName).toBe(false);
+      expect(match.reasons[0], item.displayName).toBe(PLANT_MILK_CONTRADICTION_REASON);
+      expect(reachesUsdaLive(item), item.displayName).toBe(false);
+    }
+
+    const plainHotMilk = food("熱牛奶", "hot milk", "ingredient");
+    expect(contradictoryDairyMilkLabel(plainHotMilk)).toBe(false);
+    expect(provider.resolve(plainHotMilk).profile?.id).toBe("whole-milk");
+
+    const hotTea = {
+      ...food("熱奶茶", "hot milk tea", "dish"),
+      notes: "燕麥奶",
+    };
+    expect(contradictoryDairyMilkLabel(hotTea)).toBe(false);
+    expect(provider.resolve(hotTea).reasons[0]).not.toBe(PLANT_MILK_CONTRADICTION_REASON);
+    expect(provider.resolve(hotTea).profile?.id).toBe("milk-tea");
+
     for (const item of guarded) {
       const match = provider.resolve(item);
       expect(contradictoryDairyMilkLabel(item), item.displayName).toBe(true);

@@ -621,6 +621,30 @@ describe("POST /api/nutrition/resolve", () => {
     expect(body.matches[4].includedInTotal).toBe(false);
   });
 
+  it("does not send 熱牛奶 with an oat-milk note to USDA live", async () => {
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => Response.json({ foods: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const hotMilk = {
+      ...remoteFood("熱牛奶"),
+      displayName: "熱牛奶",
+      normalizedName: "hot milk",
+      notes: "燕麥奶",
+    };
+    const response = await POST(resolveRequest([hotMilk, remoteFood("mystery food")]));
+    const body = await response.json();
+    const queries = fetchMock.mock.calls.map((call) =>
+      new URL(String(call[0])).searchParams.get("query") ?? "");
+
+    expect(response.status).toBe(200);
+    expect(queries).toEqual(["mystery food"]);
+    expect(reserveHourlyUsdaCall).toHaveBeenCalledOnce();
+    expect(body.matches[0].includedInTotal).toBe(false);
+    expect(body.matches[0].reasons[0]).toBe(PLANT_MILK_CONTRADICTION_REASON);
+    expect(body.matches[1].includedInTotal).toBe(false);
+  });
+
   it("resolves 鮮奶 locally and still looks up low-fat milk", async () => {
     vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
     const fetchMock = vi.fn(async (_input: RequestInfo | URL) => Response.json({ foods: [] }));

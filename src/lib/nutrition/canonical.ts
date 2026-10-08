@@ -206,10 +206,12 @@ function creamMacaroniText(food: FoodEstimate): string {
 
 /**
  * Hot or sauced cream macaroni. These must not use the cold salad profile.
- * Bare 熱 would match 高熱量, so only specific words count.
+ * Chinese and English cues are the same ideas: 熱食/hot, 粟米忌廉/corn cream,
+ * 忌廉汁/cream sauce, 焗/baked/gratin, plus 熱辣. Bare 熱 would match 高熱量,
+ * and corn or 粟米 alone is not the cream-corn dish.
  */
 function hasHotCreamMacaroniCue(name: string): boolean {
-  return /焗|熱食|熱辣|粟米忌廉|玉米忌廉|忌廉汁|(?:^|\s)(?:baked|gratin|corn|cream sauce)(?:$|\s)/.test(name);
+  return /焗|熱食|熱辣|粟米忌廉|玉米忌廉|忌廉汁|(?:^|\s)(?:baked|gratin|hot|corn cream|cream sauce)(?:$|\s)/.test(name);
 }
 
 function hasColdCreamMacaroniCue(name: string): boolean {
@@ -619,6 +621,33 @@ function isGrainWithDairyMilk(name: string): boolean {
   return grain && textHasDairyMilkLabel(text);
 }
 
+const ENGLISH_MILK_MODIFIER = "a glass of|hot|iced|cold|warm";
+const CJK_MILK_MODIFIER = "熱凍暫大細";
+
+/**
+ * Temperature and size words may wrap a milk label. 熱牛奶、凍鮮奶、
+ * hot milk and "a glass of milk" are still milk. Dish words are not
+ * modifiers, so 牛奶布甸、奶茶、milk tea and 牛奶麥片 stay excluded.
+ */
+function milkLabelCore(text: string): string {
+  const leadingEnglish = new RegExp(`^(?:(?:${ENGLISH_MILK_MODIFIER})\\s+)+`);
+  const trailingEnglish = new RegExp(`(?:\\s+(?:${ENGLISH_MILK_MODIFIER}))+$`);
+  const leadingCjk = new RegExp(`^[${CJK_MILK_MODIFIER}]+`);
+  const trailingCjk = new RegExp(`[${CJK_MILK_MODIFIER}]+$`);
+  let remaining = text;
+  let previous = "";
+  while (remaining !== previous) {
+    previous = remaining;
+    remaining = remaining
+      .replace(leadingEnglish, "")
+      .replace(leadingCjk, "")
+      .replace(trailingEnglish, "")
+      .replace(trailingCjk, "")
+      .trim();
+  }
+  return remaining;
+}
+
 /**
  * The food name is a dairy-milk label, not a longer dish that merely
  * contains the word. 牛奶布甸、奶茶 and 牛奶麥片 are not milk drinks.
@@ -626,7 +655,8 @@ function isGrainWithDairyMilk(name: string): boolean {
 function dairyMilkLabel(name: string): boolean {
   const text = normalizeFoodName(name);
   if (!text || plantMilkProductName(text)) return false;
-  return DAIRY_MILK_LABELS.some((label) => normalizeFoodName(label) === text);
+  const core = milkLabelCore(text);
+  return DAIRY_MILK_LABELS.some((label) => normalizeFoodName(label) === core);
 }
 
 const LOW_FAT_MILK_LABELS = [

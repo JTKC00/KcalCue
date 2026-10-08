@@ -269,11 +269,11 @@ R > 3、未完成：（無）。
 
 65 個名稱的安全覆蓋、profile 覆蓋、身份覆蓋和錯誤高信心配對沒有因為這次跟進而改變。忌廉通粉、鮮奶和燕麥牛奶粥都不在這 65 個名稱裡。
 
-只有凍的通粉沙律才接到既有 `creamy-salad`：通粉沙律、macaroni salad，或忌廉通粉同時有沙律／凍食說明。熱食要用熱食、熱辣、焗、粟米忌廉或忌廉汁這些字，單是備註「高熱量」不會把它變成熱食。粟米忌廉通粉、焗忌廉通粉、忌廉汁通粉，以及沒有凍食說明的忌廉通粉，身份是 `cream-macaroni`，原因碼 `DISH_KNOWN_NO_PROFILE`，不計算，也不交給 USDA。目錄下限仍是 63 kcal／100 g（FDC 2706818）。畫面把一份的 kcal 向下取整到 5，所以 100 g 的高脂沙律會顯示 60，而不是 63。份量約 95–98 g 時，未進位的下限大約是 60–62 kcal。這是顯示進位，目錄數字沒有改。
+只有凍的通粉沙律才接到既有 `creamy-salad`：通粉沙律、macaroni salad，或忌廉通粉同時有沙律／凍食說明。熱食字中英成對：熱食對 hot，粟米忌廉或玉米忌廉對 corn cream，忌廉汁對 cream sauce，焗對 baked 或 gratin，另有熱辣。單是 corn、粟米，或備註「高熱量」，不會把它變成熱食。粟米忌廉通粉、焗忌廉通粉、忌廉汁通粉，以及沒有凍食說明的忌廉通粉，身份是 `cream-macaroni`，原因碼 `DISH_KNOWN_NO_PROFILE`，不計算，也不交給 USDA。目錄下限仍是 63 kcal／100 g（FDC 2706818）。畫面把一份的 kcal 向下取整到 5，所以 100 g 的高脂沙律會顯示 60，而不是 63。份量約 95–98 g 時，未進位的下限大約是 60–62 kcal。這是顯示進位，目錄數字沒有改。
 
 胡麻醬沙律和油醋汁沙律維持不計算，原因碼是 `DISH_KNOWN_NO_PROFILE`。使用者句子說明還沒有營養 profile。醬量足以把 R 推過 3，而且不在這五個試點家族，所以這次不加模板。
 
-名稱本身是牛奶、鮮奶、全脂奶、低脂奶、fresh milk、skim milk 或 low-fat milk，而備註、可見食材或不確定原因指向燕麥奶、豆漿或杏仁奶時，不配對 whole-milk。`POST /api/meals` 和 `POST /api/nutrition/resolve` 也不把該項交給 USDA live lookup。牛奶布甸、奶茶、牛奶麥片不會因為名稱裡有牛奶就當成牛奶；杏仁片和黃豆也不是植物奶。沒有植物奶或低脂證據時，鮮奶和 fresh milk 配對本地全脂奶，所以沒有 USDA key 的 Demo 仍可計算。低脂奶和脫脂奶不配全脂奶，沒有植物奶證據時仍可交給 USDA。燕麥牛奶粥和麥片加牛奶仍保留乳製奶。若植物奶只寫在餐點層的 visibleEvidence，食物本身沒有這些欄位，這個缺口仍然存在。
+名稱是牛奶、鮮奶、全脂奶、低脂奶、fresh milk、skim milk 或 low-fat milk，或者這些標籤只多了溫度或分量字（熱、凍、暫、大、細、hot、iced、cold、warm、a glass of），而備註、可見食材或不確定原因指向燕麥奶、豆漿或杏仁奶時，不配對 whole-milk。`POST /api/meals` 和 `POST /api/nutrition/resolve` 也不把該項交給 USDA live lookup。牛奶布甸、奶茶、milk tea、牛奶麥片不會因為名稱裡有牛奶就當成牛奶；杏仁片和黃豆也不是植物奶。沒有植物奶或低脂證據時，鮮奶和 fresh milk 配對本地全脂奶，所以沒有 USDA key 的 Demo 仍可計算。這是香港鮮奶通常是全脂的產品預設；若那杯其實是沒有標明的低脂奶，熱量可能高估約三成。名稱本身是低脂奶、脫脂奶、skim milk 或 low-fat milk 時不配全脂奶，沒有植物奶證據時仍可交給 USDA。燕麥牛奶粥和麥片加牛奶仍保留乳製奶。若植物奶只寫在餐點層的 visibleEvidence，食物本身沒有這些欄位，這個缺口仍然存在。
 
 ## 重現
 
