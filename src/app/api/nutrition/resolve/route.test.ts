@@ -17,6 +17,7 @@ import { getNutritionApiKey } from "@/lib/server/env";
 import { authenticated, HttpError } from "@/lib/server/auth";
 import { NUTRITION_RATE_LIMIT, clearRateLimitStore } from "@/lib/server/rate-limit";
 import { clearUsdaCache } from "@/lib/nutrition/usda";
+import { PLANT_MILK_CONTRADICTION_REASON } from "@/lib/nutrition/negative-rules";
 import { reserveHourlyUsdaCall } from "@/lib/server/durable-nutrition-quota";
 import { POST } from "./route";
 
@@ -592,6 +593,48 @@ describe("POST /api/nutrition/resolve", () => {
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: { code: "invalid_request" } });
+  });
+
+  it("skips USDA live lookup for a contradictory dairy label and still looks up other foods", async () => {
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    const fetchMock = vi.fn(async () => Response.json({ foods: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const guarded = [
+      { ...remoteFood("牛奶"), displayName: "牛奶", normalizedName: "whole milk", notes: "oat milk" },
+      { ...remoteFood("鮮奶"), displayName: "鮮奶", normalizedName: "fresh milk", notes: "燕麥" },
+      { ...remoteFood("低脂奶"), displayName: "低脂奶", normalizedName: "low-fat milk", visibleIngredients: ["soy milk"] },
+      { ...remoteFood("脫脂奶"), displayName: "脫脂奶", normalizedName: "skim milk", uncertaintyReasons: ["杏仁奶"] },
+    ];
+    const response = await POST(resolveRequest([...guarded, remoteFood("mystery food")]));
+    const body = await response.json();
+    const queries = fetchMock.mock.calls.map((call) =>
+      new URL(String(call[0])).searchParams.get("query") ?? "");
+
+    expect(response.status).toBe(200);
+    expect(queries).toEqual(["mystery food"]);
+    expect(reserveHourlyUsdaCall).toHaveBeenCalledTimes(1);
+    for (const [index, food] of guarded.entries()) {
+      expect(body.matches[index].includedInTotal, food.displayName).toBe(false);
+      expect(body.matches[index].reasons[0], food.displayName).toBe(PLANT_MILK_CONTRADICTION_REASON);
+    }
+    expect(body.matches[4].includedInTotal).toBe(false);
+  });
+
+  it("still sends unlabelled fresh milk to USDA live", async () => {
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    const fetchMock = vi.fn(async () => Response.json({ foods: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await POST(resolveRequest([
+      { ...remoteFood("鮮奶"), displayName: "鮮奶", normalizedName: "鮮奶" },
+    ]));
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get("query")).toBe("鮮奶");
+    expect(reserveHourlyUsdaCall).toHaveBeenCalledOnce();
+    expect((await response.json()).matches[0].includedInTotal).toBe(false);
   });
 
   it("returns a controlled error for an interrupted input stream", async () => {
