@@ -219,7 +219,7 @@ V0.1 baseline 紀錄見 [GOAL_REPORT.md](./GOAL_REPORT.md)；HEIC／CI／evaluat
 
 ## Known limitations
 
-- 香港／亞洲組合菜式 coverage 仍然有限。已有專屬保守 profile 的包括炒飯、炒麵、咖喱飯、燴飯、焗飯、餃子、叉燒／燒味飯、煲仔飯、雲吞麵／湯麵、粥、腸粉及港式奶茶。火鍋、車仔麵、壽司拼盤、沙律、果汁、pizza 及無名混合菜式在沒有可靠 profile 時維持 unresolved，而不是套用 generic rice／noodle／meat。
+- 香港／亞洲組合菜式 coverage 仍然有限。已有專屬保守 profile 的包括炒飯、炒麵、咖喱飯、燴飯、焗飯、餃子、叉燒／燒味飯、煲仔飯、雲吞麵／湯麵、粥、腸粉、港式奶茶，以及名稱已表明是蛋白質或蔬菜沙律碗的組合沙律（寬範圍，不是單點）。火鍋、車仔麵、壽司拼盤、果汁、pizza、水果／薯仔沙律、只有「沙律」二字的名稱，以及無名混合菜式在沒有可靠 profile 時維持 unresolved，而不是套用 generic rice／noodle／meat／蔬菜。
 - USDA 即時查詢是可選的 server-side fallback，對港式食物名稱的命中率有限；沒有可靠克重換算的非克單位不會自動納入總數。
 - OpenAI API 不直接接受 HEIC / HEIF；KcalCue 會在 server memory 以 `sharp` 轉成 JPEG。Safari 17 起由 WebKit 支援 HEIC 預覽，其他瀏覽器是否能直接顯示相片取決於其 image decoder；KcalCue 仍會在預覽失敗時保留分析入口。目標裝置的完整 browser matrix 仍需持續 QA。
 - 單張相片本身無法知道真實重量、隱藏材料、油份、糖份或完整烹調方法；產品刻意以範圍及 uncertainty 表達。

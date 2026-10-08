@@ -466,6 +466,28 @@ export const representativeEvaluationCases: EvaluationCase[] = [
     expectedCoverage: "none",
   },
   {
+    id: "protein-vegetable-salad",
+    description: "a named grilled protein salad bowl uses a wide composite profile",
+    foods: [food("燒烤蛋白質雜菜沙律碗", "grilled protein mixed vegetable salad bowl", {
+      identityLevel: "dish",
+      portionMin: 450,
+      portionMax: 700,
+    })],
+    expectedCanonicalNames: ["protein-vegetable-salad"],
+    expectedIncluded: [true],
+    expectedMatchTypes: ["exact_canonical"],
+    expectedCoverage: "complete",
+  },
+  {
+    id: "fruit-salad-stays-unresolved",
+    description: "fruit salad does not inherit the protein-vegetable salad range",
+    foods: [food("水果沙律", "fruit salad", { identityLevel: "dish" })],
+    expectedCanonicalNames: ["mixed-dish"],
+    expectedIncluded: [false],
+    expectedMatchTypes: ["unresolved"],
+    expectedCoverage: "none",
+  },
+  {
     id: "risotto-and-scallops",
     description: "second live meal stays unresolved rather than guessing kcal",
     foods: [

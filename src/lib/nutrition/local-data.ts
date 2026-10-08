@@ -566,4 +566,33 @@ export const localNutritionProfiles: NutritionProfile[] = [
     densityBasis:
       "淡奶、煉奶、糖及濃度不能由相片確定；此範圍代表港式奶茶，不是純牛奶。",
   },
+  {
+    id: "protein-vegetable-salad",
+    displayName: "燒烤蛋白質雜菜沙律（組合菜式）",
+    canonicalName: "protein-vegetable-salad",
+    category: "mixed",
+    preparations: ["raw", "grilled", "cooked", "unknown"],
+    aliases: [
+      "grilled protein mixed vegetable salad",
+      "grilled protein mixed vegetable salad bowl",
+      "grilled protein vegetable salad",
+      "protein vegetable salad",
+      "protein vegetable salad bowl",
+      "vegetable salad bowl",
+      "燒烤蛋白質雜菜沙律",
+      "燒烤蛋白質雜菜沙律碗",
+      "雜菜沙律碗",
+      "蔬菜沙律碗",
+    ],
+    composite: true,
+    nutrientsPer100g: nutrientBand([60, 160], [5, 15], [3, 10], [1.5, 9]),
+    gramsPerUnit: { g: 1, bowl: 400 },
+    source: usdaSource(
+      "generic:protein-vegetable-salad",
+      "燒烤蛋白質配雜菜沙律組合菜式保守範圍",
+    ),
+    dataNotice: LOCAL_DATA_NOTICE,
+    densityBasis:
+      "下限接近大量生蔬菜、少量去皮烤雞胸及薄醬；上限反映較多烤肉、可見油汁及較密蔬菜。肉類、醬汁及用油不能由相片確定，因此使用寬範圍，不是某一碗的化驗值。密度參考 USDA 公開的生葉菜、烤雞胸及食用油，再保留組合不確定性。",
+  },
 ];

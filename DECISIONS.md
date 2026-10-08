@@ -188,3 +188,9 @@ iOS 主畫面需要 PNG `apple-touch-icon`。保留 SVG，另提供 192／512 PN
 OpenAI image input 官方支援 PNG、JPEG、WEBP 及非動畫 GIF，不包括現有產品允許的 HEIC／HEIF。為保留既有上載及 preview fallback contract，HEIC／HEIF 只在 server memory 以 `sharp` 轉 JPEG 後送出；轉換失敗回傳 public-safe `image_rejected`，不會把圖片寫入 disk。此前 Gemini-specific provider details 保留作歷史紀錄，以上決定為目前 runtime 行為。
 
 整合補充（2026-09-08）：OpenAI provider 接受 request AbortSignal，與原有 100 秒 abort timeout 合併；client 與 SDK HTTP timeout 維持 90 秒。
+
+## 29. 蛋白質／雜菜沙律碗使用寬範圍，不由模型填 kcal（2026-10-08）
+
+正式站相片「燒烤蛋白質雜菜沙律碗」（450–700 g）辨認成功，但營養顯示「暫未能計算」。Vision 契約仍禁止模型計算熱量；`identityLevel: dish` 的組合菜若沒有同名 profile，resolver 不會退回雞胸或雜菜。這道菜的名稱已足以辨成蛋白質配蔬菜沙律，而目錄沒有這個菜式類別。
+
+新增 `protein-vegetable-salad`：每 100 g 為 60–160 kcal 的寬範圍，上下限分別對應蔬菜為主的薄醬碗，以及較多烤肉和可見油汁的碗。不是該相片的化驗值，也不把範圍收成單點。只有菜名本身出現沙律／salad，並且同時有蔬菜、蛋白質、燒烤或「沙律碗」線索時才套用。水果、薯仔、意粉沙律、單獨「沙律」，以及份量未知或無法辨認的相片維持不計算。推測中的 `visibleIngredients` 不能單獨觸發這個 profile。

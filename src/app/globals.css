@@ -2671,5 +2671,12 @@ svg {
   .journal-note-meta { flex-direction: column; gap: 4px; }
   .editor-section-label { align-items: flex-start; flex-direction: column; gap: 2px; }
   .metadata-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .metadata-grid > label { min-width: 0; }
+  .metadata-grid input,
+  .metadata-grid select {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
   .save-bar { bottom: calc(88px + env(safe-area-inset-bottom)); }
 }

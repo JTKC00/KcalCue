@@ -123,14 +123,29 @@ describe("meal identity correction", () => {
     });
   });
 
-  it.each(["banana salad", "chicken breast salad", "香蕉沙律", "雞胸沙拉", "墨魚汁意大利飯", "banana smoothie", "banana split"])(
+  it.each(["banana salad", "香蕉沙律", "墨魚汁意大利飯", "banana smoothie", "banana split"])(
     "does not turn a corrected composite %s into one base ingredient",
     (name) => {
       const changed = vi.fn();
       render(<KcalCueApp initialProviderMode="live" initialDraft={draft()} onDraftChange={changed} />);
       fireEvent.change(screen.getByLabelText("食物名稱"), { target: { value: name } });
       expect(changed.mock.lastCall![0].items[0].nutritionMatch.includedInTotal).toBe(false);
+      expect(changed.mock.lastCall![0].items[0].nutritionMatch.profile?.canonicalName).not.toBe("banana");
       expect(screen.getByRole("heading", { name: "暫未能計算" })).toBeInTheDocument();
+    },
+  );
+
+  it.each(["chicken breast salad", "雞胸沙拉"])(
+    "estimates %s as a salad range instead of plain chicken",
+    (name) => {
+      const changed = vi.fn();
+      render(<KcalCueApp initialProviderMode="live" initialDraft={draft()} onDraftChange={changed} />);
+      fireEvent.change(screen.getByLabelText("食物名稱"), { target: { value: name } });
+      const match = changed.mock.lastCall![0].items[0].nutritionMatch;
+      expect(match.includedInTotal).toBe(true);
+      expect(match.profile.id).toBe("protein-vegetable-salad");
+      expect(match.profile.canonicalName).not.toBe("chicken-breast");
+      expect(screen.getByRole("heading", { name: /約 .*kcal/ })).toBeInTheDocument();
     },
   );
 

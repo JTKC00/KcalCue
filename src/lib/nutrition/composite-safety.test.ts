@@ -274,6 +274,8 @@ describe("generic fallback safety gate", () => {
     ["咖喱雞飯", "curry chicken rice", "curry-rice"],
     ["牛肉燴飯", "beef braised rice", "braised-rice"],
     ["芝士焗飯", "cheese baked rice", "baked-rice"],
+    ["燒烤蛋白質雜菜沙律碗", "grilled protein mixed vegetable salad bowl", "protein-vegetable-salad"],
+    ["雞胸沙拉", "chicken breast salad", "protein-vegetable-salad"],
   ] as const)("allows the curated %s composite profile", (displayName, normalizedName, profileId) => {
     const match = provider.resolve(makeFood(displayName, normalizedName, {
       identityLevel: "dish",
