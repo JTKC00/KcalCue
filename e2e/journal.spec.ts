@@ -231,6 +231,34 @@ async function rice(page: Page) {
     .fill("白飯");
 }
 
+test("journal visual refresh keeps mobile and desktop hierarchy usable", async ({ browser, page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "今日飲食", exact: true })).toBeVisible();
+  await expect(page.locator(".journal-hero-card")).toBeVisible();
+  await expect(page.locator(".food-stamp-cluster").first()).toHaveAttribute("aria-hidden", "true");
+  await expect(page.getByRole("button", { name: "＋ 手動記餐", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "AI 相片辨識", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "新增", exact: true })).toHaveClass(/journal-nav-add/);
+  await expect(page.locator(".food-stamp svg").first()).toHaveCSS("width", "26px");
+  await expect(page.locator(".food-stamp svg").first()).toHaveCSS("height", "26px");
+  await expect(page.getByText("未記錄", { exact: true })).toBeVisible();
+  await expect(page.getByText("未知不代表零", { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+
+  const desktop = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  try {
+    const wide = await desktop.newPage();
+    await wide.goto("/");
+    await expect(wide.getByRole("heading", { name: "今日飲食", exact: true })).toBeVisible();
+    await expect(wide.locator(".journal-title-actions")).toBeVisible();
+    await expect(wide.locator(".food-stamp svg").first()).toHaveCSS("width", "30px");
+    await expect(wide.locator(".food-stamp svg").first()).toHaveCSS("height", "30px");
+    expect(await wide.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+  } finally {
+    await desktop.close();
+  }
+});
+
 test("mobile journal-first manual note saves, reloads and stays plain text without AI", async ({ page, context }) => {
   const backend = cloud();
   await backend.install(context);
@@ -641,9 +669,17 @@ test("correcting an AI dish to banana survives cloud save, reload and history ed
   expect((await (await readback).json()).records[0]).toMatchObject({
     id: saved.id, version: 1, analysis: originalAnalysis, items: saved.items,
   });
+  // Reload can still be applying the saved meal. Acknowledging that draft
+  // returns the shell to Today in the same render that clears the banner.
+  // Opening History before that render lands never mounts this heading.
+  await expect(page.getByRole("heading", { name: "今日飲食", exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("有一份未儲存草稿")).toHaveCount(0);
+  await expect(page.getByText(/項修改待同步/)).toHaveCount(0);
   await page.getByRole("button", { name: "歷史", exact: true }).click();
   await expect(page.getByRole("heading", { name: "歷史記錄", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "香蕉", exact: true })).toBeVisible();
+  await expect(page.locator(".meal-stamp svg").first()).toHaveCSS("width", "20px");
+  await expect(page.locator(".meal-stamp svg").first()).toHaveCSS("height", "20px");
   await page.getByRole("button", { name: "查看／修正", exact: true }).click();
   await expect(page.getByRole("combobox", { name: "食物名稱", exact: true })).toHaveValue("香蕉");
   await expect(estimate).toHaveText(correctedEstimate!);
@@ -929,7 +965,7 @@ test("PWA shell restores a guest draft offline", async ({ page, context }) => {
   await page.getByRole("button", { name: "今日", exact: true }).click();
   await context.setOffline(true);
   await page.reload();
-  await expect(page.getByText(/離線中 · 可新增、修改及刪除/)).toBeVisible();
+  await expect(page.getByText(/離線中 · 修改會保留，重連後自動同步/)).toBeVisible();
   await page.getByRole("button", { name: "繼續草稿", exact: true }).click();
   await expect(
     page.getByRole("combobox", { name: "食物名稱", exact: true }),
@@ -966,11 +1002,32 @@ test("a queued meal survives an additive IndexedDB schema upgrade and syncs", as
   await expect.poll(readJob).not.toBeNull();
   const pending = await readJob();
   await page.evaluate(() => new Promise<void>((resolve, reject) => {
-    const request = indexedDB.open("kcalcue-sync", 2);
-    request.onupgradeneeded = () => request.result.createObjectStore("photoPayloads");
-    request.onsuccess = () => { request.result.close(); resolve(); };
-    request.onerror = () => reject(request.error);
-    request.onblocked = () => reject(new Error("IDB upgrade blocked"));
+    const probe = indexedDB.open("kcalcue-sync");
+    probe.onerror = () => reject(probe.error ?? new Error("IDB probe failed"));
+    probe.onsuccess = () => {
+      const version = probe.result.version;
+      probe.result.close();
+      const request = indexedDB.open("kcalcue-sync", version + 1);
+      const timer = window.setTimeout(() => {
+        reject(new Error("IDB upgrade timed out while another connection stayed open"));
+      }, 10_000);
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains("photoPayloads"))
+          request.result.createObjectStore("photoPayloads");
+      };
+      request.onsuccess = () => {
+        window.clearTimeout(timer);
+        request.result.close();
+        resolve();
+      };
+      request.onerror = () => {
+        window.clearTimeout(timer);
+        reject(request.error ?? new Error("IDB upgrade failed"));
+      };
+      // The journal opens kcalcue-sync per transaction and closes it when the
+      // transaction finishes. A transient block is that in-flight connection,
+      // not a lost queued meal. Rejecting here raced the closer.
+    };
   }));
   await page.reload();
   expect(await readJob()).toEqual(pending);
@@ -1115,7 +1172,7 @@ test("real photo preview with mocked analysis supports correction, reload, histo
   await expect(page.locator(".journal-notice")).not.toBeVisible();
   await page.reload();
   await expect(page.getByRole("heading", { name: "今日未有記錄", exact: true })).toBeVisible();
-  await expect(todayCalories).toHaveText("0");
+  await expect(todayCalories).toHaveText("未記錄");
   expect(errors).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
 });
@@ -1529,7 +1586,7 @@ test.describe("Today across local midnight", () => {
 
     await page.clock.setFixedTime(new Date(nearMidnight.getTime() + 20_000));
     await expect(page.getByRole("heading", { name: "今日未有記錄", exact: true })).toBeVisible();
-    await expect(todayCalories).toHaveText("0");
+    await expect(todayCalories).toHaveText("未記錄");
     await expect(page.getByText(/之前的餐點可在歷史記錄查看/)).toBeVisible();
     await page.getByRole("button", { name: "歷史", exact: true }).click();
     await expect(page.getByRole("heading", { name: "白飯", exact: true })).toBeVisible();
