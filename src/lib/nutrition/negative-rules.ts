@@ -129,7 +129,7 @@ export const DRESSED_SALAD_UNCALCULATED_REASON =
   "胡麻醬或油醋汁還沒有營養 profile，因此這道沙律不計算。";
 
 export const PLANT_MILK_CONTRADICTION_REASON =
-  "名稱像牛奶、鮮奶或低脂奶，但備註、可見食材或描述指向燕麥、黃豆或杏仁，因此不配對乳製奶，也不交給 USDA。";
+  "名稱像牛奶、鮮奶或低脂奶，但餐點備註、相片證據、不確定說明、項目備註或可見食材指向燕麥奶、豆漿或杏仁奶，因此不配對乳製奶，也不交給 USDA。";
 
 export const CREAM_MACARONI_UNCALCULATED_REASON =
   "忌廉通粉沒有沙律或凍食的說明。熱食、焗或忌廉汁不能用高脂沙律的範圍，因此不計算。";

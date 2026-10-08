@@ -227,6 +227,10 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
       "visibleIngredients must never become separate food entries",
     );
     expect(FOOD_VISION_SYSTEM_INSTRUCTION).toContain("Milk tea is a beverage dish");
+    expect(FOOD_VISION_SYSTEM_INSTRUCTION).toContain("燕麥奶");
+    expect(FOOD_VISION_SYSTEM_INSTRUCTION).toContain("豆漿");
+    expect(FOOD_VISION_SYSTEM_INSTRUCTION).toContain("杏仁奶");
+    expect(FOOD_VISION_SYSTEM_INSTRUCTION).toContain("Do not name it 牛奶 or milk");
     expect(FOOD_VISION_SYSTEM_INSTRUCTION).toContain("set both portionMin and portionMax to null");
     expect(FOOD_VISION_SYSTEM_INSTRUCTION).toContain("return numeric portionMin and portionMax instead");
   });

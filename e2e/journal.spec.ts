@@ -231,6 +231,25 @@ async function rice(page: Page) {
     .fill("白飯");
 }
 
+test("車仔麵 asks for a narrower range and a meal note can mark hot milk as plant milk", async ({ page, context }) => {
+  const backend = cloud();
+  await backend.install(context);
+  await page.goto("/");
+  await login(page);
+  await page.getByRole("button", { name: "手動記一餐", exact: true }).click();
+  await page.getByRole("combobox", { name: "食物名稱", exact: true }).fill("車仔麵");
+  await expect(page.getByRole("status").filter({ hasText: "2.5 倍" })).toBeVisible();
+  await expect(page.getByRole("article").getByText("約 45–185 kcal", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "新增食物", exact: true }).click();
+  await page.getByRole("combobox", { name: "食物名稱", exact: true }).nth(1).fill("熱牛奶");
+  const hotMilk = page.getByRole("article").filter({ has: page.getByRole("combobox", { name: "食物名稱" }) }).nth(1);
+  await expect(hotMilk.getByText("約 60–95 kcal", { exact: true })).toBeVisible();
+  await page.locator("#meal-journal-note").fill("這杯是燕麥奶");
+  await expect(hotMilk.getByText(/不配對乳製奶/)).toBeVisible();
+  await expect(hotMilk.getByText("約 60–95 kcal", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("status").filter({ hasText: "2.5 倍" })).toBeVisible();
+});
+
 test("journal visual refresh keeps mobile and desktop hierarchy usable", async ({ browser, page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "今日飲食", exact: true })).toBeVisible();

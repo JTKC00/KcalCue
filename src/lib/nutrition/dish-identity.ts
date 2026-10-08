@@ -343,6 +343,14 @@ export const DISH_IDENTITIES: readonly DishIdentity[] = [
     english: ["macaroni soup", "ham macaroni soup"],
   }),
   dish({
+    id: "cha-chaan-teng-set",
+    familyId: "cha-chaan-teng-set",
+    traditional: ["茶餐廳常餐", "常餐"],
+    simplified: ["茶餐厅常餐"],
+    variant: ["茶餐常餐"],
+    english: ["cha chaan teng set", "hong kong cafe set meal"],
+  }),
+  dish({
     id: "char-siu-bao",
     familyId: "dim-sum",
     traditional: ["叉燒包"],
@@ -374,9 +382,9 @@ export const DISH_IDENTITIES: readonly DishIdentity[] = [
   dish({
     id: "har-gow",
     familyId: "dim-sum",
-    traditional: ["蝦餃"],
-    simplified: ["虾饺"],
-    english: ["har gow", "shrimp dumpling"],
+    traditional: ["蝦餃", "鮮蝦餃", "水晶蝦餃"],
+    simplified: ["虾饺", "鲜虾饺", "水晶虾饺"],
+    english: ["har gow", "shrimp dumpling", "crystal shrimp dumpling"],
   }),
   dish({
     id: "xiaolongbao",

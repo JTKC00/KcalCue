@@ -118,8 +118,14 @@ export const foodAnalysisJsonSchema = {
       items: {
         type: "object",
         properties: {
-          displayName: { type: "string" },
-          normalizedName: { type: "string" },
+          displayName: {
+            type: "string",
+            description: "Traditional Chinese (Hong Kong) name. If the carton or label suggests plant milk, use 燕麥奶, 豆漿, or 杏仁奶, not 牛奶.",
+          },
+          normalizedName: {
+            type: "string",
+            description: "English canonical name. Plant milk must be oat milk, soy milk, or almond milk, not milk or whole milk, when the carton suggests it.",
+          },
           identityLevel: {
             type: "string",
             enum: [...foodIdentityLevels],
@@ -141,7 +147,10 @@ export const foodAnalysisJsonSchema = {
             type: ["array", "null"],
             items: { type: "string" },
           },
-          notes: { type: ["string", "null"] },
+          notes: {
+            type: ["string", "null"],
+            description: "Item note. For a plant-milk carton, repeat 燕麥奶, 豆漿, or 杏仁奶 here when that is what the package shows.",
+          },
         },
         required: [
           "displayName",
@@ -166,6 +175,7 @@ export const foodAnalysisJsonSchema = {
     },
     visibleEvidence: {
       type: "array",
+      description: "Visible wording and objects. When a drink carton suggests plant milk, include 燕麥奶, 豆漿, or 杏仁奶 here instead of calling the drink 牛奶.",
       items: { type: "string" },
     },
     estimatedInformation: {

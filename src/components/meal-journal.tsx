@@ -1354,7 +1354,7 @@ export function MealJournal({
                   />
                   <span className="journal-note-meta">
                     <span id="meal-journal-note-help">
-                      備註只作記錄；要改營養數值，請另外修改食物或份量。
+                      備註主要作記錄。若寫明飲品是燕麥奶、豆漿或杏仁奶，該項不會當成乳製奶。
                     </span>
                     <span
                       id="meal-journal-note-count"
@@ -1384,6 +1384,7 @@ export function MealJournal({
                   initialProviderMode={initialProviderMode}
                   initialDraft={initialDraft ?? draft}
                   calorieCorrection={draft.calorieCorrection}
+                  mealNote={draft.journalNote}
                   manual={manual}
                   onDraftChange={onDraftChange}
                   onPhotoSelected={onPhotoSelected}

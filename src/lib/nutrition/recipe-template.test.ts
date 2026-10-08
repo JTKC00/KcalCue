@@ -5,16 +5,18 @@ import { resolveCuratedDishIdentity } from "./canonical";
 import { localNutritionProfiles } from "./local-data";
 import { LocalNutritionProvider } from "./local-provider";
 import { calculateRecipe, densityRange } from "./recipe-calculator";
+import { calculateFoodNutrition } from "./calculation";
 import {
   compiledDishTemplates,
   PILOT_FAMILY_IDS,
   templateNutritionProfiles,
+  templateRangeNeedsFollowUp,
 } from "./recipe-templates";
 import { nutritionMatchResponseSchema } from "./response-schema";
 import type { FoodEstimate } from "@/lib/domain/food-analysis";
 
 const PRESERVED_CALORIES: Record<string, { min: number; max: number }> = {
-  "siu-mei-rice": { min: 170, max: 320 },
+  "siu-mei-rice": { min: 170, max: 210 },
   "noodle-soup": { min: 70, max: 160 },
   congee: { min: 40, max: 110 },
   "claypot-rice": { min: 170, max: 340 },
@@ -174,5 +176,44 @@ describe("recipe templates", () => {
     const wonton = new LocalNutritionProvider().resolve(food("鮮蝦雲吞麵"));
     expect(wonton.profile?.id).toBe("noodle-soup");
     expect(wonton.profile?.nutrientsPer100g.calories).toEqual({ min: 70, max: 160 });
+  });
+
+  it("keeps cart noodles complete and flagged for follow-up", () => {
+    const template = compiledDishTemplates.find((item) => item.dishId === "cart-noodles");
+    expect(template?.rangeRatio).toBeGreaterThan(2.5);
+    expect(template?.rangeRatio).toBeLessThanOrEqual(3);
+    expect(template?.needsFollowUp).toBe(true);
+    expect(template?.complete).toBe(true);
+    const provider = new LocalNutritionProvider();
+    const atDefault = food("車仔麵");
+    atDefault.portionMax = 150;
+    const match = provider.resolve(atDefault);
+    expect(match.profile?.id).toBe("template:cart-noodles");
+    expect(match.includedInTotal).toBe(true);
+    expect(templateRangeNeedsFollowUp(match.profile)).toBe(true);
+    const shown = calculateFoodNutrition(atDefault, match).ranges?.calories;
+    expect(shown).toBeTruthy();
+    if (!shown) return;
+    expect(shown.max / shown.min).toBeGreaterThan(3);
+    const at100 = calculateFoodNutrition({ ...atDefault, portionMin: 100, portionMax: 100 }, match).ranges?.calories;
+    expect(at100).toBeTruthy();
+    if (!at100) return;
+    expect(at100.max / at100.min).toBeGreaterThan(2.5);
+    expect(at100.max / at100.min).toBeLessThanOrEqual(3);
+  });
+
+  it("caps char siu rice below the old 320 kcal ceiling", () => {
+    const plate = compiledDishTemplates.find((item) => item.dishId === "char-siu-rice-plate");
+    const crispy = compiledDishTemplates.find((item) => item.dishId === "crispy-roast-pork-rice");
+    const profile = localNutritionProfiles.find((item) => item.id === "siu-mei-rice");
+    expect(plate?.calculation.per100g.calories.max).toBeLessThan(210);
+    expect(crispy?.calculation.per100g.calories.max).toBeLessThan(210);
+    expect(profile?.nutrientsPer100g.calories).toEqual({ min: 170, max: 210 });
+    const provider = new LocalNutritionProvider();
+    const portion = { ...food("叉燒飯"), portionMin: 100, portionMax: 150 };
+    const ranges = calculateFoodNutrition(portion, provider.resolve(portion)).ranges?.calories;
+    expect(ranges?.min).toBe(170);
+    expect(ranges?.max).toBe(315);
+    expect(ranges?.max).toBeLessThan(480);
   });
 });

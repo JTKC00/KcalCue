@@ -9,6 +9,7 @@ import {
 } from "@/lib/domain/food-analysis";
 import type { EditableFoodItem, PortionPreset } from "@/lib/domain/editable-meal";
 import { roundRange, type CalculatedFood } from "@/lib/nutrition/calculation";
+import { templateRangeNeedsFollowUp } from "@/lib/nutrition/recipe-templates";
 import { TrashIcon } from "./icons";
 
 export interface RecognitionBadge {
@@ -174,6 +175,10 @@ export function FoodEditor({
 
       {item.portionMin === null ? (
         <p className="food-uncertainty" role="status">請核對食物名稱；現有資料不足以判斷你吃了多少。可填寫份量；留空儲存時，本餐 kcal 會標示為未知。</p>
+      ) : null}
+
+      {templateRangeNeedsFollowUp(calculation.match?.profile) && calculation.includedInTotal ? (
+        <p className="inline-warning" role="status">{copy.nutritionRangeFollowUp}</p>
       ) : null}
 
       {calculation.unavailableReason ? (

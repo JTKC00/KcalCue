@@ -23,6 +23,9 @@ const GENERIC_DISH_CANONICALS = new Set([
   "bread-dish",
 ]);
 
+export const CHA_CHAAN_TENG_SET_UNCALCULATED_REASON =
+  "茶餐廳常餐的主菜和飲品由客人選擇，不是西多士、菠蘿包、腸仔蛋或通粉湯其中一樣，因此不套用早餐模板，也不計算。";
+
 export function compositeDishCoverageReason(
   identity: CanonicalFoodIdentity,
 ): NutritionCoverageReason {

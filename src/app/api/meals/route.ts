@@ -17,7 +17,7 @@ import {
 import { accountPath } from "@/lib/firebase/admin";
 import { createEditableFoodItems, hasKnownPortion } from "@/lib/domain/editable-meal";
 import { canReuseNutritionMatchForNameEdit } from "@/lib/nutrition/client";
-import { contradictoryDairyMilkLabel, isCompositeIdentity } from "@/lib/nutrition/canonical";
+import { contradictoryDairyMilkLabel, isCompositeIdentity, mealPlantMilkContext } from "@/lib/nutrition/canonical";
 import { supportsUsdaPortionUnit, UsdaNutritionClient } from "@/lib/nutrition/usda";
 import { getNutritionApiKey } from "@/lib/server/env";
 import { reserveHourlyUsdaCall } from "@/lib/server/durable-nutrition-quota";
@@ -154,31 +154,44 @@ export async function POST(request: Request) {
     const key = getNutritionApiKey();
     const usda = key ? new UsdaNutritionClient(key, async () =>
       (await reserveHourlyUsdaCall(db, user.id)).allowed, user.id) : null;
+    const resolvedNote = resolveJournalNote(journalNote, previous?.journalNote);
+    const analysisForNutrition = previous ? previous.analysis : input.analysis;
+    const mealContext = mealPlantMilkContext({
+      analysis: analysisForNutrition,
+      mealNote: resolvedNote,
+    });
+    const previousContext = mealPlantMilkContext({
+      analysis: previous?.analysis ?? null,
+      mealNote: previous?.journalNote ?? null,
+    });
     const reusePreviousNutrition =
       journalNote !== undefined &&
       !!previous &&
       input.mode === previous.mode &&
       sameCalorieBasis(input.items, previous.items);
     const previousItems = new Map(previous?.items.map((item) => [item.id, item]) ?? []);
+    const plantMilkGuardUnchanged = (item: typeof input.items[number]) =>
+      contradictoryDairyMilkLabel(item, mealContext) === contradictoryDairyMilkLabel(item, previousContext);
     const initialItems = input.items.map((item) => {
       if (!hasKnownPortion(item)) return { ...item, nutritionMatch: null };
       const old = previousItems.get(item.id);
-      if (reusePreviousNutrition && old)
+      if (reusePreviousNutrition && old && plantMilkGuardUnchanged(item))
         return { ...item, nutritionMatch: old.nutritionMatch ?? null };
       const match =
         old &&
-        hasKnownPortion(old) && canReuseNutritionMatchForNameEdit(old, item, old.nutritionMatch)
+        hasKnownPortion(old) && canReuseNutritionMatchForNameEdit(old, item, old.nutritionMatch) &&
+        plantMilkGuardUnchanged(item)
           ? old.nutritionMatch!
-          : local.resolve(item);
+          : local.resolve(item, mealContext);
       return { ...item, nutritionMatch: match };
     });
     const needsRemote = (item: typeof initialItems[number]) =>
-      !reusePreviousNutrition &&
+      (!reusePreviousNutrition || !plantMilkGuardUnchanged(item)) &&
       hasKnownPortion(item) && item.nutritionMatch !== null &&
       !item.nutritionMatch.includedInTotal &&
       supportsUsdaPortionUnit(item.unit) &&
       !isCompositeIdentity(item.nutritionMatch.identity) &&
-      !contradictoryDairyMilkLabel(item);
+      !contradictoryDairyMilkLabel(item, mealContext);
     // All writes participate in this claim. Otherwise a changed local/manual
     // payload with the same mutation ID could race a Live lookup and commit
     // first, causing the eventual Live request to acknowledge the wrong body.
@@ -229,13 +242,13 @@ export async function POST(request: Request) {
         (analysis
           ? createEditableFoodItems(
               analysis.foods,
-              analysis.foods.map((food) => hasKnownPortion(food) ? local.resolve(food) : null),
+              analysis.foods.map((food) => hasKnownPortion(food) ? local.resolve(food, mealContext) : null),
             )
           : items);
       const record: Omit<MealRecord, "updatedAt"> = {
         ...mealInput,
         calorieCorrection: resolveCalorieCorrection(input.calorieCorrection, input.items, previous),
-        journalNote: resolveJournalNote(journalNote, previous?.journalNote),
+        journalNote: resolvedNote,
         items,
         analysis,
         analysisProvenance: previous

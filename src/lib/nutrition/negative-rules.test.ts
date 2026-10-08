@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import type { FoodEstimate } from "@/lib/domain/food-analysis";
-import { canonicalizeFood, contradictoryDairyMilkLabel, isCompositeIdentity, profileBlockedByNegativeRule } from "./canonical";
+import { canonicalizeFood, contradictoryDairyMilkLabel, isCompositeIdentity, mealPlantMilkContext, profileBlockedByNegativeRule } from "./canonical";
+import { calculateFoodNutrition, roundRange } from "./calculation";
+import { oatMilkCartonPhotoAnalysis } from "./oat-milk-photo.fixture";
 import { localNutritionProfiles } from "./local-data";
 import { LocalNutritionProvider } from "./local-provider";
 import {
@@ -275,6 +277,46 @@ describe("negative match rules", () => {
       expect(match.reasons[0], item.normalizedName).toBe(PLANT_MILK_CONTRADICTION_REASON);
       expect(reachesUsdaLive(item), item.normalizedName).toBe(false);
     }
+  });
+
+  it("blocks whole milk when the oat-milk carton is only on the meal", () => {
+    const drink = oatMilkCartonPhotoAnalysis.foods[0];
+    const context = mealPlantMilkContext({ analysis: oatMilkCartonPhotoAnalysis });
+    const dairy = provider.resolve(drink);
+    const guarded = provider.resolve(drink, context);
+    const dairyCalories = calculateFoodNutrition(drink, dairy).ranges?.calories;
+
+    expect(contradictoryDairyMilkLabel(drink)).toBe(false);
+    expect(dairy.profile?.id).toBe("whole-milk");
+    expect(dairy.includedInTotal).toBe(true);
+    expect(dairyCalories && roundRange(dairyCalories, 5)).toEqual({ min: 155, max: 220 });
+    expect(contradictoryDairyMilkLabel(drink, context)).toBe(true);
+    expect(guarded.profile?.id).not.toBe("whole-milk");
+    expect(guarded.includedInTotal).toBe(false);
+    expect(guarded.reasons[0]).toBe(PLANT_MILK_CONTRADICTION_REASON);
+    expect(guarded.coverageReason).toBe("INSUFFICIENT_COVERAGE");
+
+    const rice = food("白飯", "cooked white rice", "ingredient");
+    expect(provider.resolve(rice, context).profile?.id).toBe("white-rice-cooked");
+    const porridge = food("燕麥牛奶粥", "oat porridge with milk", "dish");
+    expect(provider.resolve(porridge, { mealNote: "燕麥奶" }).profile?.id).toBe("whole-milk");
+  });
+
+  it("counts the meal note and each meal-level plant-milk field for 熱牛奶", () => {
+    const hotMilk = food("熱牛奶", "hot milk", "ingredient");
+    expect(provider.resolve(hotMilk).profile?.id).toBe("whole-milk");
+    const sources = [
+      { mealNote: "這杯是燕麥奶" },
+      { visibleEvidence: ["紙盒寫有豆漿。"] },
+      { uncertaintyText: ["可能是杏仁奶。"] },
+    ];
+    for (const context of sources) {
+      const match = provider.resolve(hotMilk, context);
+      expect(contradictoryDairyMilkLabel(hotMilk, context), JSON.stringify(context)).toBe(true);
+      expect(match.profile?.id, JSON.stringify(context)).not.toBe("whole-milk");
+      expect(match.includedInTotal, JSON.stringify(context)).toBe(false);
+    }
+    expect(contradictoryDairyMilkLabel(hotMilk, { mealNote: "同朋友食午餐" })).toBe(false);
   });
 
   it("does not resolve a composite dish to a single ingredient profile", () => {

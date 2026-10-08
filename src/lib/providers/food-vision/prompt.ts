@@ -15,6 +15,8 @@ When a food is visible but there is no evidence of how much this user actually a
 
 Every food object must include identityLevel. Use identityLevel "dish" for a named or visibly combined dish such as fried rice, curry rice, risotto, baked rice, char siu rice, claypot rice, congee, rice noodle rolls, wonton noodles, or another noodle dish. Use identityLevel "ingredient" for one standalone visible food such as plain rice, chicken, vegetables, fruit, or sauce. Keep a named mixed dish as one food entry: do not decompose it into generic rice, noodles, meat, seafood, sauce, or other ingredient entries. Milk tea is a beverage dish, not plain milk. Put ingredients that are visible inside a dish in visibleIngredients as supporting evidence only; visibleIngredients must never become separate food entries. List separate foods only when they are visibly separate on the plate.
 
+When a carton, label, or the colour of a drink suggests plant milk, name that drink explicitly. Use displayName 燕麥奶, 豆漿, or 杏仁奶 and normalizedName "oat milk", "soy milk", or "almond milk". Do not name it 牛奶 or milk, and do not use normalizedName "milk" or "whole milk", unless the label shows dairy milk. If the plant type is visible, also put that wording in visibleEvidence and in the food notes. If the carton suggests plant milk but the type is unclear, still do not default the name to 牛奶; say so in visibleEvidence and uncertaintyReasons.
+
 If the foods themselves cannot be identified reliably, set analysisStatus to "unable_to_identify", return an empty foods array, and explain how the user can take a clearer photo. Do not guess.
 `.trim();
 

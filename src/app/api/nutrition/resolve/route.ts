@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { authenticated, apiError } from "@/lib/server/auth";
 import { foodEstimateSchema } from "@/lib/domain/food-analysis";
-import { contradictoryDairyMilkLabel, isCompositeIdentity } from "@/lib/nutrition/canonical";
+import { contradictoryDairyMilkLabel, isCompositeIdentity, type MealPlantMilkContext } from "@/lib/nutrition/canonical";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { supportsUsdaPortionUnit, UsdaNutritionClient, UsdaNutritionError } from "@/lib/nutrition/usda";
 import { getNutritionApiKey } from "@/lib/server/env";
@@ -24,8 +24,14 @@ import { z } from "zod";
 
 export const runtime = "nodejs";
 
+const mealContextSchema = z.object({
+  visibleEvidence: z.array(z.string().trim().min(1).max(180)).max(12).optional(),
+  uncertaintyText: z.array(z.string().trim().min(1).max(180)).max(36).optional(),
+  mealNote: z.string().max(2000).nullable().optional(),
+}).strict();
 const requestSchema = z.object({
   foods: z.array(foodEstimateSchema).max(12),
+  mealContext: mealContextSchema.optional(),
 });
 const MAX_PARALLEL_USDA_LOOKUPS = 3;
 const USDA_ENRICHMENT_DEADLINE_MS = 12_000;
@@ -70,7 +76,8 @@ export async function POST(request: Request) {
 
   const local = new LocalNutritionProvider();
   const apiKey = getNutritionApiKey();
-  const matches: NutritionMatch[] = parsed.data.foods.map((food) => local.resolve(food));
+  const mealContext: MealPlantMilkContext | undefined = parsed.data.mealContext;
+  const matches: NutritionMatch[] = parsed.data.foods.map((food) => local.resolve(food, mealContext));
   const warnings: Array<{ index: number; code: string }> = [];
   const startedAt = performance.now();
 
@@ -79,7 +86,7 @@ export async function POST(request: Request) {
       !match.includedInTotal &&
       supportsUsdaPortionUnit(parsed.data.foods[index].unit) &&
       !isCompositeIdentity(match.identity) &&
-      !contradictoryDairyMilkLabel(parsed.data.foods[index]) ? [index] : []) : [];
+      !contradictoryDairyMilkLabel(parsed.data.foods[index], mealContext) ? [index] : []) : [];
     if (apiKey && remoteIndexes.length > 0 && !request.signal.aborted) {
       const deadline = new AbortController();
       const timeout = setTimeout(() => deadline.abort(), USDA_ENRICHMENT_DEADLINE_MS);

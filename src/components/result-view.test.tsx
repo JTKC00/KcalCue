@@ -4,6 +4,7 @@ import "../test/setup";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import { copy } from "@/content/zh-HK";
 import { createEditableFoodItems } from "@/lib/domain/editable-meal";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { ResultView } from "./result-view";
@@ -143,5 +144,30 @@ describe("ResultView coverage copy", () => {
 
     expect(screen.getByRole("heading", { name: "暫未能計算" })).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("1 / 2");
+  });
+
+  it("shows the cart-noodle follow-up at the default 100–150 g portion", () => {
+    const provider = new LocalNutritionProvider();
+    const foods = [food("車仔麵", "車仔麵", "dish")];
+    const items = createEditableFoodItems(foods, foods.map((item) => provider.resolve(item)));
+    render(
+      <ResultView
+        analysis={null}
+        items={items}
+        mode="manual"
+        previewUrl={null}
+        previewFailed={false}
+        isHeic={false}
+        onNameChange={noop}
+        onPortionChange={noop}
+        onUnitChange={noop}
+        onPreset={noop}
+        onDelete={noop}
+        onAdd={noop}
+        onReset={noop}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(copy.nutritionRangeFollowUp);
+    expect(screen.getByText(/約 45–185 kcal/)).toBeInTheDocument();
   });
 });

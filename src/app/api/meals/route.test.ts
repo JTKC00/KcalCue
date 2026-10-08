@@ -24,6 +24,7 @@ import { reserveHourlyUsdaCall } from "@/lib/server/durable-nutrition-quota";
 import { claimMealLookupAttempt, releaseMealLookupAttempt } from "@/lib/server/meal-lookup-attempt";
 import { copy } from "@/content/zh-HK";
 import { PLANT_MILK_CONTRADICTION_REASON } from "@/lib/nutrition/negative-rules";
+import { oatMilkCartonPhotoAnalysis } from "@/lib/nutrition/oat-milk-photo.fixture";
 import { clearUsdaCache } from "@/lib/nutrition/usda";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import type { NutritionMatch } from "@/lib/nutrition/types";
@@ -467,6 +468,65 @@ describe("POST /api/meals bounded input", () => {
     expect(body.record.items[0].nutritionMatch.reasons).not.toContain(copy.nutritionLookupFailed);
     expect(body.record.items[1].nutritionMatch.reasons).not.toContain(PLANT_MILK_CONTRADICTION_REASON);
     expect(commitMeal).toHaveBeenCalledOnce();
+  });
+
+  it("uses the meal note as plant-milk evidence when 熱牛奶 has no item note", async () => {
+    clearUsdaCache();
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => Response.json({ foods: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const hotMilk = {
+      ...meal.items[0],
+      id: "hot-milk",
+      displayName: "熱牛奶",
+      normalizedName: "hot milk",
+      identityLevel: "ingredient" as const,
+      unit: "ml" as const,
+      portionMin: 250,
+      portionMax: 350,
+      originalPortionMin: 250,
+      originalPortionMax: 350,
+    };
+    const response = await POST(jsonRequest(JSON.stringify({
+      ...meal,
+      mode: "live",
+      journalNote: "這杯是燕麥奶",
+      items: [hotMilk],
+    })));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(body.record.journalNote).toBe("這杯是燕麥奶");
+    expect(body.record.items[0].notes).toBeUndefined();
+    expect(body.record.items[0].nutritionMatch.profile).toBeNull();
+    expect(body.record.items[0].nutritionMatch.reasons[0]).toBe(PLANT_MILK_CONTRADICTION_REASON);
+    expect(commitMeal).toHaveBeenCalledOnce();
+  });
+
+  it("blocks dairy milk from an oat-milk photo even though the item is named 牛奶", async () => {
+    clearUsdaCache();
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => Response.json({ foods: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const drink = oatMilkCartonPhotoAnalysis.foods[0];
+    const response = await POST(jsonRequest(JSON.stringify({
+      ...meal,
+      mode: "live",
+      analysis: oatMilkCartonPhotoAnalysis,
+      items: [{
+        ...drink,
+        id: "oat-carton",
+        originalPortionMin: drink.portionMin,
+        originalPortionMax: drink.portionMax,
+      }],
+    })));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(body.record.items[0].nutritionMatch.profile).toBeNull();
+    expect(body.record.items[0].nutritionMatch.reasons[0]).toBe(PLANT_MILK_CONTRADICTION_REASON);
   });
 
   it.each([undefined, "8"])(
