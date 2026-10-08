@@ -76,10 +76,7 @@ describe("nutrition coverage benchmark", () => {
       expect(result.violation, probe.id).toBe(probe.knownFalseConfidentMatch);
     }
 
-    expect(results.filter(({ result }) => result.violation).map(({ result }) => result.id)).toEqual([
-      "char-siu-rice-plate",
-      "plain-noodle-soup",
-    ]);
+    expect(results.filter(({ result }) => result.violation).map(({ result }) => result.id)).toEqual([]);
 
     const charSiu = results.find(({ probe }) => probe.id === "char-siu-rice-not-ingredient")?.result;
     expect(charSiu?.includedInTotal).toBe(true);
@@ -107,11 +104,23 @@ describe("nutrition coverage benchmark", () => {
     }
 
     const plate = results.find(({ probe }) => probe.id === "char-siu-rice-plate")?.result;
-    expect(plate?.profileId).toBe("siu-mei-rice");
-    expect(plate?.knownFalseConfidentMatch).toBe(true);
+    expect(plate?.includedInTotal).toBe(false);
+    expect(plate?.profileId).not.toBe("siu-mei-rice");
+    expect(plate?.profileId).toBeNull();
+    expect(plate?.canonicalName).toBe("char-siu-rice-plate");
+    expect(plate?.knownFalseConfidentMatch).toBe(false);
     const plainSoup = results.find(({ probe }) => probe.id === "plain-noodle-soup")?.result;
-    expect(plainSoup?.profileId).toBe("noodle-soup");
-    expect(plainSoup?.knownFalseConfidentMatch).toBe(true);
+    expect(plainSoup?.includedInTotal).toBe(false);
+    expect(plainSoup?.profileId).not.toBe("noodle-soup");
+    expect(plainSoup?.profileId).toBeNull();
+    expect(plainSoup?.canonicalName).toBe("plain-noodle-soup");
+    expect(plainSoup?.knownFalseConfidentMatch).toBe(false);
+
+    for (const id of ["sesame-dressing-not-lean", "vinaigrette-not-lean", "thousand-island-not-lean", "egg-yolk-sauce-not-lean"] as const) {
+      const dressing = results.find(({ probe }) => probe.id === id)?.result;
+      expect(dressing?.profileId, id).not.toBe("protein-vegetable-salad");
+      expect(dressing?.violation, id).toBe(false);
+    }
   });
 
   it("assigns a reason code without changing user-facing copy or totals", () => {
@@ -119,7 +128,10 @@ describe("nutrition coverage benchmark", () => {
     const dish = benchmarkFoodEstimate("碟頭飯", "碟頭飯", "dish");
     const dishMatch = provider.resolve(dish);
     expect(dishMatch.includedInTotal).toBe(false);
-    expect(dishMatch.coverageReason).toBe("UNKNOWN_DISH");
+    expect(dishMatch.coverageReason).toBe("DISH_KNOWN_NO_PROFILE");
+    expect(dishMatch.identity.dishId).toBe("rice-plate");
+    expect(dishMatch.identity.familyId).toBe("rice-plate");
+    expect(dishMatch.identity.hasNutritionProfile).toBe(false);
     expect(dishMatch.reasons[0]).toBe(COMPOSITE_GENERIC_FALLBACK_REASON);
     expect(dishMatch.profile).toBeNull();
 
@@ -135,7 +147,7 @@ describe("nutrition coverage benchmark", () => {
     expect(soyMatch.profile).toBeNull();
 
     const namedDish = benchmarkFoodEstimate("拉麵", "拉麵", "dish");
-    expect(provider.resolve(namedDish).coverageReason).toBe("COMPOSITE_UNSUPPORTED");
+    expect(provider.resolve(namedDish).coverageReason).toBe("DISH_KNOWN_NO_PROFILE");
 
     const wings = benchmarkFoodEstimate("雞翼", "chicken wings", "ingredient");
     const wingsMatch = provider.resolve(wings);
@@ -146,7 +158,8 @@ describe("nutrition coverage benchmark", () => {
     const banana = benchmarkFoodEstimate("香蕉", "banana", "ingredient");
     const bananaMl = provider.resolve({ ...banana, unit: "ml" });
     expect(bananaMl.includedInTotal).toBe(false);
-    expect(bananaMl.coverageReason).toBe("TYPE_MISMATCH");
+    expect(bananaMl.coverageReason).toBe("UNIT_CONVERSION_MISSING");
+    expect(bananaMl.coverageReason).not.toBe("TYPE_MISMATCH");
     expect(bananaMl.reasons[0]).toContain("ml");
 
     const included = provider.resolve(benchmarkFoodEstimate("鮮蝦雲吞麵", "鮮蝦雲吞麵", "dish"));
@@ -159,13 +172,13 @@ describe("nutrition coverage benchmark", () => {
     expect(withoutReason.includedInTotal).toBe(calculated.includedInTotal);
     expect(withoutReason.ranges).toEqual(calculated.ranges);
     expect(withoutReason.unavailableReason).toBe(calculated.unavailableReason);
-    expect(NUTRITION_COVERAGE_REASONS).toHaveLength(5);
+    expect(NUTRITION_COVERAGE_REASONS).toHaveLength(7);
   });
 
   it("accepts nutrition matches saved before coverageReason existed", () => {
     const provider = new LocalNutritionProvider();
     const current = provider.resolve(benchmarkFoodEstimate("火鍋", "火鍋", "dish"));
-    expect(current.coverageReason).toBe("COMPOSITE_UNSUPPORTED");
+    expect(current.coverageReason).toBe("DISH_KNOWN_NO_PROFILE");
     expect(nutritionMatchResponseSchema.safeParse(current).success).toBe(true);
 
     const parsed = nutritionMatchResponseSchema.safeParse(withoutCoverageReason(current));

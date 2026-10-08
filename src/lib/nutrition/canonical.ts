@@ -1,4 +1,10 @@
 import type { FoodEstimate } from "@/lib/domain/food-analysis";
+import { DISH_IDENTITIES, type DishIdentity } from "./dish-identity";
+import {
+  NEGATIVE_MATCH_RULES,
+  SALAD_NAME_SPELLINGS,
+  type NegativeMatchRule,
+} from "./negative-rules";
 import type {
   CanonicalFoodIdentity,
   FoodCategory,
@@ -147,19 +153,41 @@ const IDENTITY_RULES: TermRule[] = [
   { keys: ["apple", "蘋果"], canonicalName: "apple", category: "fruit", kind: "specific_food" },
 ];
 
-const SALAD_WORD = /(?:^|\s)salads?(?:$|\s)|沙律(?!醬)|沙拉(?!醬)/;
+const SALAD_WORD = new RegExp(
+  `(?:^|\\s)salads?(?:$|\\s)|(?:${SALAD_NAME_SPELLINGS.join("|")})(?!醬)`,
+);
 const SALAD_LEAN_EXCLUSION =
   /banana|apple|mango|grape|fruit|potato|pasta|jelly|香蕉|蘋果|芒果|葡萄|水果|雜果|薯|意粉|啫喱|果沙律|果沙拉/;
 const SALAD_COMPONENT =
   /vegetables?|veggies?|greens?|protein|chicken|salmon|beef|pork|tofu|tuna|shrimp|prawn|grilled|roasted|雜菜|蔬菜|生菜|青菜|蛋白質|蛋白|雞胸|雞腿|雞扒|雞肉|三文魚|牛肉|豬肉|豆腐|吞拿|蝦|燒烤|烤/;
-const CREAMY_SALAD_CUE =
-  /macaroni|通粉|通心粉|mayonnaise|(?:^|\s)mayo(?:$|\s)|沙律醬|沙拉醬|蛋黃醬|千島|thousand island|(?:^|\s)caesar(?:$|\s)|凱撒|(?:^|\s)cheese(?:$|\s)|芝士|起司/;
 const SALAD_DRESSING_CUE = /(?:^|\s)dressing(?:$|\s)/;
 const SALAD_DRESSING_NEGATION =
   /(?:^|\s)(?:no|without) dressing(?:$|\s)|不加醬|沒有沙律醬|沒有沙拉醬|走醬/;
 
 function saladSearchName(food: FoodEstimate): string {
   return normalizeFoodName(`${food.displayName} ${food.normalizedName}`);
+}
+
+function ruleMatchesName(rule: NegativeMatchRule, name: string): boolean {
+  return rule.patterns.some((pattern) =>
+    textContainsKey(name, pattern, { skipLongerAliasShadow: true }),
+  );
+}
+
+function saladDressingRules(name: string): NegativeMatchRule[] {
+  return NEGATIVE_MATCH_RULES.filter(
+    (rule) => rule.kind === "salad-dressing" && ruleMatchesName(rule, name),
+  );
+}
+
+/**
+ * Dressing rules come from the negative-match table. A rule that refuses
+ * every profile wins over one that still has a creamy-salad route.
+ * Visible ingredients are not consulted.
+ */
+function matchingSaladDressingRule(name: string): NegativeMatchRule | null {
+  const rules = saladDressingRules(name);
+  return rules.find((rule) => rule.routeCanonicalName === null) ?? rules[0] ?? null;
 }
 
 /**
@@ -170,7 +198,8 @@ function saladSearchName(food: FoodEstimate): string {
  */
 function isCreamySalad(food: FoodEstimate): boolean {
   const name = saladSearchName(food);
-  return SALAD_WORD.test(name) && CREAMY_SALAD_CUE.test(name);
+  if (!SALAD_WORD.test(name)) return false;
+  return matchingSaladDressingRule(name)?.routeCanonicalName === "creamy-salad";
 }
 
 function hasUnnegatedDressing(name: string): boolean {
@@ -185,7 +214,11 @@ function hasUnnegatedDressing(name: string): boolean {
 function isProteinVegetableSalad(food: FoodEstimate): boolean {
   const name = saladSearchName(food);
   if (!SALAD_WORD.test(name) || SALAD_LEAN_EXCLUSION.test(name)) return false;
-  if (isCreamySalad(food) || hasUnnegatedDressing(name)) return false;
+  if (matchingSaladDressingRule(name) || hasUnnegatedDressing(name)) return false;
+  const leanGuard = NEGATIVE_MATCH_RULES.find((rule) => rule.id === "chicken-breast-salad-not-creamy");
+  if (leanGuard && ruleMatchesName(leanGuard, name) && leanGuard.routeCanonicalName === "protein-vegetable-salad") {
+    return true;
+  }
   return SALAD_COMPONENT.test(name);
 }
 
@@ -224,6 +257,7 @@ const COMPOSITE_CANONICALS = new Set([
   "mixed-dish",
   "protein-vegetable-salad",
   "creamy-salad",
+  "dressed-salad",
 ]);
 
 const SIMPLE_RICE_MODIFIERS = [
@@ -316,6 +350,8 @@ function escapeRegExp(value: string): string {
 
 interface MatchOptions {
   singleCjkKeyMustBeStandalone?: boolean;
+  /** Negative-rule patterns must still match inside a longer dish name. */
+  skipLongerAliasShadow?: boolean;
 }
 
 function standaloneCjkRemainder(haystack: string): string {
@@ -343,7 +379,10 @@ function textContainsKey(
 
   const hasCjk = /[\u4e00-\u9fff]/.test(needle);
   if (!hasCjk) {
-    return new RegExp(`(?:^|\\s)${escapeRegExp(needle)}(?:$|\\s)`).test(haystack);
+    const matched = new RegExp(`(?:^|\\s)${escapeRegExp(needle)}(?:$|\\s)`).test(haystack);
+    if (!matched) return false;
+    if (options.skipLongerAliasShadow) return true;
+    return !longerEnglishAliasShadows(haystack, needle);
   }
 
   if (
@@ -354,6 +393,42 @@ function textContainsKey(
   }
 
   return haystack.includes(needle);
+}
+
+function englishPhraseIn(haystack: string, phrase: string): boolean {
+  const needle = normalizeFoodName(phrase);
+  if (!needle) return false;
+  if (haystack === needle) return true;
+  return new RegExp(`(?:^|\\s)${escapeRegExp(needle)}(?:$|\\s)`).test(haystack);
+}
+
+let cachedEnglishAliases: string[] | null = null;
+
+function englishAliases(): string[] {
+  if (cachedEnglishAliases) return cachedEnglishAliases;
+  const fromRules = IDENTITY_RULES.flatMap((rule) =>
+    rule.keys.filter((key) => !/[\u4e00-\u9fff]/.test(key)),
+  );
+  const fromCatalog = DISH_IDENTITIES.flatMap((identity) =>
+    identity.aliases.filter((alias) => alias.script === "english").map((alias) => alias.text),
+  );
+  cachedEnglishAliases = [...fromRules, ...fromCatalog];
+  return cachedEnglishAliases;
+}
+
+/**
+ * "char siu rice" must not hit "char siu rice plate", and "noodle soup"
+ * must not hit "plain noodle soup", once the longer alias is in the catalog.
+ * A modifier in front ("seafood fried rice") still matches "fried rice"
+ * because no longer alias covers that whole name.
+ */
+function longerEnglishAliasShadows(haystack: string, key: string): boolean {
+  const needle = normalizeFoodName(key);
+  return englishAliases().some((alias) => {
+    const longer = normalizeFoodName(alias);
+    if (longer.length <= needle.length || !longer.includes(needle)) return false;
+    return englishPhraseIn(haystack, longer);
+  });
 }
 
 function findLongestMatch(
@@ -455,15 +530,15 @@ function isSimpleRemainder(text: string, modifiers: string[]): boolean {
   return stripTokens(text, [...modifiers, ...preparationTokens]).length === 0;
 }
 
-// "soy milk" contains the token "milk". These drinks are not whole milk.
-// Rice milk is intentionally absent: dropping the milk hit would leave the rice hit.
-const PLANT_MILK =
-  /(?:^|\s)(?:soy|soya|oat|almond|coconut) milk(?:$|\s)|豆漿|豆奶|燕麥奶|杏仁奶/;
+function plantMilkBlocksWholeMilk(text: string): boolean {
+  const rule = NEGATIVE_MATCH_RULES.find((item) => item.id === "plant-milk-not-whole-milk");
+  return rule ? ruleMatchesName(rule, text) : false;
+}
 
 function collectIdentityHits(text: string): IdentityHit[] {
   const hits: IdentityHit[] = [];
   for (const rule of IDENTITY_RULES) {
-    if (rule.canonicalName === "milk" && PLANT_MILK.test(text)) continue;
+    if (rule.canonicalName === "milk" && plantMilkBlocksWholeMilk(text)) continue;
     const matchedKey = findLongestMatch(text, rule.keys, {
       singleCjkKeyMustBeStandalone: true,
     });
@@ -575,6 +650,111 @@ function promoteSimpleStarchIfComposite(
   return hit;
 }
 
+export type CuratedDishResolution =
+  | { status: "none" }
+  | { status: "ambiguous" }
+  | { status: "matched"; identity: DishIdentity };
+
+function exactDishHits(name: string): DishIdentity[] {
+  const normalized = normalizeFoodName(name);
+  if (!normalized) return [];
+  return DISH_IDENTITIES.filter((identity) =>
+    identity.aliases.some((alias) => normalizeFoodName(alias.text) === normalized),
+  );
+}
+
+function uniqueIdentities(hits: DishIdentity[]): DishIdentity[] {
+  return [...new Map(hits.map((hit) => [hit.id, hit])).values()];
+}
+
+function containsAsTokenPhrase(longer: string, shorter: string): boolean {
+  if (!shorter || longer === shorter) return false;
+  return longer.startsWith(`${shorter} `) || longer.endsWith(` ${shorter}`);
+}
+
+/** The Chinese dish's English alias properly extends the other identity's alias. */
+function chineseIsMoreSpecific(chinese: DishIdentity, english: DishIdentity): boolean {
+  const chineseEnglish = chinese.aliases
+    .filter((alias) => alias.script === "english")
+    .map((alias) => normalizeFoodName(alias.text));
+  const englishAliases = english.aliases.map((alias) => normalizeFoodName(alias.text));
+  return chineseEnglish.some((longer) =>
+    englishAliases.some((shorter) => containsAsTokenPhrase(longer, shorter)),
+  );
+}
+
+function isChineseField(name: string): boolean {
+  return /[\u4e00-\u9fff]/.test(name);
+}
+
+/**
+ * Exact alias match. A Chinese name is decided before the English name.
+ * English cannot replace a more specific Chinese identity. Unrelated
+ * Chinese and English identities are ambiguous instead of a guess.
+ */
+export function resolveCuratedDishIdentity(food: {
+  displayName: string;
+  normalizedName: string;
+}): CuratedDishResolution {
+  const displayHits = uniqueIdentities(exactDishHits(food.displayName));
+  const normalizedHits = uniqueIdentities(exactDishHits(food.normalizedName));
+  const sameName = normalizeFoodName(food.displayName) === normalizeFoodName(food.normalizedName);
+
+  if (sameName) {
+    if (displayHits.length === 1) return { status: "matched", identity: displayHits[0] };
+    if (displayHits.length > 1) return { status: "ambiguous" };
+    return { status: "none" };
+  }
+
+  const chinese = uniqueIdentities([
+    ...(isChineseField(food.displayName) ? displayHits : []),
+    ...(isChineseField(food.normalizedName) ? normalizedHits : []),
+  ]);
+  const english = uniqueIdentities([
+    ...(!isChineseField(food.displayName) ? displayHits : []),
+    ...(!isChineseField(food.normalizedName) ? normalizedHits : []),
+  ]);
+
+  if (chinese.length > 1) return { status: "ambiguous" };
+  if (chinese.length === 1) {
+    const chineseIdentity = chinese[0];
+    if (!chineseIdentity) return { status: "ambiguous" };
+    if (english.length === 0 || english.every((hit) => hit.id === chineseIdentity.id)) {
+      return { status: "matched", identity: chineseIdentity };
+    }
+    if (english.length === 1 && english[0] && chineseIsMoreSpecific(chineseIdentity, english[0])) {
+      return { status: "matched", identity: chineseIdentity };
+    }
+    if (
+      english.length === 1 &&
+      english[0] &&
+      english[0].familyId === chineseIdentity.id &&
+      english[0].id !== chineseIdentity.id
+    ) {
+      return { status: "matched", identity: chineseIdentity };
+    }
+    return { status: "ambiguous" };
+  }
+  if (english.length === 1 && english[0]) return { status: "matched", identity: english[0] };
+  if (english.length > 1) return { status: "ambiguous" };
+  return { status: "none" };
+}
+
+function identityFromDish(
+  identity: DishIdentity,
+  preparation: FoodPreparation,
+): CanonicalFoodIdentity {
+  return {
+    canonicalName: identity.resolverCanonicalName,
+    category: identity.category,
+    preparation,
+    qualifiers: ["composite"],
+    dishId: identity.id,
+    familyId: identity.familyId,
+    hasNutritionProfile: identity.nutritionCanonicalName !== null,
+  };
+}
+
 export function canonicalizeFood(food: FoodEstimate): CanonicalFoodIdentity {
   const text = collectSearchText(food);
   const qualifiers = new Set<string>();
@@ -589,9 +769,33 @@ export function canonicalizeFood(food: FoodEstimate): CanonicalFoodIdentity {
     }
   }
 
+  const curated = resolveCuratedDishIdentity(food);
+  if (curated.status === "ambiguous") {
+    return {
+      canonicalName: "unknown",
+      category: "mixed",
+      preparation,
+      qualifiers: ["composite", "ambiguous"],
+    };
+  }
+  if (curated.status === "matched") {
+    return identityFromDish(curated.identity, preparation);
+  }
+
   const identityHits = collectIdentityHits(text);
+  const saladName = saladSearchName(food);
+  const dressingRule = SALAD_WORD.test(saladName) ? matchingSaladDressingRule(saladName) : null;
   if (!hasNamedDish(identityHits)) {
-    if (isCreamySalad(food)) {
+    if (dressingRule?.routeCanonicalName === null) {
+      identityHits.push({
+        keys: [],
+        matchedKey: "dressed salad",
+        canonicalName: "dressed-salad",
+        category: "mixed",
+        kind: "named_dish",
+        qualifiers: ["composite"],
+      });
+    } else if (isCreamySalad(food)) {
       identityHits.push({
         keys: [],
         matchedKey: "creamy salad",
@@ -677,12 +881,18 @@ export function canonicalizeFood(food: FoodEstimate): CanonicalFoodIdentity {
     qualifiers.add("composite");
   }
 
-  return {
+  const identified: CanonicalFoodIdentity = {
     canonicalName,
     category,
     preparation,
     qualifiers: [...qualifiers],
   };
+  if (canonicalName === "dressed-salad") {
+    identified.dishId = "dressed-salad";
+    identified.familyId = "salad";
+    identified.hasNutritionProfile = false;
+  }
+  return identified;
 }
 
 export function isCompositeIdentity(identity: CanonicalFoodIdentity): boolean {
@@ -691,4 +901,26 @@ export function isCompositeIdentity(identity: CanonicalFoodIdentity): boolean {
     identity.category === "mixed" ||
     COMPOSITE_CANONICALS.has(identity.canonicalName)
   );
+}
+
+export function profileBlockedByNegativeRule(
+  food: FoodEstimate,
+  identity: CanonicalFoodIdentity,
+  profile: { id: string; canonicalName: string; composite: boolean },
+): boolean {
+  const name = normalizeFoodName(`${food.displayName} ${food.normalizedName}`);
+  for (const rule of NEGATIVE_MATCH_RULES) {
+    if (rule.kind === "composite-not-ingredient") {
+      if (isCompositeIdentity(identity) && profile.composite !== true) return true;
+      continue;
+    }
+    if (!ruleMatchesName(rule, name)) continue;
+    if (
+      rule.blockProfileIds.includes(profile.id) ||
+      rule.blockCanonicalNames.includes(profile.canonicalName)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }

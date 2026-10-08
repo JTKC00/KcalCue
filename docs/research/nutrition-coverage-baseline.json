@@ -3,7 +3,7 @@
   "dishCount": 52,
   "ingredientCount": 13,
   "portionGrams": 100,
-  "pipeline": "canonicalizeFood → resolveNutritionMatch → calculateMealNutrition",
+  "pipeline": "dish identity → canonicalizeFood → resolveNutritionMatch → calculateMealNutrition",
   "network": "none",
   "coverage": {
     "complete": 1,
@@ -12,9 +12,11 @@
     "none": 64
   },
   "reasons": {
-    "UNKNOWN_DISH": 46,
-    "COMPOSITE_UNSUPPORTED": 5,
+    "UNKNOWN_DISH": 0,
+    "DISH_KNOWN_NO_PROFILE": 51,
+    "COMPOSITE_UNSUPPORTED": 0,
     "TYPE_MISMATCH": 0,
+    "UNIT_CONVERSION_MISSING": 0,
     "AMBIGUOUS_MATCH": 0,
     "INSUFFICIENT_COVERAGE": 13
   },
@@ -24,15 +26,25 @@
     "percent": "1.5%"
   },
   "falseConfidentMatchRate": {
-    "numerator": 2,
-    "denominator": 8,
-    "percent": "25.0%"
+    "numerator": 0,
+    "denominator": 12,
+    "percent": "0.0%"
+  },
+  "identityCoverage": {
+    "numerator": 52,
+    "denominator": 65,
+    "percent": "80.0%"
+  },
+  "profileCoverage": {
+    "numerator": 1,
+    "denominator": 65,
+    "percent": "1.5%"
   },
   "items": [
     {
       "name": "碟頭飯",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "rice-plate",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -40,14 +52,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "rice-plate",
+      "familyId": "rice-plate",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "叉燒碟頭飯",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "char-siu-rice-plate",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -55,14 +71,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "char-siu-rice-plate",
+      "familyId": "rice-plate",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "午餐便當",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "lunch-bento",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -70,14 +90,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "lunch-bento",
+      "familyId": "bento",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "日式便當",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "japanese-bento",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -85,14 +109,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "japanese-bento",
+      "familyId": "bento",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "燒鵝飯",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "roast-goose-rice",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -100,14 +128,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "roast-goose-rice",
+      "familyId": "rice-plate",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "油雞飯",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "soy-sauce-chicken-rice",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -115,14 +147,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "soy-sauce-chicken-rice",
+      "familyId": "rice-plate",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "脆皮燒肉飯",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "crispy-roast-pork-rice",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -130,14 +166,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "crispy-roast-pork-rice",
+      "familyId": "rice-plate",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "白切雞飯",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "white-cut-chicken-rice",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -145,14 +185,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "white-cut-chicken-rice",
+      "familyId": "rice-plate",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "海南雞飯",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "hainanese-chicken-rice",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -160,14 +204,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "hainanese-chicken-rice",
+      "familyId": "rice-plate",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "豬扒飯",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "pork-chop-rice",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -175,14 +223,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "pork-chop-rice",
+      "familyId": "rice-plate",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "雞扒飯",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "chicken-chop-rice",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -190,14 +242,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "chicken-chop-rice",
+      "familyId": "rice-plate",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "煎蛋飯",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "fried-egg-rice",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -205,14 +261,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "fried-egg-rice",
+      "familyId": "rice-plate",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "梅菜扣肉飯",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "mui-choy-pork-rice",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -220,14 +280,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "mui-choy-pork-rice",
+      "familyId": "rice-plate",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "滷肉飯",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "lu-rou-fan",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -235,14 +299,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "lu-rou-fan",
+      "familyId": "rice-plate",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "排骨飯",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "spare-rib-rice",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -250,14 +318,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "spare-rib-rice",
+      "familyId": "rice-plate",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "魚香茄子飯",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "yuxiang-eggplant-rice",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -265,14 +337,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "yuxiang-eggplant-rice",
+      "familyId": "rice-plate",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "麻婆豆腐飯",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "mapo-tofu-rice",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -280,14 +356,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "mapo-tofu-rice",
+      "familyId": "rice-plate",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "牛肉飯",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "beef-rice",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -295,14 +375,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "beef-rice",
+      "familyId": "rice-plate",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "親子丼",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "oyakodon",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -310,14 +394,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "oyakodon",
+      "familyId": "donburi",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "牛丼",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "gyudon",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -325,9 +413,13 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "gyudon",
+      "familyId": "donburi",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "石鍋拌飯",
@@ -340,14 +432,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "COMPOSITE_UNSUPPORTED",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "bibimbap",
+      "familyId": "bibimbap",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "乾炒牛河",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "dry-fried-beef-ho-fun",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -355,14 +451,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "dry-fried-beef-ho-fun",
+      "familyId": "stir-fried-rice-noodles",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "星洲炒米",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "singapore-fried-vermicelli",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -370,14 +470,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "singapore-fried-vermicelli",
+      "familyId": "stir-fried-rice-noodles",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "車仔麵",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "cart-noodles",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -385,14 +489,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "cart-noodles",
+      "familyId": "cha-chaan-teng-noodles",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "牛腩麵",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "beef-brisket-noodles",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -400,9 +508,13 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "beef-brisket-noodles",
+      "familyId": "cha-chaan-teng-noodles",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "鮮蝦雲吞麵",
@@ -417,12 +529,16 @@
       "profileComposite": true,
       "coverageReason": null,
       "userFacingReason": "已對應到同一類標準食物，而不是只靠顯示名稱。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "shrimp-wonton-noodle-soup",
+      "familyId": "wonton-noodle-soup",
+      "knownIdentity": true,
+      "hasNutritionProfile": true
     },
     {
       "name": "餐蛋麵",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "luncheon-meat-egg-noodles",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -430,14 +546,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "luncheon-meat-egg-noodles",
+      "familyId": "cha-chaan-teng-noodles",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "冬蔭功湯",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "tom-yum-soup",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -445,9 +565,13 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "tom-yum-soup",
+      "familyId": "soup",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "拉麵",
@@ -460,14 +584,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "COMPOSITE_UNSUPPORTED",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "ramen",
+      "familyId": "ramen",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "擔擔麵",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "dan-dan-noodles",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -475,14 +603,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "dan-dan-noodles",
+      "familyId": "dressed-noodles",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "炸醬麵",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "zhajiangmian",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -490,14 +622,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "zhajiangmian",
+      "familyId": "dressed-noodles",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "陽春麵",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "plain-noodle-soup",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -505,14 +641,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "plain-noodle-soup",
+      "familyId": "cha-chaan-teng-noodles",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "牛肉麵",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "beef-noodle-soup",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -520,14 +660,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "beef-noodle-soup",
+      "familyId": "cha-chaan-teng-noodles",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "米線",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "rice-vermicelli",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -535,14 +679,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "rice-vermicelli",
+      "familyId": "cha-chaan-teng-noodles",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "河粉",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "ho-fun",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -550,14 +698,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "ho-fun",
+      "familyId": "cha-chaan-teng-noodles",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "西多士",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "hong-kong-french-toast",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -565,14 +717,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "hong-kong-french-toast",
+      "familyId": "cha-chaan-teng-breakfast",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "菠蘿包",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "pineapple-bun",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -580,14 +736,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "pineapple-bun",
+      "familyId": "cha-chaan-teng-breakfast",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "叉燒包",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "char-siu-bao",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -595,14 +755,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "char-siu-bao",
+      "familyId": "dim-sum",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "蛋撻",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "egg-tart",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -610,14 +774,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "egg-tart",
+      "familyId": "dim-sum",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "腸仔蛋",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "sausage-and-egg",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -625,14 +793,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "sausage-and-egg",
+      "familyId": "cha-chaan-teng-breakfast",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "糯米雞",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "sticky-rice-chicken",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -640,14 +812,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "sticky-rice-chicken",
+      "familyId": "dim-sum",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "燒賣",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "siu-mai",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -655,14 +831,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "siu-mai",
+      "familyId": "dim-sum",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "蝦餃",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "har-gow",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -670,14 +850,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "har-gow",
+      "familyId": "dim-sum",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "小籠包",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "xiaolongbao",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -685,14 +869,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "xiaolongbao",
+      "familyId": "dim-sum",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "春卷",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "spring-roll",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -700,14 +888,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "spring-roll",
+      "familyId": "dim-sum",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "壽司拼盤",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "sushi-platter",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -715,14 +907,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "sushi-platter",
+      "familyId": "sushi",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "壽司",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "sushi",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -730,9 +926,13 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "sushi",
+      "familyId": "sushi",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "火鍋",
@@ -745,14 +945,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "COMPOSITE_UNSUPPORTED",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "hotpot",
+      "familyId": "hotpot",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "漢堡",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "hamburger",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -760,9 +964,13 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "hamburger",
+      "familyId": "burger",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "三文治",
@@ -775,9 +983,13 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "COMPOSITE_UNSUPPORTED",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "sandwich",
+      "familyId": "sandwich",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "肉醬意粉",
@@ -790,14 +1002,18 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "COMPOSITE_UNSUPPORTED",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "bolognese",
+      "familyId": "pasta",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "魚柳薯條",
       "identityLevel": "dish",
-      "canonicalName": "mixed-dish",
+      "canonicalName": "fish-and-chips",
       "compositeIdentity": true,
       "coverage": "none",
       "includedInTotal": false,
@@ -805,9 +1021,13 @@
       "profileId": null,
       "profileCanonicalName": null,
       "profileComposite": null,
-      "coverageReason": "UNKNOWN_DISH",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
       "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": "fish-and-chips",
+      "familyId": "fish-and-chips",
+      "knownIdentity": true,
+      "hasNutritionProfile": false
     },
     {
       "name": "果汁",
@@ -822,7 +1042,11 @@
       "profileComposite": null,
       "coverageReason": "INSUFFICIENT_COVERAGE",
       "userFacingReason": "未有足夠可靠的營養參考資料可以配對。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": null,
+      "familyId": null,
+      "knownIdentity": false,
+      "hasNutritionProfile": false
     },
     {
       "name": "凍檸茶",
@@ -837,7 +1061,11 @@
       "profileComposite": null,
       "coverageReason": "INSUFFICIENT_COVERAGE",
       "userFacingReason": "未有足夠可靠的營養參考資料可以配對。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": null,
+      "familyId": null,
+      "knownIdentity": false,
+      "hasNutritionProfile": false
     },
     {
       "name": "油條",
@@ -852,7 +1080,11 @@
       "profileComposite": null,
       "coverageReason": "INSUFFICIENT_COVERAGE",
       "userFacingReason": "未有足夠可靠的營養參考資料可以配對。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": null,
+      "familyId": null,
+      "knownIdentity": false,
+      "hasNutritionProfile": false
     },
     {
       "name": "西蘭花",
@@ -867,7 +1099,11 @@
       "profileComposite": null,
       "coverageReason": "INSUFFICIENT_COVERAGE",
       "userFacingReason": "未有足夠可靠的營養參考資料可以配對。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": null,
+      "familyId": null,
+      "knownIdentity": false,
+      "hasNutritionProfile": false
     },
     {
       "name": "牛油果",
@@ -882,7 +1118,11 @@
       "profileComposite": null,
       "coverageReason": "INSUFFICIENT_COVERAGE",
       "userFacingReason": "未有足夠可靠的營養參考資料可以配對。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": null,
+      "familyId": null,
+      "knownIdentity": false,
+      "hasNutritionProfile": false
     },
     {
       "name": "蝦仁",
@@ -897,7 +1137,11 @@
       "profileComposite": null,
       "coverageReason": "INSUFFICIENT_COVERAGE",
       "userFacingReason": "未有足夠可靠的營養參考資料可以配對。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": null,
+      "familyId": null,
+      "knownIdentity": false,
+      "hasNutritionProfile": false
     },
     {
       "name": "蒸魚",
@@ -912,7 +1156,11 @@
       "profileComposite": null,
       "coverageReason": "INSUFFICIENT_COVERAGE",
       "userFacingReason": "未有足夠可靠的營養參考資料可以配對。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": null,
+      "familyId": null,
+      "knownIdentity": false,
+      "hasNutritionProfile": false
     },
     {
       "name": "雞翼",
@@ -927,7 +1175,11 @@
       "profileComposite": null,
       "coverageReason": "INSUFFICIENT_COVERAGE",
       "userFacingReason": "未有足夠可靠的營養參考資料可以配對。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": null,
+      "familyId": null,
+      "knownIdentity": false,
+      "hasNutritionProfile": false
     },
     {
       "name": "午餐肉",
@@ -942,7 +1194,11 @@
       "profileComposite": null,
       "coverageReason": "INSUFFICIENT_COVERAGE",
       "userFacingReason": "未有足夠可靠的營養參考資料可以配對。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": null,
+      "familyId": null,
+      "knownIdentity": false,
+      "hasNutritionProfile": false
     },
     {
       "name": "芝士",
@@ -957,7 +1213,11 @@
       "profileComposite": null,
       "coverageReason": "INSUFFICIENT_COVERAGE",
       "userFacingReason": "未有足夠可靠的營養參考資料可以配對。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": null,
+      "familyId": null,
+      "knownIdentity": false,
+      "hasNutritionProfile": false
     },
     {
       "name": "豆漿",
@@ -972,7 +1232,11 @@
       "profileComposite": null,
       "coverageReason": "INSUFFICIENT_COVERAGE",
       "userFacingReason": "未有足夠可靠的營養參考資料可以配對。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": null,
+      "familyId": null,
+      "knownIdentity": false,
+      "hasNutritionProfile": false
     },
     {
       "name": "燕麥",
@@ -987,7 +1251,11 @@
       "profileComposite": null,
       "coverageReason": "INSUFFICIENT_COVERAGE",
       "userFacingReason": "未有足夠可靠的營養參考資料可以配對。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": null,
+      "familyId": null,
+      "knownIdentity": false,
+      "hasNutritionProfile": false
     },
     {
       "name": "乳酪",
@@ -1002,7 +1270,11 @@
       "profileComposite": null,
       "coverageReason": "INSUFFICIENT_COVERAGE",
       "userFacingReason": "未有足夠可靠的營養參考資料可以配對。",
-      "falseConfidentMatch": false
+      "falseConfidentMatch": false,
+      "dishId": null,
+      "familyId": null,
+      "knownIdentity": false,
+      "hasNutritionProfile": false
     }
   ],
   "probes": [
@@ -1114,16 +1386,16 @@
       "normalizedName": "char siu rice plate",
       "identityLevel": "dish",
       "rule": "英文前綴 char siu rice 不得配對 siu-mei-rice",
-      "knownFalseConfidentMatch": true,
-      "note": "研究 3.3 的英文前綴撞名。仍是已知錯誤高信心配對。",
-      "violation": true,
-      "includedInTotal": true,
-      "profileId": "siu-mei-rice",
-      "profileCanonicalName": "siu-mei-rice",
-      "canonicalName": "siu-mei-rice",
-      "coverage": "complete",
-      "coverageReason": null,
-      "userFacingReason": "已對應到同一類標準食物，而不是只靠顯示名稱。"
+      "knownFalseConfidentMatch": false,
+      "note": "N1 把叉燒碟頭飯收到 rice-plate，不再因為英文前綴 char siu rice 計入燒味飯。",
+      "violation": false,
+      "includedInTotal": false,
+      "profileId": null,
+      "profileCanonicalName": null,
+      "canonicalName": "char-siu-rice-plate",
+      "coverage": "none",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
+      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。"
     },
     {
       "id": "plain-noodle-soup",
@@ -1131,16 +1403,84 @@
       "normalizedName": "plain noodle soup",
       "identityLevel": "dish",
       "rule": "英文鍵 noodle soup 不得配對 noodle-soup",
-      "knownFalseConfidentMatch": true,
-      "note": "研究 3.3 的英文前綴撞名。仍是已知錯誤高信心配對。",
-      "violation": true,
+      "knownFalseConfidentMatch": false,
+      "note": "N1 把陽春麵收到茶餐廳麵，plain noodle soup 不再繼承雲吞麵。",
+      "violation": false,
+      "includedInTotal": false,
+      "profileId": null,
+      "profileCanonicalName": null,
+      "canonicalName": "plain-noodle-soup",
+      "coverage": "none",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
+      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。"
+    },
+    {
+      "id": "sesame-dressing-not-lean",
+      "displayName": "雞胸胡麻醬沙律",
+      "normalizedName": "chicken breast salad with sesame dressing",
+      "identityLevel": "dish",
+      "rule": "胡麻醬不得落到 protein-vegetable-salad",
+      "knownFalseConfidentMatch": false,
+      "note": "胡麻醬沒有營養 profile，離開瘦身範圍後不計算。",
+      "violation": false,
+      "includedInTotal": false,
+      "profileId": null,
+      "profileCanonicalName": null,
+      "canonicalName": "dressed-salad",
+      "coverage": "none",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
+      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。"
+    },
+    {
+      "id": "vinaigrette-not-lean",
+      "displayName": "油醋汁沙律",
+      "normalizedName": "vinaigrette salad",
+      "identityLevel": "dish",
+      "rule": "油醋汁不得落到 protein-vegetable-salad",
+      "knownFalseConfidentMatch": false,
+      "note": "油醋汁沒有營養 profile，離開瘦身範圍後不計算。",
+      "violation": false,
+      "includedInTotal": false,
+      "profileId": null,
+      "profileCanonicalName": null,
+      "canonicalName": "dressed-salad",
+      "coverage": "none",
+      "coverageReason": "DISH_KNOWN_NO_PROFILE",
+      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。"
+    },
+    {
+      "id": "thousand-island-not-lean",
+      "displayName": "千島醬沙律",
+      "normalizedName": "thousand island salad",
+      "identityLevel": "dish",
+      "rule": "千島醬不得落到 protein-vegetable-salad",
+      "knownFalseConfidentMatch": false,
+      "note": "千島醬走 creamy-salad，不是 60–160 的瘦身沙律。",
+      "violation": false,
       "includedInTotal": true,
-      "profileId": "noodle-soup",
-      "profileCanonicalName": "noodle-soup",
-      "canonicalName": "noodle-soup",
+      "profileId": "creamy-salad",
+      "profileCanonicalName": "creamy-salad",
+      "canonicalName": "creamy-salad",
       "coverage": "complete",
       "coverageReason": null,
-      "userFacingReason": "已對應到同一類標準食物，而不是只靠顯示名稱。"
+      "userFacingReason": "醬量、芝士或通粉份量未能由菜名確定，因此使用較寬範圍。"
+    },
+    {
+      "id": "egg-yolk-sauce-not-lean",
+      "displayName": "蛋黃醬沙律",
+      "normalizedName": "mayonnaise salad",
+      "identityLevel": "dish",
+      "rule": "蛋黃醬不得落到 protein-vegetable-salad",
+      "knownFalseConfidentMatch": false,
+      "note": "蛋黃醬走 creamy-salad。",
+      "violation": false,
+      "includedInTotal": true,
+      "profileId": "creamy-salad",
+      "profileCanonicalName": "creamy-salad",
+      "canonicalName": "creamy-salad",
+      "coverage": "complete",
+      "coverageReason": null,
+      "userFacingReason": "醬量、芝士或通粉份量未能由菜名確定，因此使用較寬範圍。"
     }
   ]
 }
