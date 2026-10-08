@@ -488,6 +488,33 @@ export const representativeEvaluationCases: EvaluationCase[] = [
     expectedCoverage: "none",
   },
   {
+    id: "caesar-chicken-salad",
+    description: "caesar chicken salad uses the high-fat salad profile, not the lean bowl",
+    foods: [food("凱撒雞沙律", "chicken caesar salad", { identityLevel: "dish" })],
+    expectedCanonicalNames: ["creamy-salad"],
+    expectedIncluded: [true],
+    expectedMatchTypes: ["exact_canonical"],
+    expectedCoverage: "complete",
+  },
+  {
+    id: "tuna-macaroni-salad",
+    description: "tuna macaroni salad uses the high-fat salad profile",
+    foods: [food("吞拿魚通粉沙律", "tuna macaroni salad", { identityLevel: "dish" })],
+    expectedCanonicalNames: ["creamy-salad"],
+    expectedIncluded: [true],
+    expectedMatchTypes: ["exact_canonical"],
+    expectedCoverage: "complete",
+  },
+  {
+    id: "mayo-potato-salad",
+    description: "mayonnaise potato salad uses the high-fat salad profile",
+    foods: [food("蛋黃醬薯仔沙律", "potato salad with mayonnaise", { identityLevel: "dish" })],
+    expectedCanonicalNames: ["creamy-salad"],
+    expectedIncluded: [true],
+    expectedMatchTypes: ["exact_canonical"],
+    expectedCoverage: "complete",
+  },
+  {
     id: "risotto-and-scallops",
     description: "second live meal stays unresolved rather than guessing kcal",
     foods: [

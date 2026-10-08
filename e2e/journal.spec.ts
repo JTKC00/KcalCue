@@ -1641,18 +1641,28 @@ test("a recognised protein salad photo shows a kcal range instead of an empty to
 
 async function expectFieldsInsideCard(page: Page) {
   const card = page.locator(".meal-metadata");
+  const date = page.getByLabel("日期", { exact: true });
   const time = page.getByLabel("時間", { exact: true });
   const mealType = page.getByRole("combobox", { name: "餐次", exact: true });
+  await expect(date).toBeVisible();
   await expect(time).toBeVisible();
   await expect(mealType).toBeVisible();
   const cardBox = await card.boundingBox();
+  const dateBox = await date.boundingBox();
   const timeBox = await time.boundingBox();
   const mealBox = await mealType.boundingBox();
-  expect(cardBox && timeBox && mealBox).toBeTruthy();
-  expect(timeBox!.x).toBeGreaterThanOrEqual(cardBox!.x - 1);
-  expect(timeBox!.x + timeBox!.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width + 1);
-  expect(mealBox!.x).toBeGreaterThanOrEqual(cardBox!.x - 1);
-  expect(mealBox!.x + mealBox!.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width + 1);
+  expect(cardBox && dateBox && timeBox && mealBox).toBeTruthy();
+  for (const box of [dateBox!, timeBox!, mealBox!]) {
+    expect(box.x).toBeGreaterThanOrEqual(cardBox!.x - 1);
+    expect(box.x + box.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width + 1);
+  }
+  const dateFit = await date.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+    innerWidth: window.innerWidth,
+  }));
+  expect(dateFit.scrollWidth).toBeLessThanOrEqual(dateFit.clientWidth + 1);
+  if (dateFit.innerWidth <= 374) expect(dateFit.clientWidth).toBeGreaterThan(240);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 }
 
@@ -1679,14 +1689,25 @@ test("edit meal time and meal type stay inside the card at 360 and 375px", async
       path: testInfo.outputPath("edit-meal-375.png"),
       fullPage: true,
     });
+    await page.locator(".metadata-grid").screenshot({
+      path: testInfo.outputPath("edit-meal-375-metadata.png"),
+    });
 
     await page.setViewportSize({ width: 360, height: 800 });
     await expectFieldsInsideCard(page);
+    await page.screenshot({
+      path: testInfo.outputPath("edit-meal-360.png"),
+      fullPage: true,
+    });
+    await page.locator(".metadata-grid").screenshot({
+      path: testInfo.outputPath("edit-meal-360-metadata.png"),
+    });
 
     await page.setViewportSize({ width: 1280, height: 900 });
-    await expect.poll(async () => page.locator(".metadata-grid").evaluate((element) =>
-      getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean).length,
-    )).toBe(3);
+    await expect.poll(async () => page.locator(".metadata-grid").evaluate((element) => {
+      const columns = getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean).map(Number.parseFloat);
+      return columns.length === 3 && Math.max(...columns) - Math.min(...columns) < 1;
+    })).toBe(true);
     await expectFieldsInsideCard(page);
   } finally {
     await context.close();

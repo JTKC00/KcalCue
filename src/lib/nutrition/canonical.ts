@@ -147,23 +147,46 @@ const IDENTITY_RULES: TermRule[] = [
   { keys: ["apple", "蘋果"], canonicalName: "apple", category: "fruit", kind: "specific_food" },
 ];
 
-const SALAD_WORD = /(?:^|\s)salads?(?:$|\s)|沙律|沙拉/;
-const SALAD_BOWL = /(?:^|\s)salad bowl(?:$|\s)|沙律碗|沙拉碗/;
-const SALAD_EXCLUSION =
+const SALAD_WORD = /(?:^|\s)salads?(?:$|\s)|沙律(?!醬)|沙拉(?!醬)/;
+const SALAD_LEAN_EXCLUSION =
   /banana|apple|mango|grape|fruit|potato|pasta|jelly|香蕉|蘋果|芒果|葡萄|水果|雜果|薯|意粉|啫喱|果沙律|果沙拉/;
 const SALAD_COMPONENT =
   /vegetables?|veggies?|greens?|protein|chicken|salmon|beef|pork|tofu|tuna|shrimp|prawn|grilled|roasted|雜菜|蔬菜|生菜|青菜|蛋白質|蛋白|雞胸|雞腿|雞扒|雞肉|三文魚|牛肉|豬肉|豆腐|吞拿|蝦|燒烤|烤/;
+const CREAMY_SALAD_CUE =
+  /macaroni|通粉|通心粉|mayonnaise|(?:^|\s)mayo(?:$|\s)|沙律醬|沙拉醬|蛋黃醬|千島|thousand island|(?:^|\s)caesar(?:$|\s)|凱撒|(?:^|\s)cheese(?:$|\s)|芝士|起司/;
+const SALAD_DRESSING_CUE = /(?:^|\s)dressing(?:$|\s)/;
+const SALAD_DRESSING_NEGATION =
+  /(?:^|\s)(?:no|without) dressing(?:$|\s)|不加醬|沒有沙律醬|沒有沙拉醬|走醬/;
+
+function saladSearchName(food: FoodEstimate): string {
+  return normalizeFoodName(`${food.displayName} ${food.normalizedName}`);
+}
 
 /**
- * A named protein or vegetable salad can use the curated wide-range profile.
- * The dish name itself must carry the evidence. Visible ingredients are often
- * guesses and must not promote an otherwise ambiguous salad. Fruit, potato and
- * pasta salads stay unresolved so they do not inherit this density.
+ * Mayo, macaroni, caesar, cheese and thousand-island salads are high-fat.
+ * The dish name itself must carry the cue. Visible ingredients are often
+ * guesses and must not move a lean salad into this profile. 「沙律醬」 is the
+ * dressing, not a salad: the salad word does not match when 醬 follows it.
+ */
+function isCreamySalad(food: FoodEstimate): boolean {
+  const name = saladSearchName(food);
+  return SALAD_WORD.test(name) && CREAMY_SALAD_CUE.test(name);
+}
+
+function hasUnnegatedDressing(name: string): boolean {
+  return SALAD_DRESSING_CUE.test(name) && !SALAD_DRESSING_NEGATION.test(name);
+}
+
+/**
+ * A named protein or vegetable salad can use the lean wide-range profile.
+ * A salad bowl alone is not enough. Fruit, potato, pasta, creamy dressings
+ * and an unspecified dressing stay off this density.
  */
 function isProteinVegetableSalad(food: FoodEstimate): boolean {
-  const name = normalizeFoodName(`${food.displayName} ${food.normalizedName}`);
-  if (!SALAD_WORD.test(name) || SALAD_EXCLUSION.test(name)) return false;
-  return SALAD_BOWL.test(name) || SALAD_COMPONENT.test(name);
+  const name = saladSearchName(food);
+  if (!SALAD_WORD.test(name) || SALAD_LEAN_EXCLUSION.test(name)) return false;
+  if (isCreamySalad(food) || hasUnnegatedDressing(name)) return false;
+  return SALAD_COMPONENT.test(name);
 }
 
 const COMPOSITE_CANONICALS = new Set([
@@ -200,6 +223,7 @@ const COMPOSITE_CANONICALS = new Set([
   "bread-dish",
   "mixed-dish",
   "protein-vegetable-salad",
+  "creamy-salad",
 ]);
 
 const SIMPLE_RICE_MODIFIERS = [
@@ -431,9 +455,15 @@ function isSimpleRemainder(text: string, modifiers: string[]): boolean {
   return stripTokens(text, [...modifiers, ...preparationTokens]).length === 0;
 }
 
+// "soy milk" contains the token "milk". These drinks are not whole milk.
+// Rice milk is intentionally absent: dropping the milk hit would leave the rice hit.
+const PLANT_MILK =
+  /(?:^|\s)(?:soy|soya|oat|almond|coconut) milk(?:$|\s)|豆漿|豆奶|燕麥奶|杏仁奶/;
+
 function collectIdentityHits(text: string): IdentityHit[] {
   const hits: IdentityHit[] = [];
   for (const rule of IDENTITY_RULES) {
+    if (rule.canonicalName === "milk" && PLANT_MILK.test(text)) continue;
     const matchedKey = findLongestMatch(text, rule.keys, {
       singleCjkKeyMustBeStandalone: true,
     });
@@ -560,15 +590,26 @@ export function canonicalizeFood(food: FoodEstimate): CanonicalFoodIdentity {
   }
 
   const identityHits = collectIdentityHits(text);
-  if (isProteinVegetableSalad(food) && !hasNamedDish(identityHits)) {
-    identityHits.push({
-      keys: [],
-      matchedKey: "protein vegetable salad",
-      canonicalName: "protein-vegetable-salad",
-      category: "mixed",
-      kind: "named_dish",
-      qualifiers: ["composite"],
-    });
+  if (!hasNamedDish(identityHits)) {
+    if (isCreamySalad(food)) {
+      identityHits.push({
+        keys: [],
+        matchedKey: "creamy salad",
+        canonicalName: "creamy-salad",
+        category: "mixed",
+        kind: "named_dish",
+        qualifiers: ["composite"],
+      });
+    } else if (isProteinVegetableSalad(food)) {
+      identityHits.push({
+        keys: [],
+        matchedKey: "protein vegetable salad",
+        canonicalName: "protein-vegetable-salad",
+        category: "mixed",
+        kind: "named_dish",
+        qualifiers: ["composite"],
+      });
+    }
   }
   const rankedHits = rankIdentityHits(identityHits);
 

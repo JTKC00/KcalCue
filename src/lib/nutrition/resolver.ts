@@ -124,6 +124,16 @@ function classifyMatch(
 ): { matchType: NutritionMatchType; confidence: NutritionConfidence; reasons: string[] } {
   const reasons: string[] = [];
 
+  // This band's max/min is about 4, so it stays medium. Other wide profiles keep their existing confidence.
+  if (identity.canonicalName === "creamy-salad" && profile.canonicalName === "creamy-salad") {
+    reasons.push("醬量、芝士或通粉份量未能由菜名確定，因此使用較寬範圍。");
+    return {
+      matchType: aliasExact ? "exact_canonical" : "strong_synonym",
+      confidence: "medium",
+      reasons,
+    };
+  }
+
   if (aliasExact && identity.canonicalName === profile.canonicalName) {
     reasons.push("名稱與參考資料的標準名稱一致。");
     if (
