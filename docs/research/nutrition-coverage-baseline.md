@@ -1,6 +1,6 @@
 # 營養覆蓋基準（Gate N0）
 
-這是 Gate N0 的基準，對照合併 PR #116 之後的本地目錄與 resolver。程式是 `canonicalizeFood`、`resolveNutritionMatch`、`calculateMealNutrition`。沒有呼叫 USDA、OpenAI，也沒有讀正式環境餐點。Vision 不參與，也不提供 kcal。
+這是 Gate N0 的基準，對照已合併 PR #118 的 `main`（`228a4f9`）。程式是 `canonicalizeFood`、`resolveNutritionMatch`、`calculateMealNutrition`。沒有呼叫 USDA、OpenAI，也沒有讀正式環境餐點。Vision 不參與，也不提供 kcal。
 
 65 個名稱來自營養目錄研究附錄 A（Draft PR #117，commit `c9d4a1a8`）。碟上的菜是 `identityLevel: "dish"`，單獨食物是 `"ingredient"`。`displayName` 與 `normalizedName` 都是該中文名，份量 100 g。
 
@@ -20,7 +20,7 @@
 
 **安全覆蓋率（Safe Coverage Rate）** = 基準裡餐覆蓋為 `complete`、而且不是錯誤高信心配對的項數 / 65。錯誤高信心配對指：`identityLevel` 為 dish，卻計入一個非組合菜 profile。中文名樣本裡的「未計入」不是錯誤高信心。
 
-**錯誤高信心配對率（False Confident Match Rate）** = 負向探針裡，`includedInTotal` 為 true 且違反該探針規則的項數 / 探針數。已知、本基準不修復的錯誤仍然計入分子。探針不混進 65 個中文名的覆蓋計數，因為那些撞名靠的是英文 `normalizedName`，附錄 A 的量測沒有把它們算進去。
+**錯誤高信心配對率（False Confident Match Rate）** = 負向探針裡，違反該探針規則的項數 / 探針數。仍未修復的英文前綴撞名計入分子。植物奶與沙律探針若已符合規則，只留在分母。探針不混進 65 個中文名的覆蓋計數。
 
 ## 基準結果
 
@@ -52,30 +52,32 @@ complete 的名稱：鮮蝦雲吞麵。
 
 ## 負向探針
 
-錯誤高信心配對率：5/7（71.4%）。
+錯誤高信心配對率：2/8（25.0%）。
 
-| 探針 | 顯示名 | normalizedName | 規則 | 計入 | profile | 錯誤高信心 | #118 預期清除 |
-|---|---|---|---|---|---|---|---|
-| `soy-milk` | 豆漿 | `soy milk` | 不得配對 whole-milk | 是 | whole-milk | 是 | 是 |
-| `oat-milk` | 燕麥奶 | `oat milk` | 不得配對 whole-milk | 是 | whole-milk | 是 | 是 |
-| `almond-milk` | 杏仁奶 | `almond milk` | 不得配對 whole-milk | 是 | whole-milk | 是 | 是 |
-| `char-siu-rice-not-ingredient` | 叉燒飯 | `叉燒飯` | 不得拆成單一食材（白飯或其他非組合菜 profile） | 是 | siu-mei-rice | 否 | 否 |
-| `chicken-breast-salad-not-creamy` | 雞胸沙拉 | `雞胸沙拉` | 不得配對 creamy／高脂沙律 profile | 是 | protein-vegetable-salad | 否 | 否 |
-| `char-siu-rice-plate` | 叉燒碟頭飯 | `char siu rice plate` | 英文前綴 char siu rice 不得配對 siu-mei-rice | 是 | siu-mei-rice | 是 | 否 |
-| `plain-noodle-soup` | 陽春麵 | `plain noodle soup` | 英文鍵 noodle soup 不得配對 noodle-soup | 是 | noodle-soup | 是 | 否 |
+| 探針 | 顯示名 | normalizedName | 規則 | 計入 | profile | 錯誤高信心 |
+|---|---|---|---|---|---|---|
+| `soy-milk` | 豆漿 | `soy milk` | 不得配對 whole-milk | 否 | — | 否 |
+| `oat-milk` | 燕麥奶 | `oat milk` | 不得配對 whole-milk | 否 | — | 否 |
+| `almond-milk` | 杏仁奶 | `almond milk` | 不得配對 whole-milk | 否 | — | 否 |
+| `char-siu-rice-not-ingredient` | 叉燒飯 | `叉燒飯` | 不得拆成單一食材（白飯或其他非組合菜 profile） | 是 | siu-mei-rice | 否 |
+| `chicken-breast-salad-not-creamy` | 雞胸沙拉 | `雞胸沙拉` | 不得落到 creamy-salad | 是 | protein-vegetable-salad | 否 |
+| `caesar-salad-creamy` | 凱撒沙律 | `凱撒沙律` | 必須配對 creamy-salad | 是 | creamy-salad | 否 |
+| `char-siu-rice-plate` | 叉燒碟頭飯 | `char siu rice plate` | 英文前綴 char siu rice 不得配對 siu-mei-rice | 是 | siu-mei-rice | 是 |
+| `plain-noodle-soup` | 陽春麵 | `plain noodle soup` | 英文鍵 noodle soup 不得配對 noodle-soup | 是 | noodle-soup | 是 |
 
-### Draft PR #118 預期清除
+### 已知錯誤高信心
 
-- `soy-milk`：豆漿 / `soy milk` 現時計入 `whole-milk`。英文 token milk 命中全脂奶。中文「豆漿」單獨不會。
-- `oat-milk`：燕麥奶 / `oat milk` 現時計入 `whole-milk`。與豆漿相同的 milk token。
-- `almond-milk`：杏仁奶 / `almond milk` 現時計入 `whole-milk`。與豆漿相同的 milk token。
+- `char-siu-rice-plate`：叉燒碟頭飯 / `char siu rice plate` 現時計入 `siu-mei-rice`。研究 3.3 的英文前綴撞名。仍是已知錯誤高信心配對。
+- `plain-noodle-soup`：陽春麵 / `plain noodle soup` 現時計入 `noodle-soup`。研究 3.3 的英文前綴撞名。仍是已知錯誤高信心配對。
 
-### 已知錯誤高信心，#118 不清除
+### 已通過的探針
 
-- `char-siu-rice-plate`：叉燒碟頭飯 / `char siu rice plate` 現時計入 `siu-mei-rice`。研究 3.3 的英文前綴撞名。Draft PR #118 不處理這條。
-- `plain-noodle-soup`：陽春麵 / `plain noodle soup` 現時計入 `noodle-soup`。研究 3.3 的英文前綴撞名。Draft PR #118 不處理這條。
-
-通過的負向規則（不計入分子）：中文「叉燒飯」不得變成白飯；「雞胸沙拉」不得配到 creamy／高脂沙律。後者在這份基準已經是 `protein-vegetable-salad`，不是高脂 profile。
+- `soy-milk`：豆漿 / `soy milk` → `—`。PR #118 已合併。soy milk 不再配到全脂奶。
+- `oat-milk`：燕麥奶 / `oat milk` → `—`。PR #118 已合併。oat milk 不再配到全脂奶。
+- `almond-milk`：杏仁奶 / `almond milk` → `—`。PR #118 已合併。almond milk 不再配到全脂奶。
+- `char-siu-rice-not-ingredient`：叉燒飯 / `叉燒飯` → `siu-mei-rice`。中文「叉燒飯」維持燒味飯組合菜 profile，不是白飯。
+- `chicken-breast-salad-not-creamy`：雞胸沙拉 / `雞胸沙拉` → `protein-vegetable-salad`。維持瘦身 profile protein-vegetable-salad。
+- `caesar-salad-creamy`：凱撒沙律 / `凱撒沙律` → `creamy-salad`。PR #118 的高脂沙律。計入 creamy-salad 是對的，不是錯誤高信心。
 
 ## 重現
 

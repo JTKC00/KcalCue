@@ -86,9 +86,6 @@ export const APPENDIX_A_INGREDIENTS = [
   "乳酪",
 ] as const;
 
-const CREAMY_OR_HIGH_FAT_SALAD =
-  /creamy|caesar|mayo|mayonnaise|凱撒|沙律醬|蛋黃醬|千島/;
-
 export interface CoverageBenchmarkFood {
   name: string;
   identityLevel: FoodIdentityLevel;
@@ -101,8 +98,6 @@ export interface FalseMatchProbe {
   identityLevel: FoodIdentityLevel;
   rule: string;
   knownFalseConfidentMatch: boolean;
-  /** Draft PR expected to remove this false match. Null when no such PR exists. */
-  clearedByDraftPr: 118 | null;
   note: string;
   violates: (match: NutritionMatch) => boolean;
 }
@@ -114,9 +109,8 @@ export const FALSE_MATCH_PROBES: readonly FalseMatchProbe[] = [
     normalizedName: "soy milk",
     identityLevel: "ingredient",
     rule: "不得配對 whole-milk",
-    knownFalseConfidentMatch: true,
-    clearedByDraftPr: 118,
-    note: "英文 token milk 命中全脂奶。中文「豆漿」單獨不會。",
+    knownFalseConfidentMatch: false,
+    note: "PR #118 已合併。soy milk 不再配到全脂奶。",
     violates: (match) => match.includedInTotal && match.profile?.id === "whole-milk",
   },
   {
@@ -125,9 +119,8 @@ export const FALSE_MATCH_PROBES: readonly FalseMatchProbe[] = [
     normalizedName: "oat milk",
     identityLevel: "ingredient",
     rule: "不得配對 whole-milk",
-    knownFalseConfidentMatch: true,
-    clearedByDraftPr: 118,
-    note: "與豆漿相同的 milk token。",
+    knownFalseConfidentMatch: false,
+    note: "PR #118 已合併。oat milk 不再配到全脂奶。",
     violates: (match) => match.includedInTotal && match.profile?.id === "whole-milk",
   },
   {
@@ -136,9 +129,8 @@ export const FALSE_MATCH_PROBES: readonly FalseMatchProbe[] = [
     normalizedName: "almond milk",
     identityLevel: "ingredient",
     rule: "不得配對 whole-milk",
-    knownFalseConfidentMatch: true,
-    clearedByDraftPr: 118,
-    note: "與豆漿相同的 milk token。",
+    knownFalseConfidentMatch: false,
+    note: "PR #118 已合併。almond milk 不再配到全脂奶。",
     violates: (match) => match.includedInTotal && match.profile?.id === "whole-milk",
   },
   {
@@ -148,7 +140,6 @@ export const FALSE_MATCH_PROBES: readonly FalseMatchProbe[] = [
     identityLevel: "dish",
     rule: "不得拆成單一食材（白飯或其他非組合菜 profile）",
     knownFalseConfidentMatch: false,
-    clearedByDraftPr: null,
     note: "中文「叉燒飯」維持燒味飯組合菜 profile，不是白飯。",
     violates: (match) =>
       match.includedInTotal && match.profile != null && match.profile.composite !== true,
@@ -158,20 +149,20 @@ export const FALSE_MATCH_PROBES: readonly FalseMatchProbe[] = [
     displayName: "雞胸沙拉",
     normalizedName: "雞胸沙拉",
     identityLevel: "dish",
-    rule: "不得配對 creamy／高脂沙律 profile",
+    rule: "不得落到 creamy-salad",
     knownFalseConfidentMatch: false,
-    clearedByDraftPr: null,
-    note: "維持瘦身 profile protein-vegetable-salad，與高脂沙律分開。",
-    violates: (match) => {
-      if (!match.includedInTotal || !match.profile) return false;
-      const label = [
-        match.profile.id,
-        match.profile.canonicalName,
-        match.profile.displayName,
-        ...match.profile.aliases,
-      ].join(" ");
-      return CREAMY_OR_HIGH_FAT_SALAD.test(label);
-    },
+    note: "維持瘦身 profile protein-vegetable-salad。",
+    violates: (match) => match.profile?.id === "creamy-salad",
+  },
+  {
+    id: "caesar-salad-creamy",
+    displayName: "凱撒沙律",
+    normalizedName: "凱撒沙律",
+    identityLevel: "dish",
+    rule: "必須配對 creamy-salad",
+    knownFalseConfidentMatch: false,
+    note: "PR #118 的高脂沙律。計入 creamy-salad 是對的，不是錯誤高信心。",
+    violates: (match) => match.includedInTotal && match.profile?.id !== "creamy-salad",
   },
   {
     id: "char-siu-rice-plate",
@@ -180,8 +171,7 @@ export const FALSE_MATCH_PROBES: readonly FalseMatchProbe[] = [
     identityLevel: "dish",
     rule: "英文前綴 char siu rice 不得配對 siu-mei-rice",
     knownFalseConfidentMatch: true,
-    clearedByDraftPr: null,
-    note: "研究 3.3 的英文前綴撞名。Draft PR #118 不處理這條。",
+    note: "研究 3.3 的英文前綴撞名。仍是已知錯誤高信心配對。",
     violates: (match) => match.includedInTotal && match.profile?.id === "siu-mei-rice",
   },
   {
@@ -191,8 +181,7 @@ export const FALSE_MATCH_PROBES: readonly FalseMatchProbe[] = [
     identityLevel: "dish",
     rule: "英文鍵 noodle soup 不得配對 noodle-soup",
     knownFalseConfidentMatch: true,
-    clearedByDraftPr: null,
-    note: "研究 3.3 的英文前綴撞名。Draft PR #118 不處理這條。",
+    note: "研究 3.3 的英文前綴撞名。仍是已知錯誤高信心配對。",
     violates: (match) => match.includedInTotal && match.profile?.id === "noodle-soup",
   },
 ];
@@ -220,7 +209,6 @@ export interface FalseMatchProbeResult {
   identityLevel: FoodIdentityLevel;
   rule: string;
   knownFalseConfidentMatch: boolean;
-  clearedByDraftPr: 118 | null;
   note: string;
   violation: boolean;
   includedInTotal: boolean;
@@ -365,7 +353,6 @@ export function runFalseMatchProbe(probe: FalseMatchProbe): FalseMatchProbeResul
     identityLevel: probe.identityLevel,
     rule: probe.rule,
     knownFalseConfidentMatch: probe.knownFalseConfidentMatch,
-    clearedByDraftPr: probe.clearedByDraftPr,
     note: probe.note,
     violation,
     includedInTotal: match.includedInTotal,
@@ -453,14 +440,12 @@ export function formatCoverageBaselineMarkdown(report: NutritionCoverageReport):
   const unsupported = report.items
     .filter((item) => item.coverageReason === "COMPOSITE_UNSUPPORTED")
     .map((item) => `${item.name}（${item.canonicalName}）`);
-  const clearedBy118 = report.probes.filter((probe) => probe.clearedByDraftPr === 118);
-  const notCleared = report.probes.filter(
-    (probe) => probe.knownFalseConfidentMatch && probe.clearedByDraftPr === null,
-  );
+  const knownFalse = report.probes.filter((probe) => probe.knownFalseConfidentMatch);
+  const passing = report.probes.filter((probe) => !probe.violation);
   const lines = [
     "# 營養覆蓋基準（Gate N0）",
     "",
-    "這是 Gate N0 的基準，對照合併 PR #116 之後的本地目錄與 resolver。程式是 `canonicalizeFood`、`resolveNutritionMatch`、`calculateMealNutrition`。沒有呼叫 USDA、OpenAI，也沒有讀正式環境餐點。Vision 不參與，也不提供 kcal。",
+    "這是 Gate N0 的基準，對照已合併 PR #118 的 `main`（`228a4f9`）。程式是 `canonicalizeFood`、`resolveNutritionMatch`、`calculateMealNutrition`。沒有呼叫 USDA、OpenAI，也沒有讀正式環境餐點。Vision 不參與，也不提供 kcal。",
     "",
     "65 個名稱來自營養目錄研究附錄 A（Draft PR #117，commit `c9d4a1a8`）。碟上的菜是 `identityLevel: \"dish\"`，單獨食物是 `\"ingredient\"`。`displayName` 與 `normalizedName` 都是該中文名，份量 100 g。",
     "",
@@ -480,7 +465,7 @@ export function formatCoverageBaselineMarkdown(report: NutritionCoverageReport):
     "",
     "**安全覆蓋率（Safe Coverage Rate）** = 基準裡餐覆蓋為 `complete`、而且不是錯誤高信心配對的項數 / 65。錯誤高信心配對指：`identityLevel` 為 dish，卻計入一個非組合菜 profile。中文名樣本裡的「未計入」不是錯誤高信心。",
     "",
-    "**錯誤高信心配對率（False Confident Match Rate）** = 負向探針裡，`includedInTotal` 為 true 且違反該探針規則的項數 / 探針數。已知、本基準不修復的錯誤仍然計入分子。探針不混進 65 個中文名的覆蓋計數，因為那些撞名靠的是英文 `normalizedName`，附錄 A 的量測沒有把它們算進去。",
+    "**錯誤高信心配對率（False Confident Match Rate）** = 負向探針裡，違反該探針規則的項數 / 探針數。仍未修復的英文前綴撞名計入分子。植物奶與沙律探針若已符合規則，只留在分母。探針不混進 65 個中文名的覆蓋計數。",
     "",
     "## 基準結果",
     "",
@@ -510,19 +495,17 @@ export function formatCoverageBaselineMarkdown(report: NutritionCoverageReport):
     "",
     `錯誤高信心配對率：${report.falseConfidentMatchRate.numerator}/${report.falseConfidentMatchRate.denominator}（${report.falseConfidentMatchRate.percent}）。`,
     "",
-    "| 探針 | 顯示名 | normalizedName | 規則 | 計入 | profile | 錯誤高信心 | #118 預期清除 |",
-    "|---|---|---|---|---|---|---|---|",
-    ...report.probes.map((probe) => `| \`${probe.id}\` | ${probe.displayName} | \`${probe.normalizedName}\` | ${probe.rule} | ${probe.includedInTotal ? "是" : "否"} | ${probe.profileId ?? "—"} | ${probe.violation ? "是" : "否"} | ${probe.clearedByDraftPr === 118 ? "是" : "否"} |`),
+    "| 探針 | 顯示名 | normalizedName | 規則 | 計入 | profile | 錯誤高信心 |",
+    "|---|---|---|---|---|---|---|",
+    ...report.probes.map((probe) => `| \`${probe.id}\` | ${probe.displayName} | \`${probe.normalizedName}\` | ${probe.rule} | ${probe.includedInTotal ? "是" : "否"} | ${probe.profileId ?? "—"} | ${probe.violation ? "是" : "否"} |`),
     "",
-    "### Draft PR #118 預期清除",
+    "### 已知錯誤高信心",
     "",
-    ...clearedBy118.map((probe) => `- \`${probe.id}\`：${probe.displayName} / \`${probe.normalizedName}\` 現時計入 \`${probe.profileId ?? "—"}\`。${probe.note}`),
+    ...knownFalse.map((probe) => `- \`${probe.id}\`：${probe.displayName} / \`${probe.normalizedName}\` 現時計入 \`${probe.profileId ?? "—"}\`。${probe.note}`),
     "",
-    "### 已知錯誤高信心，#118 不清除",
+    "### 已通過的探針",
     "",
-    ...notCleared.map((probe) => `- \`${probe.id}\`：${probe.displayName} / \`${probe.normalizedName}\` 現時計入 \`${probe.profileId ?? "—"}\`。${probe.note}`),
-    "",
-    "通過的負向規則（不計入分子）：中文「叉燒飯」不得變成白飯；「雞胸沙拉」不得配到 creamy／高脂沙律。後者在這份基準已經是 `protein-vegetable-salad`，不是高脂 profile。",
+    ...passing.map((probe) => `- \`${probe.id}\`：${probe.displayName} / \`${probe.normalizedName}\` → \`${probe.profileId ?? "—"}\`。${probe.note}`),
     "",
     "## 重現",
     "",

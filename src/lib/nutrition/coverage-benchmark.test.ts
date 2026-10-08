@@ -77,9 +77,6 @@ describe("nutrition coverage benchmark", () => {
     }
 
     expect(results.filter(({ result }) => result.violation).map(({ result }) => result.id)).toEqual([
-      "soy-milk",
-      "oat-milk",
-      "almond-milk",
       "char-siu-rice-plate",
       "plain-noodle-soup",
     ]);
@@ -93,21 +90,28 @@ describe("nutrition coverage benchmark", () => {
     const salad = results.find(({ probe }) => probe.id === "chicken-breast-salad-not-creamy")?.result;
     expect(salad?.includedInTotal).toBe(true);
     expect(salad?.profileId).toBe("protein-vegetable-salad");
+    expect(salad?.profileId).not.toBe("creamy-salad");
     expect(salad?.violation).toBe(false);
+
+    const caesar = results.find(({ probe }) => probe.id === "caesar-salad-creamy")?.result;
+    expect(caesar?.includedInTotal).toBe(true);
+    expect(caesar?.profileId).toBe("creamy-salad");
+    expect(caesar?.violation).toBe(false);
 
     for (const id of ["soy-milk", "oat-milk", "almond-milk"] as const) {
       const milk = results.find(({ probe }) => probe.id === id)?.result;
-      expect(milk?.includedInTotal).toBe(true);
-      expect(milk?.profileId).toBe("whole-milk");
-      expect(milk?.clearedByDraftPr).toBe(118);
+      expect(milk?.includedInTotal).toBe(false);
+      expect(milk?.profileId).not.toBe("whole-milk");
+      expect(milk?.violation).toBe(false);
+      expect(milk?.knownFalseConfidentMatch).toBe(false);
     }
 
     const plate = results.find(({ probe }) => probe.id === "char-siu-rice-plate")?.result;
     expect(plate?.profileId).toBe("siu-mei-rice");
-    expect(plate?.clearedByDraftPr).toBeNull();
+    expect(plate?.knownFalseConfidentMatch).toBe(true);
     const plainSoup = results.find(({ probe }) => probe.id === "plain-noodle-soup")?.result;
     expect(plainSoup?.profileId).toBe("noodle-soup");
-    expect(plainSoup?.clearedByDraftPr).toBeNull();
+    expect(plainSoup?.knownFalseConfidentMatch).toBe(true);
   });
 
   it("assigns a reason code without changing user-facing copy or totals", () => {
