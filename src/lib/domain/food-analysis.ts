@@ -20,6 +20,11 @@ const foodFields = {
   preparationMethod: z.string().trim().min(1).max(120).optional(),
   visibleIngredients: z.array(shortTextSchema).max(12).optional(),
   notes: z.string().trim().min(1).max(240).optional(),
+  /**
+   * Set after analysis when two milk rows were the same container.
+   * Kept off uncertaintyReasons so it does not consume one of the eight slots.
+   */
+  duplicateMilkNotice: z.string().trim().min(1).max(180).optional(),
 };
 const positivePortionSchema = z.number().positive().max(5000);
 

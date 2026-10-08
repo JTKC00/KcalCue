@@ -3,6 +3,7 @@ import { DISH_IDENTITIES, type DishIdentity } from "./dish-identity";
 import { dishTemplateIsComplete } from "./recipe-templates";
 import {
   NEGATIVE_MATCH_RULES,
+  PHOTO_MILK_OTHER_REASON,
   PLANT_MILK_CONTEXT_CUES,
   SALAD_NAME_SPELLINGS,
   type NegativeMatchRule,
@@ -589,6 +590,7 @@ const DAIRY_MILK_LABELS = [
   "脫脂奶",
   "脱脂奶",
   "低脂奶",
+  "全脂牛奶",
   "全脂奶",
   "鮮奶",
   "牛奶",
@@ -622,8 +624,33 @@ function isGrainWithDairyMilk(name: string): boolean {
   return grain && textHasDairyMilkLabel(text);
 }
 
-const ENGLISH_MILK_MODIFIER = "a glass of|a cup of|hot|iced|cold|warm|small|large|medium";
+const ENGLISH_MILK_MODIFIER = "a glass of|a cup of|glass of|cup of|hot|iced|cold|warm|chilled|small|large|medium";
 const CJK_MILK_MODIFIER = "一杯|[熱凍暖大細]";
+const GENERIC_MILK_PHRASES = [
+  "玻璃杯中的",
+  "玻璃樽",
+  "玻璃杯",
+  "杯中的",
+  "carton of",
+  "bottle of",
+  "beverage",
+  "玻璃",
+  "杯裝",
+  "瓶裝",
+  "盒裝",
+  "紙盒",
+  "紙包",
+  "飲品",
+  "飲料",
+  "中的",
+  "glass",
+  "carton",
+  "bottle",
+  "drink",
+  "plain",
+  "white",
+  "cup",
+];
 
 /**
  * Temperature and size words may wrap a milk label. 熱牛奶、暖鮮奶、
@@ -664,8 +691,32 @@ function dairyMilkLabel(name: string): boolean {
 const EXPLICIT_DAIRY_QUALIFIER =
   /全脂|鮮奶|低脂|脫脂|脱脂|(?:^|\s)(?:whole|fresh|skimmed|skim|semi-skimmed|semi skimmed|low-fat|low fat|reduced-fat|reduced fat)(?:$|\s)/;
 
+const NON_MILK_DISH =
+  /奶茶|布甸|布丁|麥片|麦片|粥|咖啡|拿鐵|latte|(?:^|\s)tea(?:$|\s)|pudding|cereal|porridge/;
+
 /**
- * 牛奶 / milk / 奶, including temperature and size words.
+ * Drop glass, carton, and "drink" wording so 冷牛奶、牛奶飲品、玻璃杯牛奶
+ * and "glass of milk" still read as plain milk. 鮮奶 is handled earlier.
+ */
+function unwrapGenericMilkPhrase(text: string): string {
+  const phrases = [...GENERIC_MILK_PHRASES].sort((left, right) => right.length - left.length);
+  let remaining = text;
+  let previous = "";
+  while (remaining !== previous) {
+    previous = remaining;
+    remaining = milkLabelCore(remaining);
+    for (const phrase of phrases) remaining = remaining.split(phrase).join(" ");
+    remaining = remaining
+      .replace(/^[冷冰純白鮮杯]+/u, "")
+      .replace(/[冷冰純白鮮杯]+$/u, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+  return remaining;
+}
+
+/**
+ * 牛奶 / milk / 奶, including temperature, glass, and "drink" wording.
  * 鮮奶、全脂、低脂、脫脂 are explicit dairy qualifiers, not this generic label.
  * Chocolate milk is neither: it must not fall through to whole milk.
  *
@@ -678,23 +729,45 @@ export function genericMilkLabel(name: string): boolean {
   if (!text || plantMilkProductName(text)) return false;
   if (EXPLICIT_DAIRY_QUALIFIER.test(text)) return false;
   if (/朱古力|巧克力|chocolate/.test(text)) return false;
-  const core = milkLabelCore(text);
+  if (NON_MILK_DISH.test(text)) return false;
+  const core = unwrapGenericMilkPhrase(text);
   return core === "milk" || core === "牛奶" || core === "奶";
 }
 
+/**
+ * Photo item that is still plain milk. The chooser depends on the names,
+ * not on identityLevel or meal-level visibleEvidence. A model guess of
+ * "whole milk" in normalizedName does not count as type evidence when the
+ * display name is still generic. Meal text that only says the drink might
+ * be milk or plant milk is not plant evidence and must not hide the chooser.
+ */
 export function photoGenericMilkNeedsConfirmation(
   food: PlantMilkFood & { entrySource?: "photo" | "manual" },
   context?: MealPlantMilkContext,
 ): boolean {
+  // Meal-level visibleEvidence must not hide the chooser. Callers still pass it.
+  void context;
   if (food.entrySource !== "photo") return false;
-  if (!genericMilkLabel(food.displayName)) return false;
-  return !contradictoryDairyMilkLabel(food, context);
+  const display = normalizeFoodName(food.displayName);
+  const normalized = normalizeFoodName(food.normalizedName);
+  if (plantMilkProductName(display) || chocolateMilkName(food)) return false;
+  if (NON_MILK_DISH.test(`${display} ${normalized}`)) return false;
+  if (genericMilkLabel(food.displayName)) return true;
+  if (EXPLICIT_DAIRY_QUALIFIER.test(display) || EXPLICIT_DAIRY_QUALIFIER.test(normalized)) return false;
+  if (plantMilkProductName(normalized)) return false;
+  return genericMilkLabel(food.normalizedName);
 }
 
 export function blocksUsdaLiveLookup(
-  food: PlantMilkFood & { entrySource?: "photo" | "manual" },
+  food: PlantMilkFood & {
+    entrySource?: "photo" | "manual";
+    userMilkTypeChoice?: string;
+    otherMilkNotice?: string;
+  },
   context?: MealPlantMilkContext,
 ): boolean {
+  if (food.userMilkTypeChoice === "other" || food.otherMilkNotice === PHOTO_MILK_OTHER_REASON) return true;
+  if (food.uncertaintyReasons?.includes(PHOTO_MILK_OTHER_REASON)) return true;
   return contradictoryDairyMilkLabel(food, context)
     || photoGenericMilkNeedsConfirmation(food, context)
     || chocolateMilkName(food);
@@ -778,11 +851,26 @@ function plantMilkCueText(text: string): string {
 }
 
 /**
+ * "Could not tell whether this is milk or plant milk" is uncertainty, not
+ * a sighting. 紙盒寫有燕麥奶 and 植物奶字樣 stay as evidence.
+ */
+function dropUnknownMilkOrPlantClauses(text: string): string {
+  return text
+    .replace(/未能確認是否為[^。；;]*/g, " ")
+    .replace(/未能確定是否為[^。；;]*/g, " ")
+    .replace(/未知是否為[^。；;]*/g, " ")
+    .replace(/不確定是否為[^。；;]*/g, " ")
+    .replace(/未能確認是[^。；;]*還是[^。；;]*/g, " ");
+}
+
+/**
  * Plant-milk evidence on this food. A porridge or cereal-with-milk name
  * does not count bare oat words: 燕麥 there is a separate grain, not oat milk.
+ * A meal note that only says the drink might be milk or plant milk does not
+ * count either, so it cannot hide the generic-milk chooser.
  */
 function plantMilkEvidence(food: PlantMilkFood, context?: MealPlantMilkContext): boolean {
-  const text = normalizeFoodName(
+  const text = normalizeFoodName(dropUnknownMilkOrPlantClauses(
     [
       food.displayName,
       food.normalizedName,
@@ -794,7 +882,7 @@ function plantMilkEvidence(food: PlantMilkFood, context?: MealPlantMilkContext):
       ...(context?.visibleEvidence ?? []),
       ...(context?.uncertaintyText ?? []),
     ].join(" "),
-  );
+  ));
   if (plantMilkProductName(text)) return true;
   const cueText = plantMilkCueText(text);
   const grainWithDairy = [food.displayName, food.normalizedName].some((name) => isGrainWithDairyMilk(name));

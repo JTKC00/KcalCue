@@ -4,27 +4,39 @@ import type { FoodEstimate } from "@/lib/domain/food-analysis";
 import { dedupeIdenticalContainerMilk, MERGED_DUPLICATE_MILK_NOTICE } from "@/lib/domain/milk-dedupe";
 import { calculateFoodNutrition, roundRange } from "./calculation";
 import {
+  contradictoryDairyMilkLabel,
   explicitLowFatMilk,
   genericMilkLabel,
+  mealPlantMilkContext,
   photoGenericMilkNeedsConfirmation,
 } from "./canonical";
 import { duplicateGenericMilkCartonAnalysis } from "./duplicate-milk-carton.fixture";
+import {
+  genericPlusOatCartonAnalysis,
+  glassOfMilkDishAnalysis,
+  oatCartonNameVariantsAnalysis,
+  oatPackagingWholeMilkChoiceAnalysis,
+  productionGlassMilkUnknownAnalysis,
+  wholeMilkChoiceStillDish,
+} from "./photo-milk-prod-qa.fixture";
 import { localNutritionProfiles } from "./local-data";
 import { LocalNutritionProvider } from "./local-provider";
 import {
   CHOCOLATE_MILK_UNCALCULATED_REASON,
   LOW_FAT_MILK_UNCALCULATED_REASON,
   PHOTO_GENERIC_MILK_CONFIRMATION_REASON,
+  PHOTO_MILK_OTHER_REASON,
+  PLANT_MILK_CONTRADICTION_REASON,
 } from "./negative-rules";
 import { isMilkTypeUncertainty } from "./photo-milk";
-import { findLowFatMilkProfile, resolveNutritionMatch } from "./resolver";
+import { findLowFatMilkProfile, resolveNutritionMatch, type ResolvableFood } from "./resolver";
 import type { NutritionProfile } from "./types";
 
 function food(
   displayName: string,
   normalizedName: string,
-  extra: Partial<FoodEstimate> & { entrySource?: "photo" | "manual" } = {},
-): FoodEstimate & { entrySource?: "photo" | "manual" } {
+  extra: Partial<ResolvableFood> = {},
+): ResolvableFood {
   return {
     displayName,
     normalizedName,
@@ -63,10 +75,16 @@ describe("photo generic milk", () => {
 
     expect(genericMilkLabel("牛奶")).toBe(true);
     expect(genericMilkLabel("熱牛奶")).toBe(true);
+    expect(genericMilkLabel("冷牛奶")).toBe(true);
+    expect(genericMilkLabel("牛奶飲品")).toBe(true);
+    expect(genericMilkLabel("玻璃杯牛奶")).toBe(true);
+    expect(genericMilkLabel("鮮牛奶")).toBe(true);
+    expect(genericMilkLabel("glass of milk")).toBe(true);
     expect(genericMilkLabel("鮮奶")).toBe(false);
     expect(genericMilkLabel("全脂牛奶")).toBe(false);
     expect(genericMilkLabel("朱古力奶")).toBe(false);
     expect(genericMilkLabel("奶茶")).toBe(false);
+    expect(genericMilkLabel("牛奶麥片")).toBe(false);
     for (const item of [
       food("朱古力奶", "chocolate milk", { entrySource: "photo" }),
       food("朱古力奶", "chocolate milk"),
@@ -159,7 +177,8 @@ describe("photo generic milk", () => {
     expect(duplicateGenericMilkCartonAnalysis.foods).toHaveLength(2);
     expect(merged.foods).toHaveLength(1);
     expect(merged.foods[0]).toMatchObject({ displayName: "牛奶", portionMin: null, portionMax: null });
-    expect(merged.foods[0].uncertaintyReasons[0]).toBe(MERGED_DUPLICATE_MILK_NOTICE);
+    expect(merged.foods[0].duplicateMilkNotice).toBe(MERGED_DUPLICATE_MILK_NOTICE);
+    expect(merged.foods[0].uncertaintyReasons).not.toContain(MERGED_DUPLICATE_MILK_NOTICE);
 
     const one = food("牛奶", "milk", { entrySource: "photo" });
     const confirmed = food("全脂牛奶", "whole milk", { entrySource: "photo" });
@@ -184,5 +203,245 @@ describe("photo generic milk", () => {
       ],
     });
     expect(apples.foods).toHaveLength(2);
+  });
+
+  it("shows the chooser for every generic-milk phrasing from the glass photo, including a dish label", () => {
+    const context = {
+      visibleEvidence: glassOfMilkDishAnalysis.visibleEvidence,
+      uncertaintyText: glassOfMilkDishAnalysis.uncertaintyReasons,
+    };
+    for (const item of glassOfMilkDishAnalysis.foods) {
+      const photo = food(item.displayName, item.normalizedName, {
+        entrySource: "photo",
+        identityLevel: item.identityLevel,
+        notes: item.notes,
+        preparationMethod: item.preparationMethod,
+        visibleIngredients: item.visibleIngredients,
+        uncertaintyReasons: item.uncertaintyReasons,
+      });
+      expect(photoGenericMilkNeedsConfirmation(photo, context), item.displayName).toBe(true);
+      const match = provider.resolve(photo, context);
+      expect(match.includedInTotal, item.displayName).toBe(false);
+      expect(match.profile, item.displayName).toBeNull();
+      expect(match.coverageReason, item.displayName).not.toBe("UNKNOWN_DISH");
+    }
+    for (const [displayName, normalizedName] of [
+      ["飲品", "milk"],
+      ["白牛奶", "dairy milk"],
+      ["純牛奶", "plain milk"],
+    ] as const) {
+      const photo = food(displayName, normalizedName, { entrySource: "photo", identityLevel: "dish" });
+      expect(photoGenericMilkNeedsConfirmation(photo, {
+        visibleEvidence: ["可能是植物奶"],
+      }), displayName).toBe(true);
+    }
+  });
+
+  it("counts 全脂牛奶 at 250 ml after a dish-classified row, even when the meal still says 燕麥", () => {
+    const chosen = food(wholeMilkChoiceStillDish.displayName, wholeMilkChoiceStillDish.normalizedName, {
+      entrySource: "photo",
+      identityLevel: "dish",
+      notes: wholeMilkChoiceStillDish.notes,
+      preparationMethod: wholeMilkChoiceStillDish.preparationMethod,
+      visibleIngredients: wholeMilkChoiceStillDish.visibleIngredients,
+      uncertaintyReasons: wholeMilkChoiceStillDish.uncertaintyReasons,
+      userMilkTypeChoice: "whole",
+    });
+    const context = {
+      visibleEvidence: oatPackagingWholeMilkChoiceAnalysis.visibleEvidence,
+      uncertaintyText: oatPackagingWholeMilkChoiceAnalysis.uncertaintyReasons,
+    };
+    const match = provider.resolve(chosen, context);
+    const calories = calculateFoodNutrition(chosen, match).ranges?.calories;
+    expect(match.profile?.id).toBe("whole-milk");
+    expect(match.includedInTotal).toBe(true);
+    expect(match.coverageReason).not.toBe("UNKNOWN_DISH");
+    expect(calories && roundRange(calories, 5)).toEqual({ min: 155, max: 160 });
+
+    const lowFat = food("低脂牛奶", "low-fat milk", {
+      entrySource: "photo",
+      identityLevel: "dish",
+    });
+    expect(provider.resolve(lowFat).includedInTotal).toBe(false);
+    expect(provider.resolve(lowFat).reasons[0]).toBe(LOW_FAT_MILK_UNCALCULATED_REASON);
+  });
+
+  it("merges an oat carton split into name variants without using an uncertainty slot", () => {
+    const merged = dedupeIdenticalContainerMilk(oatCartonNameVariantsAnalysis);
+    expect(oatCartonNameVariantsAnalysis.foods).toHaveLength(2);
+    expect(merged.foods).toHaveLength(1);
+    expect(merged.foods[0].displayName).toBe("燕麥奶");
+    expect(merged.foods[0].portionMin).toBe(250);
+    expect(merged.foods[0].portionMax).toBe(250);
+    expect(merged.foods[0].duplicateMilkNotice).toBe(MERGED_DUPLICATE_MILK_NOTICE);
+    expect(merged.foods[0].uncertaintyReasons).not.toContain(MERGED_DUPLICATE_MILK_NOTICE);
+
+    const full = dedupeIdenticalContainerMilk({
+      ...oatCartonNameVariantsAnalysis,
+      foods: [
+        {
+          ...oatCartonNameVariantsAnalysis.foods[1],
+          uncertaintyReasons: ["1", "2", "3", "4", "5", "6", "7", "8"],
+        },
+        oatCartonNameVariantsAnalysis.foods[0],
+      ],
+    });
+    expect(full.foods[0].uncertaintyReasons).toHaveLength(8);
+    expect(full.foods[0].duplicateMilkNotice).toBe(MERGED_DUPLICATE_MILK_NOTICE);
+
+    const genericAndOat = dedupeIdenticalContainerMilk(genericPlusOatCartonAnalysis);
+    expect(genericAndOat.foods).toHaveLength(1);
+    expect(genericAndOat.foods[0].displayName).toBe("紙盒燕麥奶");
+    expect(genericAndOat.foods[0].duplicateMilkNotice).toBe(MERGED_DUPLICATE_MILK_NOTICE);
+  });
+
+  it("shows the chooser for the production glass, then counts 全脂 at 250 ml", () => {
+    const source = productionGlassMilkUnknownAnalysis.foods[0];
+    const context = mealPlantMilkContext({ analysis: productionGlassMilkUnknownAnalysis });
+    const photo = food(source.displayName, source.normalizedName, {
+      entrySource: "photo",
+      identityLevel: source.identityLevel,
+      portionMin: source.portionMin,
+      portionMax: source.portionMax,
+      unit: source.unit,
+      recognitionConfidence: source.recognitionConfidence,
+      portionConfidence: source.portionConfidence,
+      uncertaintyReasons: source.uncertaintyReasons,
+      notes: source.notes,
+    });
+
+    expect(context.uncertaintyText).toContain("未能確認是否為牛奶、植物奶或其他白色飲品。");
+    expect(photoGenericMilkNeedsConfirmation(photo, context)).toBe(true);
+    expect(contradictoryDairyMilkLabel(photo, context)).toBe(false);
+    expect(isMilkTypeUncertainty(source.uncertaintyReasons[0])).toBe(false);
+
+    const blocked = provider.resolve(photo, context);
+    expect(blocked.includedInTotal).toBe(false);
+    expect(blocked.profile).toBeNull();
+    expect(blocked.reasons[0]).toBe(PHOTO_GENERIC_MILK_CONFIRMATION_REASON);
+    expect(blocked.reasons).not.toContain(PLANT_MILK_CONTRADICTION_REASON);
+    expect(blocked.coverageReason).not.toBe("UNKNOWN_DISH");
+
+    const chosen = food("全脂牛奶", "全脂牛奶", {
+      entrySource: "photo",
+      identityLevel: "dish",
+      portionMin: 250,
+      portionMax: 250,
+      unit: "ml",
+      uncertaintyReasons: source.uncertaintyReasons,
+      notes: source.notes,
+      userMilkTypeChoice: "whole",
+    });
+    const match = provider.resolve(chosen, context);
+    const calories = calculateFoodNutrition(chosen, match).ranges?.calories;
+    expect(match.profile?.id).toBe("whole-milk");
+    expect(match.includedInTotal).toBe(true);
+    expect(match.coverageReason).not.toBe("UNKNOWN_DISH");
+    expect(match.identity.canonicalName).not.toBe("mixed-dish");
+    expect(calories && roundRange(calories, 5)).toEqual({ min: 155, max: 160 });
+  });
+
+  it("does not treat a model label of 全脂牛奶 on an oat carton as the user's choice", () => {
+    const modeled = food("全脂牛奶", "全脂牛奶", {
+      entrySource: "photo",
+      identityLevel: "dish",
+      notes: "紙盒標示燕麥奶",
+      uncertaintyReasons: ["包裝是燕麥奶。"],
+    });
+    const context = {
+      visibleEvidence: ["燕麥奶紙盒"],
+      uncertaintyText: ["紙盒寫有燕麥奶。"],
+    };
+    expect(modeled.userMilkTypeChoice).toBeUndefined();
+    expect(contradictoryDairyMilkLabel(modeled, context)).toBe(true);
+    const match = provider.resolve(modeled, context);
+    expect(match.profile).toBeNull();
+    expect(match.includedInTotal).toBe(false);
+    expect(match.reasons[0]).toBe(PLANT_MILK_CONTRADICTION_REASON);
+    expect(match.coverageReason).toBe("INSUFFICIENT_COVERAGE");
+
+    const chosen = { ...modeled, userMilkTypeChoice: "whole" as const };
+    const counted = provider.resolve(chosen, context);
+    const calories = calculateFoodNutrition(chosen, counted).ranges?.calories;
+    expect(counted.profile?.id).toBe("whole-milk");
+    expect(counted.includedInTotal).toBe(true);
+    expect(calories && roundRange(calories, 5)).toEqual({ min: 155, max: 160 });
+  });
+
+  it("keeps manual 牛奶飲品 on whole milk and still asks on a photo", () => {
+    const typed = food("牛奶飲品", "牛奶飲品", { entrySource: "manual" });
+    expect(photoGenericMilkNeedsConfirmation(typed)).toBe(false);
+    expect(provider.resolve(typed).profile?.id).toBe("whole-milk");
+    expect(provider.resolve(typed).includedInTotal).toBe(true);
+
+    const photo = food("牛奶飲品", "milk beverage", { entrySource: "photo", identityLevel: "dish" });
+    expect(photoGenericMilkNeedsConfirmation(photo)).toBe(true);
+    expect(provider.resolve(photo).includedInTotal).toBe(false);
+    expect(provider.resolve(photo).reasons[0]).toBe(PHOTO_GENERIC_MILK_CONFIRMATION_REASON);
+  });
+
+  it("stores 其他 on its own field and does not spend an uncertainty slot", () => {
+    const other = food("牛奶", "milk", {
+      entrySource: "photo",
+      userMilkTypeChoice: "other",
+      otherMilkNotice: PHOTO_MILK_OTHER_REASON,
+      uncertaintyReasons: ["玻璃杯沒有刻度。"],
+    });
+    const match = provider.resolve(other);
+    expect(match.includedInTotal).toBe(false);
+    expect(match.reasons[0]).toBe(PHOTO_MILK_OTHER_REASON);
+    expect(other.uncertaintyReasons).not.toContain(PHOTO_MILK_OTHER_REASON);
+  });
+
+  it("does not merge a fresh-milk carton with a glass, or milk with a packaged sandwich", () => {
+    const row = (
+      displayName: string,
+      normalizedName: string,
+      extra: Partial<ResolvableFood> = {},
+    ) => food(displayName, normalizedName, { identityLevel: "ingredient", ...extra });
+    const cartonAndGlass = dedupeIdenticalContainerMilk({
+      analysisStatus: "success",
+      foods: [
+        row("鮮奶", "fresh milk", { preparationMethod: "紙盒", notes: "一盒鮮奶" }),
+        row("牛奶", "milk", { notes: "玻璃杯", preparationMethod: "杯裝" }),
+      ],
+      uncertaintyReasons: [],
+      visibleEvidence: ["一盒鮮奶", "一杯牛奶"],
+      estimatedInformation: [],
+      unknownInformation: [],
+    });
+    expect(cartonAndGlass.foods.map((item) => item.displayName)).toEqual(["鮮奶", "牛奶"]);
+    expect(cartonAndGlass.foods.every((item) => item.duplicateMilkNotice == null)).toBe(true);
+
+    const sandwichAndGlass = dedupeIdenticalContainerMilk({
+      analysisStatus: "success",
+      foods: [
+        row("三文治", "sandwich", { unit: "piece", notes: "包裝三文治", portionMin: 1, portionMax: 1 }),
+        row("牛奶", "milk", { notes: "玻璃杯" }),
+      ],
+      uncertaintyReasons: [],
+      visibleEvidence: ["包裝", "一杯牛奶"],
+      estimatedInformation: [],
+      unknownInformation: [],
+    });
+    expect(sandwichAndGlass.foods).toHaveLength(2);
+    expect(sandwichAndGlass.foods[1].displayName).toBe("牛奶");
+    expect(sandwichAndGlass.foods[1].duplicateMilkNotice).toBeUndefined();
+
+    const sandwichAndTwoGlasses = dedupeIdenticalContainerMilk({
+      analysisStatus: "success",
+      foods: [
+        row("三文治", "sandwich", { unit: "piece", notes: "包裝三文治", portionMin: 1, portionMax: 1 }),
+        row("牛奶", "milk", { notes: "左邊玻璃杯" }),
+        row("牛奶", "milk", { notes: "右邊玻璃杯" }),
+      ],
+      uncertaintyReasons: ["餐點有包裝食品。"],
+      visibleEvidence: ["包裝三文治", "兩隻杯"],
+      estimatedInformation: [],
+      unknownInformation: [],
+    });
+    expect(sandwichAndTwoGlasses.foods).toHaveLength(3);
+    expect(sandwichAndTwoGlasses.foods.filter((item) => item.displayName === "牛奶")).toHaveLength(2);
+    expect(sandwichAndTwoGlasses.foods.every((item) => item.duplicateMilkNotice == null)).toBe(true);
   });
 });

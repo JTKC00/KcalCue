@@ -2,6 +2,8 @@ import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import sharp from "sharp";
 import path from "node:path";
 
+import { productionGlassMilkUnknownAnalysis } from "../src/lib/nutrition/photo-milk-prod-qa.fixture";
+
 const userId = "11111111-1111-4111-8111-111111111111";
 type TestRecord = {
   id: string;
@@ -1745,6 +1747,237 @@ test("a duplicated generic milk carton stays one item until a dairy choice", asy
   await expect(page.locator(".food-card").getByText("已合併重複嘅牛奶項目，如果係兩杯可以再加返", { exact: true })).toBeVisible();
   expect(nutritionLookups).toBe(0);
   expect(backend.records.size).toBe(0);
+});
+
+test("a dish-classified glass of milk always offers a type choice and counts 全脂 at 250 ml", async ({ page, context }) => {
+  const backend = cloud();
+  await backend.install(context);
+  await page.route("**/api/nutrition/resolve", (route) => route.fulfill({
+    status: 500,
+    json: { error: { code: "unexpected_nutrition" } },
+  }));
+  await page.route("**/api/analyze", (route) => route.fulfill({
+    json: {
+      mode: "live",
+      analysis: {
+        analysisStatus: "success",
+        foods: [{
+          displayName: "冷牛奶",
+          normalizedName: "whole milk",
+          identityLevel: "dish",
+          portionMin: null,
+          portionMax: null,
+          unit: "ml",
+          recognitionConfidence: 0.71,
+          portionConfidence: 0.48,
+          uncertaintyReasons: ["外觀是白色飲品，未能從杯子判斷脂肪含量。"],
+          preparationMethod: "冷飲",
+          visibleIngredients: ["牛奶"],
+          notes: "透明玻璃杯",
+        }],
+        uncertaintyReasons: ["只有一隻玻璃杯。"],
+        visibleEvidence: ["一隻透明玻璃杯", "白色液體"],
+        estimatedInformation: ["份量大約 250 ml。"],
+        unknownInformation: ["沒有包裝，看不到全脂或低脂字樣。"],
+      },
+    },
+  }));
+  await page.goto("/");
+  await login(page);
+  await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
+  const png = await sharp({
+    create: { width: 80, height: 60, channels: 3, background: "white" },
+  }).png().toBuffer();
+  await page.locator('input[type="file"]').nth(1).setInputFiles({
+    name: "milk-glass.png", mimeType: "image/png", buffer: png,
+  });
+  await page.getByRole("button", { name: "開始分析", exact: true }).click();
+
+  await expect(page.getByRole("button", { name: "全脂牛奶", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "低脂牛奶", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "燕麥奶", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "其他", exact: true })).toBeVisible();
+  await page.getByRole("spinbutton", { name: "最少份量", exact: true }).fill("250");
+  await page.getByRole("spinbutton", { name: "最少份量", exact: true }).press("Tab");
+  await expect(page.getByText("155–160")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "全脂牛奶", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "約 155–160 kcal", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "燕麥奶", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  await expect.poll(() => backend.records.size).toBe(1);
+  const saved = [...backend.records.values()][0];
+  const item = (saved.items as Array<{ displayName: string; identityLevel: string; userMilkTypeChoice?: string; nutritionMatch?: { includedInTotal?: boolean; profile?: { id?: string } } }>)[0];
+  expect(item.displayName).toBe("全脂牛奶");
+  expect(item.identityLevel).toBe("ingredient");
+  expect(item.userMilkTypeChoice).toBe("whole");
+  expect(item.nutritionMatch?.includedInTotal).toBe(true);
+  expect(item.nutritionMatch?.profile?.id).toBe("whole-milk");
+});
+
+test("an oat carton split into name variants becomes one item with a merge notice", async ({ page, context }) => {
+  const backend = cloud();
+  await backend.install(context);
+  await page.route("**/api/analyze", (route) => route.fulfill({
+    json: {
+      mode: "live",
+      analysis: {
+        analysisStatus: "success",
+        foods: [
+          {
+            displayName: "燕麥飲品",
+            normalizedName: "oat beverage",
+            identityLevel: "dish",
+            portionMin: 1000,
+            portionMax: 1000,
+            unit: "ml",
+            recognitionConfidence: 0.7,
+            portionConfidence: 0.4,
+            uncertaintyReasons: ["紙盒容量不一定是飲用份量。"],
+            preparationMethod: "盒裝",
+            notes: "紙盒標示 1 公升",
+            visibleIngredients: ["燕麥"],
+          },
+          {
+            displayName: "燕麥奶",
+            normalizedName: "oat milk",
+            identityLevel: "ingredient",
+            portionMin: 250,
+            portionMax: 250,
+            unit: "ml",
+            recognitionConfidence: 0.8,
+            portionConfidence: 0.6,
+            uncertaintyReasons: ["同一紙盒的飲用份量。"],
+            preparationMethod: "紙盒飲品",
+            notes: "紙盒正面",
+            visibleIngredients: ["燕麥奶"],
+          },
+        ],
+        uncertaintyReasons: ["一盒飲品被拆成兩項。"],
+        visibleEvidence: ["一盒燕麥飲品", "紙盒"],
+        estimatedInformation: [],
+        unknownInformation: [],
+      },
+    },
+  }));
+  await page.goto("/");
+  await login(page);
+  await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
+  const png = await sharp({
+    create: { width: 80, height: 60, channels: 3, background: "beige" },
+  }).png().toBuffer();
+  await page.locator('input[type="file"]').nth(1).setInputFiles({
+    name: "oat-carton.png", mimeType: "image/png", buffer: png,
+  });
+  await page.getByRole("button", { name: "開始分析", exact: true }).click();
+
+  await expect(page.getByRole("combobox", { name: "食物名稱", exact: true })).toHaveCount(1);
+  await expect(page.getByRole("combobox", { name: "食物名稱", exact: true })).toHaveValue("燕麥奶");
+  await expect(page.locator(".food-card").getByText("已合併重複嘅牛奶項目，如果係兩杯可以再加返", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "新增食物", exact: true })).toBeVisible();
+  expect(backend.records.size).toBe(0);
+});
+
+test("choosing 其他 hides the milk buttons and stays uncomputed", async ({ page, context }) => {
+  const backend = cloud();
+  await backend.install(context);
+  await page.route("**/api/analyze", (route) => route.fulfill({
+    json: {
+      mode: "live",
+      analysis: {
+        analysisStatus: "success",
+        foods: [{
+          displayName: "牛奶",
+          normalizedName: "milk",
+          identityLevel: "ingredient",
+          portionMin: 250,
+          portionMax: 250,
+          unit: "ml",
+          recognitionConfidence: 0.7,
+          portionConfidence: 0.5,
+          uncertaintyReasons: ["未能讀到種類。"],
+        }],
+        uncertaintyReasons: [],
+        visibleEvidence: ["一杯白色飲品"],
+        estimatedInformation: [],
+        unknownInformation: [],
+      },
+    },
+  }));
+  await page.goto("/");
+  await login(page);
+  await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
+  const png = await sharp({
+    create: { width: 80, height: 60, channels: 3, background: "white" },
+  }).png().toBuffer();
+  await page.locator('input[type="file"]').nth(1).setInputFiles({
+    name: "milk.png", mimeType: "image/png", buffer: png,
+  });
+  await page.getByRole("button", { name: "開始分析", exact: true }).click();
+  await expect(page.getByRole("button", { name: "其他", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "其他", exact: true }).click();
+  await expect(page.getByRole("button", { name: "全脂牛奶", exact: true })).toHaveCount(0);
+  await expect(page.locator(".food-card").getByText("已標為其他。沒有對應營養資料，因此不計算。")).toBeVisible();
+  await expect(page.getByText("155–160")).toHaveCount(0);
+  expect(backend.records.size).toBe(0);
+});
+
+test("a production glass that might be milk or plant milk still offers 全脂 and counts 250 ml", async ({ page, context }) => {
+  const backend = cloud();
+  await backend.install(context);
+  await page.route("**/api/nutrition/resolve", (route) => route.fulfill({
+    status: 500,
+    json: { error: { code: "unexpected_nutrition" } },
+  }));
+  await page.route("**/api/analyze", (route) => route.fulfill({
+    json: { mode: "live", analysis: productionGlassMilkUnknownAnalysis },
+  }));
+  await page.goto("/");
+  await login(page);
+  await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
+  const png = await sharp({
+    create: { width: 80, height: 60, channels: 3, background: "white" },
+  }).png().toBuffer();
+  await page.locator('input[type="file"]').nth(1).setInputFiles({
+    name: "milkglass.jpg", mimeType: "image/png", buffer: png,
+  });
+  await page.getByRole("button", { name: "開始分析", exact: true }).click();
+
+  await expect(page.getByRole("button", { name: "全脂牛奶", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "低脂牛奶", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "燕麥奶", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "其他", exact: true })).toBeVisible();
+  await expect(page.getByText("名稱像牛奶、鮮奶或低脂奶，但餐點備註、相片證據、不確定說明、項目備註或可見食材指向燕麥奶、豆漿或杏仁奶，因此不配對乳製奶，也不交給 USDA。")).toHaveCount(0);
+  await expect(page.getByText("155–160")).toHaveCount(0);
+
+  const maximum = page.getByRole("spinbutton", { name: "最多份量", exact: true });
+  await maximum.fill("250");
+  await maximum.press("Tab");
+  await expect(maximum).toHaveValue("250");
+  await expect(page.getByRole("button", { name: "全脂牛奶", exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "全脂牛奶", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "約 155–160 kcal", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "燕麥奶", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  await expect.poll(() => backend.records.size).toBe(1);
+  const saved = [...backend.records.values()][0];
+  const item = (saved.items as Array<{
+    displayName: string;
+    identityLevel: string;
+    userMilkTypeChoice?: string;
+    portionMin: number;
+    portionMax: number;
+    nutritionMatch?: { includedInTotal?: boolean; profile?: { id?: string }; coverageReason?: string };
+  }>)[0];
+  expect(item.displayName).toBe("全脂牛奶");
+  expect(item.identityLevel).toBe("ingredient");
+  expect(item.userMilkTypeChoice).toBe("whole");
+  expect(item.portionMin).toBe(250);
+  expect(item.portionMax).toBe(250);
+  expect(item.nutritionMatch?.includedInTotal).toBe(true);
+  expect(item.nutritionMatch?.profile?.id).toBe("whole-milk");
+  expect(item.nutritionMatch?.coverageReason).not.toBe("UNKNOWN_DISH");
 });
 
 test("choosing 全脂牛奶 counts when the photo could not tell whole milk from low-fat", async ({ page, context }) => {

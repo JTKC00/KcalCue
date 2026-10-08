@@ -2,6 +2,8 @@ import type { FoodAnalysis, FoodEstimate, ObservedFood, PortionUnit } from "./fo
 import type { NutritionMatch, NutritionProfile } from "@/lib/nutrition/types";
 import { normalizeFoodName } from "@/lib/nutrition/canonical";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
+import { isMilkTypeUncertainty, photoMilkChoiceByLabel, type UserMilkTypeChoice } from "@/lib/nutrition/photo-milk";
+import { PHOTO_MILK_OTHER_REASON } from "@/lib/nutrition/negative-rules";
 
 export type PortionPreset = "small" | "regular" | "large";
 
@@ -15,6 +17,13 @@ export interface EditableFoodItem extends ObservedFood {
    * Absent on meals saved before the photo milk confirmation.
    */
   entrySource?: "photo" | "manual";
+  /**
+   * Set only by the milk chooser. Saved with the meal so a later edit
+   * still treats the row as that choice. A model name is not this flag.
+   */
+  userMilkTypeChoice?: UserMilkTypeChoice;
+  /** 「其他」 note. Not an uncertainty reason, so it does not use one of the eight slots. */
+  otherMilkNotice?: string;
 }
 
 export function hasKnownPortion<T extends ObservedFood>(food: T): food is T & FoodEstimate {
@@ -26,6 +35,30 @@ export function renameFoodItem(
   name: string,
   originalFood: ObservedFood = food,
 ): EditableFoodItem {
+  const milkChoice = photoMilkChoiceByLabel(name);
+  if (
+    milkChoice &&
+    food.userMilkTypeChoice &&
+    food.userMilkTypeChoice !== "other" &&
+    food.userMilkTypeChoice === milkChoice.id
+  ) {
+    return {
+      ...food,
+      displayName: milkChoice.displayName,
+      normalizedName: milkChoice.normalizedName,
+      identityLevel: "ingredient",
+      preparationMethod: undefined,
+      visibleIngredients: undefined,
+      notes: undefined,
+      nutritionMatch: null,
+      otherMilkNotice: undefined,
+      userMilkTypeChoice: milkChoice.id,
+      uncertaintyReasons: food.uncertaintyReasons.filter((reason) =>
+        reason !== PHOTO_MILK_OTHER_REASON && !isMilkTypeUncertainty(reason),
+      ),
+    };
+  }
+
   if (normalizeFoodName(food.displayName) === normalizeFoodName(name)) {
     return { ...food, displayName: name };
   }

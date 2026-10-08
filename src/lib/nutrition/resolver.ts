@@ -1,6 +1,10 @@
 import type { FoodEstimate } from "@/lib/domain/food-analysis";
 
-export type ResolvableFood = FoodEstimate & { entrySource?: "photo" | "manual" };
+export type ResolvableFood = FoodEstimate & {
+  entrySource?: "photo" | "manual";
+  userMilkTypeChoice?: UserMilkTypeChoice;
+  otherMilkNotice?: string;
+};
 import {
   canonicalizeFood,
   chocolateMilkName,
@@ -18,8 +22,10 @@ import {
   DRESSED_SALAD_UNCALCULATED_REASON,
   LOW_FAT_MILK_UNCALCULATED_REASON,
   PHOTO_GENERIC_MILK_CONFIRMATION_REASON,
+  PHOTO_MILK_OTHER_REASON,
   PLANT_MILK_CONTRADICTION_REASON,
 } from "./negative-rules";
+import { milkResolveSubject, type UserMilkTypeChoice } from "./photo-milk";
 import {
   COMPOSITE_GENERIC_FALLBACK_REASON,
   isCompatibleNutritionIdentity,
@@ -259,8 +265,23 @@ export function resolveNutritionMatch(
   catalog: NutritionProfile[],
   mealContext?: MealPlantMilkContext,
 ): NutritionMatch {
-  const identity = canonicalizeFood(food);
-  if (contradictoryDairyMilkLabel(food, mealContext)) {
+  if (
+    food.userMilkTypeChoice === "other" ||
+    food.otherMilkNotice === PHOTO_MILK_OTHER_REASON ||
+    food.uncertaintyReasons.includes(PHOTO_MILK_OTHER_REASON)
+  ) {
+    return unmatched({
+      profile: null,
+      confidence: "low",
+      matchType: "unresolved",
+      reasons: [PHOTO_MILK_OTHER_REASON],
+      identity: canonicalizeFood(food),
+    }, "INSUFFICIENT_COVERAGE");
+  }
+  const subject = milkResolveSubject(food);
+  const explicitChoice = food.userMilkTypeChoice != null;
+  const identity = canonicalizeFood(subject);
+  if (!explicitChoice && contradictoryDairyMilkLabel(food, mealContext)) {
     return unmatched({
       profile: null,
       confidence: "low",
@@ -269,7 +290,7 @@ export function resolveNutritionMatch(
       identity,
     }, "INSUFFICIENT_COVERAGE");
   }
-  if (chocolateMilkName(food)) {
+  if (chocolateMilkName(subject)) {
     return unmatched({
       profile: null,
       confidence: "low",
@@ -278,7 +299,7 @@ export function resolveNutritionMatch(
       identity,
     }, "INSUFFICIENT_COVERAGE");
   }
-  if (explicitLowFatMilk(food)) {
+  if (explicitLowFatMilk(subject)) {
     const lowFatProfile = findLowFatMilkProfile(catalog);
     if (!lowFatProfile) {
       return unmatched({
@@ -289,13 +310,13 @@ export function resolveNutritionMatch(
         identity,
       }, "INSUFFICIENT_COVERAGE");
     }
-    const gramsPerUnit = lowFatProfile.gramsPerUnit[food.unit];
+    const gramsPerUnit = lowFatProfile.gramsPerUnit[subject.unit];
     if (typeof gramsPerUnit !== "number" || !Number.isFinite(gramsPerUnit) || gramsPerUnit <= 0) {
       return unmatched({
         profile: null,
         confidence: "low",
         matchType: "unresolved",
-        reasons: [`未有 ${food.unit} 的可靠克重換算，因此不納入總數。`],
+        reasons: [`未有 ${subject.unit} 的可靠克重換算，因此不納入總數。`],
         identity,
       }, "UNIT_CONVERSION_MISSING");
     }
@@ -308,7 +329,7 @@ export function resolveNutritionMatch(
       includedInTotal: true,
     };
   }
-  if (photoGenericMilkNeedsConfirmation(food, mealContext)) {
+  if (photoGenericMilkNeedsConfirmation(subject, mealContext)) {
     return unmatched({
       profile: null,
       confidence: "low",
@@ -328,15 +349,15 @@ export function resolveNutritionMatch(
   }
 
   const eligibleCatalog = catalog.filter(
-    (profile) => !profileBlockedByNegativeRule(food, identity, profile),
+    (profile) => !profileBlockedByNegativeRule(subject, identity, profile),
   );
   const ranked = eligibleCatalog
     .map((profile) => ({
       profile,
-      score: scoreProfile(food, identity, profile),
+      score: scoreProfile(subject, identity, profile),
       aliasExact:
-        exactAliasHit(food.normalizedName, profile) ||
-        exactAliasHit(food.displayName, profile),
+        exactAliasHit(subject.normalizedName, profile) ||
+        exactAliasHit(subject.displayName, profile),
     }))
     .sort((left, right) => right.score - left.score);
 
@@ -378,13 +399,13 @@ export function resolveNutritionMatch(
     }, "AMBIGUOUS_MATCH");
   }
 
-  const gramsPerUnit = best.profile.gramsPerUnit[food.unit];
+  const gramsPerUnit = best.profile.gramsPerUnit[subject.unit];
   if (typeof gramsPerUnit !== "number" || !Number.isFinite(gramsPerUnit) || gramsPerUnit <= 0) {
     return unmatched({
       profile: null,
       confidence: "low",
       matchType: "unresolved",
-      reasons: [`未有 ${food.unit} 的可靠克重換算，因此不納入總數。`],
+      reasons: [`未有 ${subject.unit} 的可靠克重換算，因此不納入總數。`],
       identity,
     }, "UNIT_CONVERSION_MISSING");
   }

@@ -25,6 +25,11 @@ import { claimMealLookupAttempt, releaseMealLookupAttempt } from "@/lib/server/m
 import { copy } from "@/content/zh-HK";
 import { PHOTO_GENERIC_MILK_CONFIRMATION_REASON, PLANT_MILK_CONTRADICTION_REASON } from "@/lib/nutrition/negative-rules";
 import { oatMilkCartonPhotoAnalysis } from "@/lib/nutrition/oat-milk-photo.fixture";
+import {
+  oatPackagingWholeMilkChoiceAnalysis,
+  productionGlassMilkUnknownAnalysis,
+  wholeMilkChoiceStillDish,
+} from "@/lib/nutrition/photo-milk-prod-qa.fixture";
 import { clearUsdaCache } from "@/lib/nutrition/usda";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import type { NutritionMatch } from "@/lib/nutrition/types";
@@ -577,6 +582,97 @@ describe("POST /api/meals bounded input", () => {
     expect(body.record.items[0].nutritionMatch.profile).toBeNull();
     expect(body.record.items[0].nutritionMatch.includedInTotal).toBe(false);
     expect(body.record.items[0].nutritionMatch.reasons[0]).toBe(PHOTO_GENERIC_MILK_CONFIRMATION_REASON);
+  });
+
+  it("counts an explicit 全脂牛奶 choice when the model filed the drink as a dish", async () => {
+    clearUsdaCache();
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => Response.json({ foods: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await POST(jsonRequest(JSON.stringify({
+      ...meal,
+      mode: "live",
+      analysis: oatPackagingWholeMilkChoiceAnalysis,
+      items: [{
+        ...wholeMilkChoiceStillDish,
+        id: "chosen-whole-milk",
+        originalPortionMin: 250,
+        originalPortionMax: 250,
+        entrySource: "photo",
+        userMilkTypeChoice: "whole",
+      }],
+    })));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(body.record.items[0].userMilkTypeChoice).toBe("whole");
+    expect(body.record.items[0].nutritionMatch.profile.id).toBe("whole-milk");
+    expect(body.record.items[0].nutritionMatch.includedInTotal).toBe(true);
+    expect(body.record.items[0].nutritionMatch.coverageReason).not.toBe("UNKNOWN_DISH");
+  });
+
+  it("counts 全脂牛奶 at 250 ml for the production glass even when the model left it a dish", async () => {
+    clearUsdaCache();
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => Response.json({ foods: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const source = productionGlassMilkUnknownAnalysis.foods[0];
+    const response = await POST(jsonRequest(JSON.stringify({
+      ...meal,
+      mode: "live",
+      analysis: productionGlassMilkUnknownAnalysis,
+      items: [{
+        ...source,
+        id: "production-glass",
+        displayName: "全脂牛奶",
+        normalizedName: "全脂牛奶",
+        identityLevel: "dish",
+        portionMin: 250,
+        portionMax: 250,
+        originalPortionMin: 250,
+        originalPortionMax: 250,
+        entrySource: "photo",
+        userMilkTypeChoice: "whole",
+      }],
+    })));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(body.record.items[0].userMilkTypeChoice).toBe("whole");
+    expect(body.record.items[0].nutritionMatch.profile.id).toBe("whole-milk");
+    expect(body.record.items[0].nutritionMatch.includedInTotal).toBe(true);
+    expect(body.record.items[0].nutritionMatch.coverageReason).not.toBe("UNKNOWN_DISH");
+    expect(body.record.items[0].nutritionMatch.identity.canonicalName).not.toBe("mixed-dish");
+  });
+
+  it("keeps a model 全脂牛奶 label blocked when the carton says oat milk", async () => {
+    clearUsdaCache();
+    vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => Response.json({ foods: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await POST(jsonRequest(JSON.stringify({
+      ...meal,
+      mode: "live",
+      analysis: oatPackagingWholeMilkChoiceAnalysis,
+      items: [{
+        ...wholeMilkChoiceStillDish,
+        id: "model-whole-milk",
+        notes: "紙盒標示燕麥奶",
+        originalPortionMin: 250,
+        originalPortionMax: 250,
+        entrySource: "photo",
+      }],
+    })));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(body.record.items[0].userMilkTypeChoice).toBeUndefined();
+    expect(body.record.items[0].nutritionMatch.profile).toBeNull();
+    expect(body.record.items[0].nutritionMatch.includedInTotal).toBe(false);
+    expect(body.record.items[0].nutritionMatch.reasons[0]).toBe(PLANT_MILK_CONTRADICTION_REASON);
   });
 
   it.each([undefined, "8"])(
