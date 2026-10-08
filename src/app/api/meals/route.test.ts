@@ -385,7 +385,7 @@ describe("POST /api/meals bounded input", () => {
   it("does not send a contradictory dairy label to USDA when saving a live meal", async () => {
     clearUsdaCache();
     vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
-    const fetchMock = vi.fn(async () => Response.json({ foods: [] }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => Response.json({ foods: [] }));
     vi.stubGlobal("fetch", fetchMock);
     const dairy = {
       ...meal.items[0],

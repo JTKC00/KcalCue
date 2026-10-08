@@ -40,7 +40,7 @@ const remoteNames = [
 ];
 
 function remoteFood(name: string) {
-  return { ...banana, displayName: name, normalizedName: name, uncertaintyReasons: [] };
+  return { ...banana, displayName: name, normalizedName: name, uncertaintyReasons: [] as string[] };
 }
 
 function usdaResponse(index: number): Response {
@@ -597,7 +597,7 @@ describe("POST /api/nutrition/resolve", () => {
 
   it("skips USDA live lookup for a contradictory dairy label and still looks up other foods", async () => {
     vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
-    const fetchMock = vi.fn(async () => Response.json({ foods: [] }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => Response.json({ foods: [] }));
     vi.stubGlobal("fetch", fetchMock);
 
     const guarded = [
@@ -623,7 +623,7 @@ describe("POST /api/nutrition/resolve", () => {
 
   it("resolves 鮮奶 locally and still looks up low-fat milk", async () => {
     vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");
-    const fetchMock = vi.fn(async () => Response.json({ foods: [] }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => Response.json({ foods: [] }));
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await POST(resolveRequest([
