@@ -104,15 +104,15 @@ describe("nutrition coverage benchmark", () => {
     }
 
     const plate = results.find(({ probe }) => probe.id === "char-siu-rice-plate")?.result;
-    expect(plate?.includedInTotal).toBe(false);
+    expect(plate?.includedInTotal).toBe(true);
+    expect(plate?.profileId).toBe("template:char-siu-rice-plate");
     expect(plate?.profileId).not.toBe("siu-mei-rice");
-    expect(plate?.profileId).toBeNull();
     expect(plate?.canonicalName).toBe("char-siu-rice-plate");
     expect(plate?.knownFalseConfidentMatch).toBe(false);
     const plainSoup = results.find(({ probe }) => probe.id === "plain-noodle-soup")?.result;
-    expect(plainSoup?.includedInTotal).toBe(false);
+    expect(plainSoup?.includedInTotal).toBe(true);
+    expect(plainSoup?.profileId).toBe("template:plain-noodle-soup");
     expect(plainSoup?.profileId).not.toBe("noodle-soup");
-    expect(plainSoup?.profileId).toBeNull();
     expect(plainSoup?.canonicalName).toBe("plain-noodle-soup");
     expect(plainSoup?.knownFalseConfidentMatch).toBe(false);
 
@@ -125,15 +125,21 @@ describe("nutrition coverage benchmark", () => {
 
   it("assigns a reason code without changing user-facing copy or totals", () => {
     const provider = new LocalNutritionProvider();
-    const dish = benchmarkFoodEstimate("碟頭飯", "碟頭飯", "dish");
+    const dish = benchmarkFoodEstimate("火鍋", "火鍋", "dish");
     const dishMatch = provider.resolve(dish);
     expect(dishMatch.includedInTotal).toBe(false);
     expect(dishMatch.coverageReason).toBe("DISH_KNOWN_NO_PROFILE");
-    expect(dishMatch.identity.dishId).toBe("rice-plate");
-    expect(dishMatch.identity.familyId).toBe("rice-plate");
+    expect(dishMatch.identity.dishId).toBe("hotpot");
+    expect(dishMatch.identity.familyId).toBe("hotpot");
     expect(dishMatch.identity.hasNutritionProfile).toBe(false);
     expect(dishMatch.reasons[0]).toBe(COMPOSITE_GENERIC_FALLBACK_REASON);
     expect(dishMatch.profile).toBeNull();
+
+    const ricePlate = provider.resolve(benchmarkFoodEstimate("碟頭飯", "碟頭飯", "dish"));
+    expect(ricePlate.includedInTotal).toBe(true);
+    expect(ricePlate.profile?.id).toBe("template:rice-plate");
+    expect(ricePlate.profile?.composite).toBe(true);
+    expect(ricePlate.identity.hasNutritionProfile).toBe(true);
 
     const ingredient = benchmarkFoodEstimate("西蘭花", "西蘭花", "ingredient");
     const ingredientMatch = provider.resolve(ingredient);

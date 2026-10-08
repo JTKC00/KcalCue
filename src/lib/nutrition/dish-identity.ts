@@ -8,8 +8,8 @@ export interface DishAlias {
 }
 
 /**
- * A curated dish identity. Nutrition numbers stay on existing profiles.
- * `nutritionCanonicalName` is null until a later gate adds a profile.
+ * A curated dish identity. Existing profiles stay on `nutritionCanonicalName`.
+ * N2 recipe templates can complete a dish while leaving that field null.
  */
 export interface DishIdentity {
   id: string;

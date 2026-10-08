@@ -1,3 +1,4 @@
+import { templateNutritionProfiles } from "./recipe-templates";
 import {
   nutrientBand,
   pointNutrient,
@@ -34,7 +35,7 @@ function pointMacros(
   };
 }
 
-export const localNutritionProfiles: NutritionProfile[] = [
+const baseNutritionProfiles: NutritionProfile[] = [
   {
     id: "white-rice-cooked",
     displayName: "白飯",
@@ -631,4 +632,9 @@ export const localNutritionProfiles: NutritionProfile[] = [
     densityBasis:
       "2026-10-08 讀取 USDA FoodData Central FNDDS，每 100 g：無醬凱撒雞沙律 63 kcal（FDC 2706818）、無醬凱撒沙律 77 kcal（FDC 2709591）、美乃滋通粉沙律 221 kcal（FDC 2708932）、芝士通粉沙律 246 kcal（FDC 2708947）、蛋黃醬蛋沙律 257 kcal（FDC 2707182，脂肪 23.14 g）。菜名分不出無醬或有醬，也分不出醬和芝士佔多少，因此同一範圍蓋過這些點值。脂肪上限 24 g 低於美乃滋本身的 74.85 g／680 kcal（FDC 171009），因為醬只佔沙律的一部分。這不是某一碟的化驗值。",
   },
+];
+
+export const localNutritionProfiles: NutritionProfile[] = [
+  ...baseNutritionProfiles,
+  ...templateNutritionProfiles,
 ];

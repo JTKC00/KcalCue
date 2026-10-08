@@ -1,5 +1,6 @@
 import type { FoodEstimate } from "@/lib/domain/food-analysis";
 import { DISH_IDENTITIES, type DishIdentity } from "./dish-identity";
+import { dishTemplateIsComplete } from "./recipe-templates";
 import {
   NEGATIVE_MATCH_RULES,
   SALAD_NAME_SPELLINGS,
@@ -751,7 +752,8 @@ function identityFromDish(
     qualifiers: ["composite"],
     dishId: identity.id,
     familyId: identity.familyId,
-    hasNutritionProfile: identity.nutritionCanonicalName !== null,
+    hasNutritionProfile:
+      identity.nutritionCanonicalName !== null || dishTemplateIsComplete(identity.id),
   };
 }
 
