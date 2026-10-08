@@ -32,15 +32,25 @@ const presetLabels: Record<PortionPreset, string> = {
   large: "多",
 };
 
+function selectPortion(input: HTMLInputElement) {
+  input.select();
+}
+
 function PortionInput({ id, value, onCommit }: { id: string; value: number | null; onCommit: (value: number | null) => void }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [error, setError] = useState(false);
+  const shown = editing ?? (value == null ? "" : String(value));
   return <><input id={id} type="number" inputMode="decimal" min="0.1" max="5000" step="any"
-    value={editing ?? value ?? ""} placeholder="未知" aria-invalid={error || undefined} aria-describedby={error ? `${id}-error` : undefined}
-    onChange={event => { setEditing(event.target.value); setError(false); }}
+    value={shown} placeholder="未知" aria-invalid={error || undefined} aria-describedby={error ? `${id}-error` : undefined}
+    onFocus={event => { selectPortion(event.currentTarget); }}
+    onClick={event => { selectPortion(event.currentTarget); }}
+    // A click otherwise drops the caret at the end, so the next digit appends to 150.
+    onMouseUp={event => { event.preventDefault(); }}
+    onChange={event => { setEditing(event.currentTarget.value); setError(false); }}
     onBlur={event => {
-      const number = Number(event.target.value);
-      if (!event.target.value) { onCommit(null); setEditing(null); setError(false); return; }
+      const raw = event.currentTarget.value;
+      const number = Number(raw);
+      if (!raw) { onCommit(null); setEditing(null); setError(false); return; }
       if (!Number.isFinite(number) || number < .1 || number > 5000) { setError(true); return; }
       onCommit(number); setEditing(null); setError(false);
     }} />{error && <small id={`${id}-error`} role="alert">請輸入 0.1 至 5000 的份量。</small>}</>;

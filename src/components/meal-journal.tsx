@@ -1277,7 +1277,7 @@ export function MealJournal({
                   <small>按 {draft.timezone} 記錄</small>
                 </div>
                 <div className="metadata-grid">
-                  <label>
+                  <label className="metadata-date">
                     日期
                     <input
                       required

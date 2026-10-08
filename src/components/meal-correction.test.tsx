@@ -187,6 +187,32 @@ describe("meal identity correction", () => {
     expect(changed.mock.lastCall![0].items[0].nutritionMatch.reasons).toEqual(["最新結果"]);
   });
 
+  it("replaces the focused max grams instead of appending them", () => {
+    const select = vi.spyOn(HTMLInputElement.prototype, "select");
+    const changed = vi.fn();
+    render(<KcalCueApp initialProviderMode="live" initialDraft={draft()} onDraftChange={changed} />);
+    const maximum = screen.getByLabelText("最多份量") as HTMLInputElement;
+    expect(maximum).toHaveValue(150);
+
+    fireEvent.focus(maximum);
+    fireEvent.click(maximum);
+    expect(select).toHaveBeenCalled();
+    const mouseUp = new MouseEvent("mouseup", { bubbles: true, cancelable: true });
+    maximum.dispatchEvent(mouseUp);
+    expect(mouseUp.defaultPrevented).toBe(true);
+
+    fireEvent.change(maximum, { target: { value: "150" } });
+    fireEvent.change(maximum, { target: { value: "150" } });
+    fireEvent.change(maximum, { target: { value: "150" } });
+    expect(maximum.value).toBe("150");
+
+    fireEvent.change(maximum, { target: { value: "200" } });
+    expect(maximum.value).toBe("200");
+    fireEvent.blur(maximum);
+    expect(changed.mock.lastCall![0].items[0]).toMatchObject({ portionMin: 100, portionMax: 200 });
+    select.mockRestore();
+  });
+
   it("cancels a queued name lookup and ignores an in-flight result when the portion becomes unknown", async () => {
     const changed = vi.fn();
     render(<KcalCueApp initialProviderMode="live" initialDraft={draft()} onDraftChange={changed} />);

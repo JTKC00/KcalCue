@@ -595,4 +595,40 @@ export const localNutritionProfiles: NutritionProfile[] = [
     densityBasis:
       "下限接近大量生蔬菜、少量去皮烤雞胸及薄醬；上限反映較多烤肉、可見油汁及較密蔬菜。肉類、醬汁及用油不能由相片確定，因此使用寬範圍，不是某一碗的化驗值。密度參考 USDA 公開的生葉菜、烤雞胸及食用油，再保留組合不確定性。",
   },
+  {
+    id: "creamy-salad",
+    displayName: "高脂沙律（通粉、蛋黃醬或凱撒）",
+    canonicalName: "creamy-salad",
+    category: "mixed",
+    preparations: ["raw", "cooked", "grilled", "unknown"],
+    aliases: [
+      "creamy salad",
+      "macaroni salad",
+      "tuna macaroni salad",
+      "chicken caesar salad",
+      "caesar salad",
+      "potato salad with mayonnaise",
+      "egg mayo salad",
+      "egg salad with mayonnaise",
+      "通粉沙律",
+      "吞拿魚通粉沙律",
+      "凱撒沙律",
+      "凱撒雞沙律",
+      "蛋黃醬薯仔沙律",
+      "蛋黃醬蛋沙律",
+    ],
+    composite: true,
+    nutrientsPer100g: nutrientBand([63, 257], [1.5, 11], [1, 26], [1.9, 24]),
+    gramsPerUnit: { g: 1 },
+    source: {
+      ...usdaSource(
+        "fdc:2706818+2709591+2708932+2708947+2707182",
+        "高脂沙律組合菜式保守範圍（通粉、蛋黃醬或凱撒）",
+      ),
+      retrievedAt: "2026-10-08",
+    },
+    dataNotice: LOCAL_DATA_NOTICE,
+    densityBasis:
+      "2026-10-08 讀取 USDA FoodData Central FNDDS，每 100 g：無醬凱撒雞沙律 63 kcal（FDC 2706818）、無醬凱撒沙律 77 kcal（FDC 2709591）、美乃滋通粉沙律 221 kcal（FDC 2708932）、芝士通粉沙律 246 kcal（FDC 2708947）、蛋黃醬蛋沙律 257 kcal（FDC 2707182，脂肪 23.14 g）。菜名分不出無醬或有醬，也分不出醬和芝士佔多少，因此同一範圍蓋過這些點值。脂肪上限 24 g 低於美乃滋本身的 74.85 g／680 kcal（FDC 171009），因為醬只佔沙律的一部分。這不是某一碟的化驗值。",
+  },
 ];
