@@ -3,6 +3,7 @@ import {
   canonicalizeFood,
   isCompositeIdentity,
   normalizeFoodName,
+  profileBlockedByNegativeRule,
 } from "./canonical";
 import {
   COMPOSITE_GENERIC_FALLBACK_REASON,
@@ -202,7 +203,20 @@ export function resolveNutritionMatch(
   catalog: NutritionProfile[],
 ): NutritionMatch {
   const identity = canonicalizeFood(food);
-  const ranked = catalog
+  if (identity.qualifiers.includes("ambiguous")) {
+    return unmatched({
+      profile: null,
+      confidence: "low",
+      matchType: "unresolved",
+      reasons: ["找到多個相近但不相同的營養資料，為免假裝精準，暫不自動配對。"],
+      identity,
+    }, "AMBIGUOUS_MATCH");
+  }
+
+  const eligibleCatalog = catalog.filter(
+    (profile) => !profileBlockedByNegativeRule(food, identity, profile),
+  );
+  const ranked = eligibleCatalog
     .map((profile) => ({
       profile,
       score: scoreProfile(food, identity, profile),
@@ -258,7 +272,7 @@ export function resolveNutritionMatch(
       matchType: "unresolved",
       reasons: [`未有 ${food.unit} 的可靠克重換算，因此不納入總數。`],
       identity,
-    }, "TYPE_MISMATCH");
+    }, "UNIT_CONVERSION_MISSING");
   }
 
   const classified = classifyMatch(identity, best.profile, best.score, best.aliasExact);
@@ -278,6 +292,8 @@ export function resolveNutritionMatch(
   }
 
   if (!includedInTotal) {
+    // TYPE_MISMATCH is a dish/ingredient level conflict. Missing gram factors
+    // are UNIT_CONVERSION_MISSING, decided before classify.
     const coverageReason: NutritionCoverageReason = classified.matchType !== "unresolved"
       ? "INSUFFICIENT_COVERAGE"
       : !isCompatibleNutritionIdentity(identity, best.profile)

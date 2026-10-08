@@ -49,8 +49,10 @@ export type MealCoverage = "complete" | "partial" | "insufficient" | "none";
  */
 export type NutritionCoverageReason =
   | "UNKNOWN_DISH"
+  | "DISH_KNOWN_NO_PROFILE"
   | "COMPOSITE_UNSUPPORTED"
   | "TYPE_MISMATCH"
+  | "UNIT_CONVERSION_MISSING"
   | "AMBIGUOUS_MATCH"
   | "INSUFFICIENT_COVERAGE";
 
@@ -59,6 +61,15 @@ export interface CanonicalFoodIdentity {
   category: FoodCategory;
   preparation: FoodPreparation;
   qualifiers: string[];
+  /** Curated dish id. Absent when the name is not in the identity catalog. */
+  dishId?: string;
+  /** Family such as rice-plate or wonton-noodle-soup. */
+  familyId?: string;
+  /**
+   * False when the dish is known and no nutrition profile is attached yet.
+   * Absent on identities that predate the catalog.
+   */
+  hasNutritionProfile?: boolean;
 }
 
 export interface NutrientRange {

@@ -170,8 +170,8 @@ export const FALSE_MATCH_PROBES: readonly FalseMatchProbe[] = [
     normalizedName: "char siu rice plate",
     identityLevel: "dish",
     rule: "英文前綴 char siu rice 不得配對 siu-mei-rice",
-    knownFalseConfidentMatch: true,
-    note: "研究 3.3 的英文前綴撞名。仍是已知錯誤高信心配對。",
+    knownFalseConfidentMatch: false,
+    note: "N1 把叉燒碟頭飯收到 rice-plate，不再因為英文前綴 char siu rice 計入燒味飯。",
     violates: (match) => match.includedInTotal && match.profile?.id === "siu-mei-rice",
   },
   {
@@ -180,9 +180,49 @@ export const FALSE_MATCH_PROBES: readonly FalseMatchProbe[] = [
     normalizedName: "plain noodle soup",
     identityLevel: "dish",
     rule: "英文鍵 noodle soup 不得配對 noodle-soup",
-    knownFalseConfidentMatch: true,
-    note: "研究 3.3 的英文前綴撞名。仍是已知錯誤高信心配對。",
+    knownFalseConfidentMatch: false,
+    note: "N1 把陽春麵收到茶餐廳麵，plain noodle soup 不再繼承雲吞麵。",
     violates: (match) => match.includedInTotal && match.profile?.id === "noodle-soup",
+  },
+  {
+    id: "sesame-dressing-not-lean",
+    displayName: "雞胸胡麻醬沙律",
+    normalizedName: "chicken breast salad with sesame dressing",
+    identityLevel: "dish",
+    rule: "胡麻醬不得落到 protein-vegetable-salad",
+    knownFalseConfidentMatch: false,
+    note: "胡麻醬沒有營養 profile，離開瘦身範圍後不計算。",
+    violates: (match) => match.profile?.id === "protein-vegetable-salad",
+  },
+  {
+    id: "vinaigrette-not-lean",
+    displayName: "油醋汁沙律",
+    normalizedName: "vinaigrette salad",
+    identityLevel: "dish",
+    rule: "油醋汁不得落到 protein-vegetable-salad",
+    knownFalseConfidentMatch: false,
+    note: "油醋汁沒有營養 profile，離開瘦身範圍後不計算。",
+    violates: (match) => match.profile?.id === "protein-vegetable-salad",
+  },
+  {
+    id: "thousand-island-not-lean",
+    displayName: "千島醬沙律",
+    normalizedName: "thousand island salad",
+    identityLevel: "dish",
+    rule: "千島醬不得落到 protein-vegetable-salad",
+    knownFalseConfidentMatch: false,
+    note: "千島醬走 creamy-salad，不是 60–160 的瘦身沙律。",
+    violates: (match) => match.profile?.id === "protein-vegetable-salad",
+  },
+  {
+    id: "egg-yolk-sauce-not-lean",
+    displayName: "蛋黃醬沙律",
+    normalizedName: "mayonnaise salad",
+    identityLevel: "dish",
+    rule: "蛋黃醬不得落到 protein-vegetable-salad",
+    knownFalseConfidentMatch: false,
+    note: "蛋黃醬走 creamy-salad。",
+    violates: (match) => match.profile?.id === "protein-vegetable-salad",
   },
 ];
 
@@ -200,6 +240,10 @@ export interface ResolvedCoverageItem {
   coverageReason: NutritionCoverageReason | null;
   userFacingReason: string | null;
   falseConfidentMatch: boolean;
+  dishId: string | null;
+  familyId: string | null;
+  knownIdentity: boolean;
+  hasNutritionProfile: boolean;
 }
 
 export interface FalseMatchProbeResult {
@@ -231,12 +275,16 @@ export interface NutritionCoverageReport {
   dishCount: number;
   ingredientCount: number;
   portionGrams: 100;
-  pipeline: "canonicalizeFood → resolveNutritionMatch → calculateMealNutrition";
+  pipeline: "dish identity → canonicalizeFood → resolveNutritionMatch → calculateMealNutrition";
   network: "none";
   coverage: Record<MealCoverage, number>;
   reasons: Record<NutritionCoverageReason, number>;
   safeCoverageRate: CoverageRate;
   falseConfidentMatchRate: CoverageRate;
+  /** Benchmark rows whose name resolved to a curated dish identity. */
+  identityCoverage: CoverageRate;
+  /** Benchmark rows whose identity already has a nutrition profile. */
+  profileCoverage: CoverageRate;
   items: ResolvedCoverageItem[];
   probes: FalseMatchProbeResult[];
 }
@@ -284,8 +332,10 @@ function emptyCoverage(): Record<MealCoverage, number> {
 function emptyReasons(): Record<NutritionCoverageReason, number> {
   return {
     UNKNOWN_DISH: 0,
+    DISH_KNOWN_NO_PROFILE: 0,
     COMPOSITE_UNSUPPORTED: 0,
     TYPE_MISMATCH: 0,
+    UNIT_CONVERSION_MISSING: 0,
     AMBIGUOUS_MATCH: 0,
     INSUFFICIENT_COVERAGE: 0,
   };
@@ -335,6 +385,10 @@ function describeMatch(
     coverageReason: match.coverageReason ?? null,
     userFacingReason: match.reasons[0] ?? null,
     falseConfidentMatch,
+    dishId: match.identity.dishId ?? null,
+    familyId: match.identity.familyId ?? null,
+    knownIdentity: Boolean(match.identity.dishId),
+    hasNutritionProfile: match.identity.hasNutritionProfile === true,
   };
 }
 
@@ -394,12 +448,14 @@ export function buildCoverageReport(): NutritionCoverageReport {
     dishCount: APPENDIX_A_DISHES.length,
     ingredientCount: APPENDIX_A_INGREDIENTS.length,
     portionGrams: 100,
-    pipeline: "canonicalizeFood → resolveNutritionMatch → calculateMealNutrition",
+    pipeline: "dish identity → canonicalizeFood → resolveNutritionMatch → calculateMealNutrition",
     network: "none",
     coverage,
     reasons,
     safeCoverageRate: rate(safeComplete, foods.length),
     falseConfidentMatchRate: rate(falseConfidentProbes, probes.length),
+    identityCoverage: rate(items.filter((item) => item.knownIdentity).length, foods.length),
+    profileCoverage: rate(items.filter((item) => item.hasNutritionProfile).length, foods.length),
     items,
     probes,
   };
@@ -430,6 +486,18 @@ function assertReportInvariants(report: NutritionCoverageReport): void {
     if (item.coverage !== "complete" && item.coverageReason === null) {
       throw new Error(`${item.name} 未 complete 但沒有原因碼`);
     }
+    if (item.knownIdentity !== Boolean(item.dishId)) {
+      throw new Error(`${item.name} 的身份標記與 dishId 不一致`);
+    }
+    if (item.hasNutritionProfile && !item.knownIdentity) {
+      throw new Error(`${item.name} 有營養 profile 但沒有菜色身份`);
+    }
+  }
+  if (report.identityCoverage.numerator !== report.items.filter((item) => item.knownIdentity).length) {
+    throw new Error("身份覆蓋分子與逐項不一致");
+  }
+  if (report.profileCoverage.numerator !== report.items.filter((item) => item.hasNutritionProfile).length) {
+    throw new Error("profile 覆蓋分子與逐項不一致");
   }
 }
 
@@ -442,10 +510,13 @@ export function formatCoverageBaselineMarkdown(report: NutritionCoverageReport):
     .map((item) => `${item.name}（${item.canonicalName}）`);
   const knownFalse = report.probes.filter((probe) => probe.knownFalseConfidentMatch);
   const passing = report.probes.filter((probe) => !probe.violation);
+  const knownDishes = report.items.filter((item) => item.identityLevel === "dish" && item.knownIdentity);
   const lines = [
-    "# 營養覆蓋基準（Gate N0）",
+    "# 營養覆蓋基準（Gate N1）",
     "",
-    "這是 Gate N0 的基準，對照已合併 PR #118 的 `main`（`228a4f9`）。程式是 `canonicalizeFood`、`resolveNutritionMatch`、`calculateMealNutrition`。沒有呼叫 USDA、OpenAI，也沒有讀正式環境餐點。Vision 不參與，也不提供 kcal。",
+    "這是 Gate N1 的基準，疊在 Gate N0（PR #119，分支 `cursor/nutrition-coverage-n0-053e`）之上。程式先對菜色身份表做精確別名，再跑 `canonicalizeFood`、`resolveNutritionMatch`、`calculateMealNutrition`。沒有呼叫 USDA、OpenAI，也沒有讀正式環境餐點。Vision 不參與，也不提供 kcal。這一步沒有新增營養 profile。",
+    "",
+    "Gate N0 的對照：安全覆蓋 1/65（1.5%），錯誤高信心配對 2/8（25.0%）。當時還沒有分開的身份覆蓋；52 道菜裡只有少數落到既有 canonical，其餘是通用桶。",
     "",
     "65 個名稱來自營養目錄研究附錄 A（Draft PR #117，commit `c9d4a1a8`）。碟上的菜是 `identityLevel: \"dish\"`，單獨食物是 `\"ingredient\"`。`displayName` 與 `normalizedName` 都是該中文名，份量 100 g。",
     "",
@@ -453,19 +524,23 @@ export function formatCoverageBaselineMarkdown(report: NutritionCoverageReport):
     "",
     "**餐覆蓋**把每一個名稱單獨當成一餐。`complete` 是該項有計入餐總數。`none` 是沒有任何項目計入。`insufficient` 是有計入但低於 75%。`partial` 是至少 75% 但不是全部。單項餐只會是 `complete` 或 `none`。",
     "",
-    "**原因碼**只在該項沒有 `complete` 時出現，欄位是可選的 `coverageReason`。使用者看到的句子仍是 `reasons`，總數與已儲存餐點的必填形狀不變。舊配對沒有這個欄位，仍可通過 `nutritionMatchResponseSchema`。",
+    "**身份覆蓋**是 65 個名稱裡，精確對上菜色身份表（有 `dishId`）的項數。**profile 覆蓋**是這些身份裡已經接上既有營養 profile 的項數。知道菜名而沒有 profile 的項目維持不計入。",
+    "",
+    "**原因碼**只在該項沒有 `complete` 時出現，欄位是可選的 `coverageReason`。使用者看到的句子仍是 `reasons`，總數與已儲存餐點的必填形狀不變。舊配對沒有這個欄位，仍可通過 `nutritionMatchResponseSchema`。新代碼也是可選的，舊紀錄不必補上。",
     "",
     "| 原因碼 | 意義 |",
     "|---|---|",
     "| `UNKNOWN_DISH` | 組合菜身份只落到通用桶（`unknown`、`mixed-dish`、`rice-dish`、`noodle-dish`、`bread-dish`），目錄沒有這道菜的 profile，也不拆成單一食材。 |",
-    "| `COMPOSITE_UNSUPPORTED` | 已經辨成特定組合菜 canonical，但沒有整道菜 profile，因此拒絕退回單一食材。 |",
-    "| `TYPE_MISMATCH` | 單位沒有可靠克重換算，或候選 profile 與菜式／食材層級不相容。 |",
-    "| `AMBIGUOUS_MATCH` | 兩個不同 canonical 的分數差距小於 12，為免假裝精準而不配對。 |",
+    "| `DISH_KNOWN_NO_PROFILE` | 菜色身份表已經認得這道菜，但還沒有營養 profile，因此不計算。 |",
+    "| `COMPOSITE_UNSUPPORTED` | 已經辨成特定組合菜 canonical，但該 canonical 不在身份表的「已知但無 profile」路徑，而且沒有整道菜 profile。 |",
+    "| `TYPE_MISMATCH` | 候選 profile 與菜式／食材層級不相容。 |",
+    "| `UNIT_CONVERSION_MISSING` | 已經配到食物，但這個單位沒有可靠的克重換算。 |",
+    "| `AMBIGUOUS_MATCH` | 兩個不同身份或 canonical 的差距太小，或中英文指向互不從屬的菜，為免假裝精準而不配對。 |",
     "| `INSUFFICIENT_COVERAGE` | 非組合菜沒有足夠參考資料，或只有低信心的粗略配對，因此不計入總數。 |",
     "",
     "**安全覆蓋率（Safe Coverage Rate）** = 基準裡餐覆蓋為 `complete`、而且不是錯誤高信心配對的項數 / 65。錯誤高信心配對指：`identityLevel` 為 dish，卻計入一個非組合菜 profile。中文名樣本裡的「未計入」不是錯誤高信心。",
     "",
-    "**錯誤高信心配對率（False Confident Match Rate）** = 負向探針裡，違反該探針規則的項數 / 探針數。仍未修復的英文前綴撞名計入分子。植物奶與沙律探針若已符合規則，只留在分母。探針不混進 65 個中文名的覆蓋計數。",
+    "**錯誤高信心配對率（False Confident Match Rate）** = 負向探針裡，違反該探針規則的項數 / 探針數。探針不混進 65 個中文名的覆蓋計數。",
     "",
     "## 基準結果",
     "",
@@ -482,6 +557,10 @@ export function formatCoverageBaselineMarkdown(report: NutritionCoverageReport):
     `complete 的名稱：${completeNames.join("、") || "（無）"}。`,
     "",
     `安全覆蓋率：${report.safeCoverageRate.numerator}/${report.safeCoverageRate.denominator}（${report.safeCoverageRate.percent}）。`,
+    "",
+    `身份覆蓋：${report.identityCoverage.numerator}/${report.identityCoverage.denominator}（${report.identityCoverage.percent}）。其中附錄 A 的菜色有身份的是 ${knownDishes.length}/${report.dishCount}。`,
+    "",
+    `profile 覆蓋：${report.profileCoverage.numerator}/${report.profileCoverage.denominator}（${report.profileCoverage.percent}）。`,
     "",
     "| 原因碼 | 數量 |",
     "|---|---:|",
@@ -501,7 +580,9 @@ export function formatCoverageBaselineMarkdown(report: NutritionCoverageReport):
     "",
     "### 已知錯誤高信心",
     "",
-    ...knownFalse.map((probe) => `- \`${probe.id}\`：${probe.displayName} / \`${probe.normalizedName}\` 現時計入 \`${probe.profileId ?? "—"}\`。${probe.note}`),
+    ...(knownFalse.length > 0
+      ? knownFalse.map((probe) => `- \`${probe.id}\`：${probe.displayName} / \`${probe.normalizedName}\` 現時計入 \`${probe.profileId ?? "—"}\`。${probe.note}`)
+      : ["- （無）"]),
     "",
     "### 已通過的探針",
     "",
