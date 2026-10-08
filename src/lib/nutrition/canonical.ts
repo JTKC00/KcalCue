@@ -147,6 +147,25 @@ const IDENTITY_RULES: TermRule[] = [
   { keys: ["apple", "蘋果"], canonicalName: "apple", category: "fruit", kind: "specific_food" },
 ];
 
+const SALAD_WORD = /(?:^|\s)salads?(?:$|\s)|沙律|沙拉/;
+const SALAD_BOWL = /(?:^|\s)salad bowl(?:$|\s)|沙律碗|沙拉碗/;
+const SALAD_EXCLUSION =
+  /banana|apple|mango|grape|fruit|potato|pasta|jelly|香蕉|蘋果|芒果|葡萄|水果|雜果|薯|意粉|啫喱|果沙律|果沙拉/;
+const SALAD_COMPONENT =
+  /vegetables?|veggies?|greens?|protein|chicken|salmon|beef|pork|tofu|tuna|shrimp|prawn|grilled|roasted|雜菜|蔬菜|生菜|青菜|蛋白質|蛋白|雞胸|雞腿|雞扒|雞肉|三文魚|牛肉|豬肉|豆腐|吞拿|蝦|燒烤|烤/;
+
+/**
+ * A named protein or vegetable salad can use the curated wide-range profile.
+ * The dish name itself must carry the evidence. Visible ingredients are often
+ * guesses and must not promote an otherwise ambiguous salad. Fruit, potato and
+ * pasta salads stay unresolved so they do not inherit this density.
+ */
+function isProteinVegetableSalad(food: FoodEstimate): boolean {
+  const name = normalizeFoodName(`${food.displayName} ${food.normalizedName}`);
+  if (!SALAD_WORD.test(name) || SALAD_EXCLUSION.test(name)) return false;
+  return SALAD_BOWL.test(name) || SALAD_COMPONENT.test(name);
+}
+
 const COMPOSITE_CANONICALS = new Set([
   "risotto",
   "baked-rice",
@@ -180,6 +199,7 @@ const COMPOSITE_CANONICALS = new Set([
   "noodle-dish",
   "bread-dish",
   "mixed-dish",
+  "protein-vegetable-salad",
 ]);
 
 const SIMPLE_RICE_MODIFIERS = [
@@ -540,6 +560,16 @@ export function canonicalizeFood(food: FoodEstimate): CanonicalFoodIdentity {
   }
 
   const identityHits = collectIdentityHits(text);
+  if (isProteinVegetableSalad(food) && !hasNamedDish(identityHits)) {
+    identityHits.push({
+      keys: [],
+      matchedKey: "protein vegetable salad",
+      canonicalName: "protein-vegetable-salad",
+      category: "mixed",
+      kind: "named_dish",
+      qualifiers: ["composite"],
+    });
+  }
   const rankedHits = rankIdentityHits(identityHits);
 
   const hasTomato = identityHits.some((rule) => rule.canonicalName === "tomato");

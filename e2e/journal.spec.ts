@@ -1594,3 +1594,101 @@ test.describe("Today across local midnight", () => {
     expect(backend.records.size).toBe(0);
   });
 });
+
+test("a recognised protein salad photo shows a kcal range instead of an empty total", async ({ page, context }) => {
+  const backend = cloud();
+  await backend.install(context);
+  await page.route("**/api/analyze", (route) => route.fulfill({
+    json: {
+      mode: "live",
+      analysis: {
+        analysisStatus: "success",
+        foods: [{
+          displayName: "燒烤蛋白質雜菜沙律碗",
+          normalizedName: "grilled protein mixed vegetable salad bowl",
+          identityLevel: "dish",
+          portionMin: 450,
+          portionMax: 700,
+          unit: "g",
+          recognitionConfidence: 0.9,
+          portionConfidence: 0.7,
+          uncertaintyReasons: ["醬汁和肉量未能確定。"],
+          preparationMethod: "燒烤",
+          visibleIngredients: ["grilled chicken", "mixed vegetables"],
+        }],
+        uncertaintyReasons: ["醬汁和肉量未能確定。"],
+        visibleEvidence: ["一碗雜菜和烤肉"],
+        estimatedInformation: ["份量約 450–700 克"],
+        unknownInformation: ["醬汁分量"],
+      },
+    },
+  }));
+  await page.goto("/");
+  await login(page);
+  await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
+  const png = await sharp({
+    create: { width: 80, height: 60, channels: 3, background: "green" },
+  }).png().toBuffer();
+  await page.locator('input[type="file"]').nth(1).setInputFiles({
+    name: "salad-bowl.png", mimeType: "image/png", buffer: png,
+  });
+  await page.getByRole("button", { name: "開始分析", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "約 270–1120 kcal", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "暫未能計算", exact: true })).toHaveCount(0);
+  await expect(page.getByText("未有足夠資料", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("combobox", { name: "食物名稱", exact: true })).toHaveValue("燒烤蛋白質雜菜沙律碗");
+});
+
+async function expectFieldsInsideCard(page: Page) {
+  const card = page.locator(".meal-metadata");
+  const time = page.getByLabel("時間", { exact: true });
+  const mealType = page.getByRole("combobox", { name: "餐次", exact: true });
+  await expect(time).toBeVisible();
+  await expect(mealType).toBeVisible();
+  const cardBox = await card.boundingBox();
+  const timeBox = await time.boundingBox();
+  const mealBox = await mealType.boundingBox();
+  expect(cardBox && timeBox && mealBox).toBeTruthy();
+  expect(timeBox!.x).toBeGreaterThanOrEqual(cardBox!.x - 1);
+  expect(timeBox!.x + timeBox!.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width + 1);
+  expect(mealBox!.x).toBeGreaterThanOrEqual(cardBox!.x - 1);
+  expect(mealBox!.x + mealBox!.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width + 1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+}
+
+test("edit meal time and meal type stay inside the card at 360 and 375px", async ({ browser }, testInfo) => {
+  const context = await browser.newContext({
+    viewport: { width: 375, height: 812 },
+    locale: "en-US",
+  });
+  const page = await context.newPage();
+  const backend = cloud();
+  await backend.install(context);
+  try {
+    await page.goto("/");
+    await login(page);
+    await rice(page);
+    await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+    await expect.poll(() => backend.records.size).toBe(1);
+    await page.getByRole("button", { name: "歷史", exact: true }).click();
+    await page.getByRole("button", { name: "查看／修正", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "修正餐點", exact: true })).toBeVisible();
+    await page.getByLabel("時間", { exact: true }).fill("10:25");
+    await expectFieldsInsideCard(page);
+    await page.screenshot({
+      path: testInfo.outputPath("edit-meal-375.png"),
+      fullPage: true,
+    });
+
+    await page.setViewportSize({ width: 360, height: 800 });
+    await expectFieldsInsideCard(page);
+
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await expect.poll(async () => page.locator(".metadata-grid").evaluate((element) =>
+      getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean).length,
+    )).toBe(3);
+    await expectFieldsInsideCard(page);
+  } finally {
+    await context.close();
+  }
+});

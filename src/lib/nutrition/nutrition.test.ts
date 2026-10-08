@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { FoodEstimate } from "@/lib/domain/food-analysis";
+import type { FoodEstimate, ObservedFood } from "@/lib/domain/food-analysis";
 import {
   calculateFoodNutrition,
   calculateMealNutrition,
@@ -395,5 +395,97 @@ describe("nutrition providers and service", () => {
     ]);
     expect(result.coverage).toBe("complete");
     expect(result.foods[0]?.profile?.id).toBe("banana");
+  });
+});
+
+describe("recognised protein vegetable salad estimation", () => {
+  const provider = new LocalNutritionProvider();
+  const service = new NutritionService(provider);
+
+  it("turns the production salad-bowl identity into a wide kcal range", () => {
+    const food = makeFood({
+      displayName: "燒烤蛋白質雜菜沙律碗",
+      normalizedName: "grilled protein mixed vegetable salad bowl",
+      identityLevel: "dish",
+      portionMin: 450,
+      portionMax: 700,
+      preparationMethod: "燒烤",
+      visibleIngredients: ["grilled chicken", "mixed vegetables", "dressing"],
+      recognitionConfidence: 0.9,
+      portionConfidence: 0.7,
+    });
+    const match = provider.resolve(food);
+    const meal = service.calculateMeal([food]);
+
+    expect(canonicalizeFood(food).canonicalName).toBe("protein-vegetable-salad");
+    expect(match.includedInTotal).toBe(true);
+    expect(match.profile?.id).toBe("protein-vegetable-salad");
+    expect(match.profile?.id).not.toBe("chicken-breast-cooked");
+    expect(match.profile?.id).not.toBe("mixed-vegetables-stir-fried");
+    expect(match.profile?.nutrientsPer100g.calories.min).toBeLessThan(
+      match.profile?.nutrientsPer100g.calories.max ?? 0,
+    );
+    expect(meal.coverage).toBe("complete");
+    expect(mealShowsTotal(meal.coverage)).toBe(true);
+    expect(meal.totals.calories).toEqual({ min: 270, max: 1120 });
+    expect(meal.totals.protein).toEqual({ min: 22.5, max: 105 });
+    expect(meal.totals.carbs).toEqual({ min: 13.5, max: 70 });
+    expect(meal.totals.fat).toEqual({ min: 6.75, max: 63 });
+    expect(service.calculateMeal([food]).totals).toEqual(meal.totals);
+  });
+
+  it("does not let guessed visible ingredients promote an ambiguous salad", () => {
+    const food = makeFood({
+      displayName: "混合沙律",
+      normalizedName: "mixed salad",
+      identityLevel: "dish",
+      visibleIngredients: ["rice", "chicken"],
+    });
+    const meal = service.calculateMeal([food]);
+
+    expect(canonicalizeFood(food).canonicalName).toBe("mixed-dish");
+    expect(meal.coverage).toBe("none");
+    expect(meal.foods[0]?.ranges).toBeNull();
+    expect(mealShowsTotal(meal.coverage)).toBe(false);
+  });
+
+  it.each([
+    ["沙律", "salad", "ingredient", "unknown"],
+    ["水果沙律", "fruit salad", "dish", "mixed-dish"],
+    ["香蕉沙律", "banana salad", "dish", "mixed-dish"],
+    ["薯仔沙律", "potato salad", "dish", "mixed-dish"],
+  ] as const)("keeps %s unresolved", (displayName, normalizedName, identityLevel, canonicalName) => {
+    const food = makeFood({ displayName, normalizedName, identityLevel });
+    const meal = service.calculateMeal([food]);
+
+    expect(canonicalizeFood(food).canonicalName).toBe(canonicalName);
+    expect(meal.coverage).toBe("none");
+    expect(meal.totals.calories).toEqual({ min: 0, max: 0 });
+    expect(meal.foods[0]?.profile?.id).not.toBe("protein-vegetable-salad");
+  });
+
+  it("does not invent a total when the salad portion is unknown", () => {
+    const food: ObservedFood = {
+      ...makeFood({
+        displayName: "燒烤蛋白質雜菜沙律碗",
+        normalizedName: "grilled protein mixed vegetable salad bowl",
+        identityLevel: "dish",
+      }),
+      portionMin: null,
+      portionMax: null,
+    };
+    const meal = service.calculateMeal([food]);
+
+    expect(provider.resolve({ ...food, portionMin: 450, portionMax: 700 }).includedInTotal).toBe(true);
+    expect(meal.coverage).toBe("none");
+    expect(meal.foods[0]?.ranges).toBeNull();
+    expect(meal.foods[0]?.unavailableReason).toContain("個人食用份量未知");
+  });
+
+  it("does not calculate a meal the photo could not identify", () => {
+    const meal = service.calculateMeal([]);
+    expect(meal.coverage).toBe("none");
+    expect(meal.totalCount).toBe(0);
+    expect(mealShowsTotal(meal.coverage)).toBe(false);
   });
 });
