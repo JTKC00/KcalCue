@@ -68,6 +68,21 @@ function resolveRequest(foods: ReturnType<typeof remoteFood>[], signal?: AbortSi
 }
 
 describe("POST /api/nutrition/resolve", () => {
+  it.each(["oat", "soy"] as const)("returns a local ml reference for a user %s choice without USDA network lookup", async (choice) => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await POST(new Request("http://localhost/api/nutrition/resolve", {
+      method: "POST", body: JSON.stringify({ foods: [{ ...banana, displayName: "牛奶", normalizedName: "milk", identityLevel: "dish", portionMin: 250, portionMax: 250, unit: "ml", entrySource: "photo", userMilkTypeChoice: choice }] }),
+    }));
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.matches[0].includedInTotal).toBe(true);
+    expect(body.matches[0].profile.id).toBe(choice === "oat" ? "oat-milk" : "unsweetened-soy-milk");
+    expect(body.matches[0].profile.gramsPerUnit.ml).toBeGreaterThan(0);
+    expect(body.matches[0].profile.nutrientsPer100g.calories.min).toBeGreaterThan(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(authenticated).mockResolvedValue({

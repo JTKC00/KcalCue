@@ -281,6 +281,35 @@ export function resolveNutritionMatch(
   const subject = milkResolveSubject(food);
   const explicitChoice = food.userMilkTypeChoice != null;
   const identity = canonicalizeFood(subject);
+  // Only a user's chooser action selects these reference entries. Model
+  // plant-milk guesses retain the existing negative dairy/USDA guards.
+  if (food.userMilkTypeChoice === "oat" || food.userMilkTypeChoice === "soy") {
+    const profileId = food.userMilkTypeChoice === "oat" ? "oat-milk" : "unsweetened-soy-milk";
+    const profile = catalog.find(item => item.id === profileId);
+    const selectedIdentity: CanonicalFoodIdentity = {
+      canonicalName: food.userMilkTypeChoice === "oat" ? "oat-milk" : "soy-milk",
+      category: "dairy",
+      preparation: "unknown",
+      qualifiers: [],
+    };
+    if (!profile) {
+      return unmatched({
+        profile: null, confidence: "low", matchType: "unresolved",
+        reasons: ["未有足夠可靠的營養參考資料可以配對。"], identity: selectedIdentity,
+      }, "INSUFFICIENT_COVERAGE");
+    }
+    const factor = profile.gramsPerUnit[subject.unit];
+    if (typeof factor !== "number" || !Number.isFinite(factor) || factor <= 0) {
+      return unmatched({
+        profile: null, confidence: "low", matchType: "unresolved",
+        reasons: [`未有 ${subject.unit} 的可靠克重換算，因此不納入總數。`], identity: selectedIdentity,
+      }, "UNIT_CONVERSION_MISSING");
+    }
+    return {
+      profile, confidence: "medium", matchType: "exact_canonical",
+      reasons: [profile.densityBasis], identity: selectedIdentity, includedInTotal: true,
+    };
+  }
   if (!explicitChoice && contradictoryDairyMilkLabel(food, mealContext)) {
     return unmatched({
       profile: null,
@@ -349,7 +378,10 @@ export function resolveNutritionMatch(
   }
 
   const eligibleCatalog = catalog.filter(
-    (profile) => !profileBlockedByNegativeRule(subject, identity, profile),
+    // Plant references are selected by the explicit chooser branch above;
+    // their names alone must not relax existing uncertain-photo matching.
+    (profile) => profile.id !== "oat-milk" && profile.id !== "unsweetened-soy-milk" &&
+      !profileBlockedByNegativeRule(subject, identity, profile),
   );
   const ranked = eligibleCatalog
     .map((profile) => ({

@@ -2109,3 +2109,77 @@ test("edit meal time and meal type stay inside the card at 360 and 375px", async
     await context.close();
   }
 });
+
+for (const width of [360, 375]) {
+  for (const choice of [
+    { id: "oat", label: "燕麥奶", profileId: "oat-milk", range: "115–120" },
+    { id: "soy", label: "豆漿", profileId: "unsweetened-soy-milk", range: "80–85" },
+  ]) {
+    test(`QA124 ${choice.id} 250 ml counts and survives a saved edit at ${width}px`, async ({ page, context }, testInfo) => {
+      await page.setViewportSize({ width, height: 812 });
+      const backend = cloud();
+      await backend.install(context);
+      await page.route("**/api/nutrition/resolve", route => route.fulfill({ status: 500, json: { error: { code: "unexpected_nutrition" } } }));
+      await page.route("**/api/analyze", route => route.fulfill({ json: {
+        mode: "live", analysis: productionGlassMilkUnknownAnalysis,
+      } }));
+      await page.goto("/");
+      await login(page);
+      await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
+      const png = await sharp({ create: { width: 80, height: 60, channels: 3, background: "white" } }).png().toBuffer();
+      await page.locator('input[type="file"]').nth(1).setInputFiles({ name: "milk.png", mimeType: "image/png", buffer: png });
+      await page.getByRole("button", { name: "開始分析", exact: true }).click();
+      for (const label of ["全脂牛奶", "低脂牛奶", "燕麥奶", "豆漿", "其他"]) {
+        await expect(page.getByRole("button", { name: label, exact: true })).toBeVisible();
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      const maximum = page.getByRole("spinbutton", { name: "最多份量", exact: true });
+      await maximum.fill("250");
+      await maximum.press("Tab");
+      await page.getByRole("button", { name: choice.label, exact: true }).click();
+      await expect(page.getByRole("heading", { name: `約 ${choice.range} kcal`, exact: true })).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath(`QA124-${choice.id}-${width}.png`), fullPage: true });
+      await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+      await expect.poll(() => backend.records.size).toBe(1);
+      const readItem = () => ([...backend.records.values()][0].items as Array<{
+        userMilkTypeChoice?: string;
+        nutritionMatch?: { includedInTotal?: boolean; profile?: { id?: string } };
+      }>)[0];
+      expect(readItem().userMilkTypeChoice).toBe(choice.id);
+      expect(readItem().nutritionMatch?.includedInTotal).toBe(true);
+      expect(readItem().nutritionMatch?.profile?.id).toBe(choice.profileId);
+      await page.getByRole("button", { name: "歷史", exact: true }).click();
+      await page.getByRole("button", { name: "查看／修正", exact: true }).click();
+      await expect(page.getByRole("heading", { name: `約 ${choice.range} kcal`, exact: true })).toBeVisible();
+      await page.getByLabel("時間", { exact: true }).fill("10:25");
+      await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+      await expect.poll(() => backend.saves.length).toBe(2);
+      expect(readItem().userMilkTypeChoice).toBe(choice.id);
+      expect(readItem().nutritionMatch?.includedInTotal).toBe(true);
+      expect(readItem().nutritionMatch?.profile?.id).toBe(choice.profileId);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    });
+  }
+}
+
+test("QA124 server milk notices survive client parsing and render beside the split action", async ({ page, context }) => {
+  const backend = cloud();
+  await backend.install(context);
+  const plantNotice = "包裝顯示植物奶，請核對種類及份量。";
+  const duplicateNotice = "已合併重複嘅牛奶項目，如果係兩杯可以再加返";
+  await page.route("**/api/analyze", route => route.fulfill({ json: {
+    mode: "live", analysis: {
+      ...productionGlassMilkUnknownAnalysis,
+      foods: [{ ...productionGlassMilkUnknownAnalysis.foods[0], otherMilkNotice: plantNotice, duplicateMilkNotice: duplicateNotice }],
+    },
+  } }));
+  await page.goto("/");
+  await login(page);
+  await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
+  const png = await sharp({ create: { width: 80, height: 60, channels: 3, background: "white" } }).png().toBuffer();
+  await page.locator('input[type="file"]').nth(1).setInputFiles({ name: "carton.png", mimeType: "image/png", buffer: png });
+  await page.getByRole("button", { name: "開始分析", exact: true }).click();
+  await expect(page.locator(".food-card").getByText(plantNotice, { exact: true })).toBeVisible();
+  await expect(page.locator(".food-card").getByText(duplicateNotice, { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "新增食物", exact: true })).toBeVisible();
+});

@@ -25,6 +25,8 @@ const foodFields = {
    * Kept off uncertaintyReasons so it does not consume one of the eight slots.
    */
   duplicateMilkNotice: z.string().trim().min(1).max(180).optional(),
+  /** Server-generated plant-milk notice, also retained in client and saved analysis. */
+  otherMilkNotice: z.string().trim().min(1).max(180).optional(),
 };
 const positivePortionSchema = z.number().positive().max(5000);
 

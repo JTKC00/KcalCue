@@ -5,18 +5,15 @@ export const MERGED_DUPLICATE_MILK_NOTICE =
   "已合併重複嘅牛奶項目，如果係兩杯可以再加返";
 
 const SEPARATE_CONTAINER =
-  /另一杯|另一盒|另一瓶|第二杯|第二盒|兩杯|兩盒|兩瓶|兩個杯|旁邊|another glass|another cup|second glass|two glasses|two cups|two cartons/;
-
+  /另一杯|另一盒|另一瓶|第二杯|第二盒|兩杯|兩盒|兩瓶|兩個杯|兩隻杯|兩個玻璃杯|旁邊|前方|後方|前面|後面|another glass|another cup|second glass|two glasses|two cups|two cartons|front|back|separate|distinct/;
+const SAME_SERVING =
+  /同一(?:紙盒|盒|瓶|樽|隻杯|杯|玻璃杯|份|容器)|只有一(?:個紙盒|隻杯|個杯)|same (?:carton|bottle|glass|cup|serving|container)|一(?:盒|杯)飲品被(?:拆|分)成兩項/;
+const UNCERTAIN_SAME_SERVING =
+  /未能|未知|未確定|不確定|無法|未確認|可能|是否|不是|並非|未必|\b(?:not|maybe|might|may|whether|unclear|cannot|could|unsure)\b/;
 const CARTON = /紙盒|紙包|利樂|carton|一盒|盒裝/;
 const BOTTLE = /瓶子|玻璃樽|一瓶|一樽|瓶裝|(?:^|\s)bottle(?:$|\s)/;
+const GLASS = /玻璃杯|杯裝|一杯|(?:^|\s)(?:glass|cup)(?:$|\s)/;
 const WRAPPED = /包裝/;
-
-function visualEvidenceKey(food: ObservedFood): string {
-  const notes = normalizeFoodName(food.notes ?? "");
-  const preparation = normalizeFoodName(food.preparationMethod ?? "");
-  const ingredients = [...(food.visibleIngredients ?? [])].map((item) => normalizeFoodName(item)).sort().join("|");
-  return `${notes}\n${preparation}\n${ingredients}`;
-}
 
 function withMergeNotice(food: ObservedFood): ObservedFood {
   if (food.duplicateMilkNotice === MERGED_DUPLICATE_MILK_NOTICE) return food;
@@ -34,18 +31,19 @@ function milkRowText(food: ObservedFood): string {
   ].join(" ");
 }
 
-function containerKinds(food: ObservedFood): Set<"carton" | "bottle" | "package"> {
+function containerKinds(food: ObservedFood): Set<"carton" | "bottle" | "glass" | "package"> {
   const text = normalizeFoodName(milkRowText(food));
-  const kinds = new Set<"carton" | "bottle" | "package">();
+  const kinds = new Set<"carton" | "bottle" | "glass" | "package">();
   if (CARTON.test(text)) kinds.add("carton");
   if (BOTTLE.test(text)) kinds.add("bottle");
   if (WRAPPED.test(text)) kinds.add("package");
+  if (GLASS.test(text)) kinds.add("glass");
   return kinds;
 }
 
 type MilkFamily = "oat" | "soy" | "almond" | "coconut" | "dairy" | "generic";
 
-function isMergeableMilk(food: ObservedFood): boolean {
+export function isMilkDrink(food: ObservedFood): boolean {
   if (containerMilkNameKey(food)) return true;
   const text = normalizeFoodName(`${food.displayName} ${food.normalizedName}`);
   if (/粥|麥片|麦片|布甸|布丁|奶茶|(?:^|\s)(?:tea|cereal|porridge|pudding)(?:$|\s)/.test(text)) return false;
@@ -80,8 +78,8 @@ function compatibleFamilies(foods: readonly ObservedFood[]): boolean {
   return specific.size <= 1;
 }
 
-function mentionsSeparateContainers(analysis: FoodAnalysis, foods: readonly ObservedFood[]): boolean {
-  const blob = normalizeFoodName(
+function servingEvidence(analysis: FoodAnalysis, foods: readonly ObservedFood[]): string {
+  return normalizeFoodName(
     [
       ...foods.map(milkRowText),
       ...analysis.visibleEvidence,
@@ -90,7 +88,21 @@ function mentionsSeparateContainers(analysis: FoodAnalysis, foods: readonly Obse
       ...analysis.estimatedInformation,
     ].join(" "),
   );
-  return SEPARATE_CONTAINER.test(blob);
+}
+
+/** A question or negation about the same serving is not an affirmative observation. */
+function explicitlySameServing(analysis: FoodAnalysis, foods: readonly ObservedFood[]): boolean {
+  const statements = [
+    ...foods.flatMap(food => [
+      food.displayName, food.normalizedName, food.notes ?? "",
+      food.preparationMethod ?? "", ...(food.visibleIngredients ?? []),
+      ...food.uncertaintyReasons,
+    ]),
+    ...analysis.visibleEvidence,
+    ...analysis.uncertaintyReasons,
+    ...analysis.estimatedInformation,
+  ].map(normalizeFoodName).filter(text => SAME_SERVING.test(text));
+  return statements.length > 0 && statements.every(text => !UNCERTAIN_SAME_SERVING.test(text));
 }
 
 /**
@@ -109,46 +121,17 @@ function pickKept(foods: readonly ObservedFood[]): ObservedFood {
   return foods.reduce((kept, food) => (specificity(food) > specificity(kept) ? food : kept));
 }
 
-/**
- * One carton recognised as several milk rows becomes one item.
- * Name variants and a generic row plus one specific family still merge when
- * each of those milk rows names the same container. Portions are not added.
- * The notice is its own field, not an uncertainty reason.
- * Identical copies with the same visible notes still merge when there is
- * no package word. A different note such as 旁邊另一杯 stays separate.
- */
-function mergeIdenticalKeys(analysis: FoodAnalysis): FoodAnalysis {
-  const seen = new Map<string, number>();
-  const foods: ObservedFood[] = [];
-  let removed = false;
-  for (const food of analysis.foods) {
-    const nameKey = containerMilkNameKey(food);
-    if (!nameKey) {
-      foods.push(food);
-      continue;
-    }
-    const key = `${nameKey}\n${visualEvidenceKey(food)}`;
-    const keptAt = seen.get(key);
-    if (keptAt !== undefined) {
-      removed = true;
-      foods[keptAt] = withMergeNotice(foods[keptAt]);
-      continue;
-    }
-    seen.set(key, foods.length);
-    foods.push(food);
-  }
-  return removed ? { ...analysis, foods } : analysis;
-}
-
+/** Merge only when the model explicitly describes the same serving. */
 export function dedupeIdenticalContainerMilk(analysis: FoodAnalysis): FoodAnalysis {
   if (!analysis || !Array.isArray(analysis.foods)) return analysis;
-  const milkIndexes = analysis.foods.flatMap((food, index) => (isMergeableMilk(food) ? [index] : []));
+  const milkIndexes = analysis.foods.flatMap((food, index) => (isMilkDrink(food) ? [index] : []));
   const milkFoods = milkIndexes.map((index) => analysis.foods[index]);
   if (
     milkIndexes.length >= 2 &&
     compatibleFamilies(milkFoods) &&
     sameMilkContainer(milkFoods) &&
-    !mentionsSeparateContainers(analysis, milkFoods)
+    explicitlySameServing(analysis, milkFoods) &&
+    !SEPARATE_CONTAINER.test(servingEvidence(analysis, milkFoods))
   ) {
     const drop = new Set(milkIndexes);
     const preferred = withMergeNotice(pickKept(milkFoods));
@@ -166,5 +149,26 @@ export function dedupeIdenticalContainerMilk(analysis: FoodAnalysis): FoodAnalys
     }
     return { ...analysis, foods };
   }
-  return mergeIdenticalKeys(analysis);
+  // One model row may already have swallowed a second container. Do not
+  // fabricate a split or portions; surface the existing add/split action.
+  if (milkFoods.length === 1) {
+    const evidence = normalizeFoodName([
+      ...milkFoods.flatMap(food => [
+        food.displayName, food.normalizedName, food.notes ?? "",
+        food.preparationMethod ?? "", ...(food.visibleIngredients ?? []),
+      ]),
+      ...analysis.visibleEvidence,
+    ].join(" "));
+    const cartonAndGlass = CARTON.test(evidence) && GLASS.test(evidence);
+    const multipleGlasses = /兩杯|兩隻杯|兩個杯|兩個玻璃杯|two glasses|two cups/.test(evidence) ||
+      (/前方|前面|front/.test(evidence) && /後方|後面|back/.test(evidence));
+    if ((cartonAndGlass || multipleGlasses) && !explicitlySameServing(analysis, milkFoods)) {
+      return {
+        ...analysis,
+        foods: analysis.foods.map((food, index) =>
+          index === milkIndexes[0] ? withMergeNotice(food) : food),
+      };
+    }
+  }
+  return analysis;
 }

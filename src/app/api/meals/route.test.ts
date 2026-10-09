@@ -584,6 +584,18 @@ describe("POST /api/meals bounded input", () => {
     expect(body.record.items[0].nutritionMatch.reasons[0]).toBe(PHOTO_GENERIC_MILK_CONFIRMATION_REASON);
   });
 
+  it.each(["oat", "soy"] as const)("saves a %s chooser selection with its own included reference", async (choice) => {
+    const response = await POST(jsonRequest(JSON.stringify({
+      ...meal, mode: "live", analysis: productionGlassMilkUnknownAnalysis,
+      items: [{ ...productionGlassMilkUnknownAnalysis.foods[0], id: "plant-choice", portionMin: 250, portionMax: 250, originalPortionMin: 250, originalPortionMax: 250, entrySource: "photo", userMilkTypeChoice: choice }],
+    })));
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.record.items[0].userMilkTypeChoice).toBe(choice);
+    expect(body.record.items[0].nutritionMatch.profile.id).toBe(choice === "oat" ? "oat-milk" : "unsweetened-soy-milk");
+    expect(body.record.items[0].nutritionMatch.includedInTotal).toBe(true);
+  });
+
   it("counts an explicit 全脂牛奶 choice when the model filed the drink as a dish", async () => {
     clearUsdaCache();
     vi.mocked(getNutritionApiKey).mockReturnValue("test-only-key");

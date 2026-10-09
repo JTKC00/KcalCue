@@ -22,8 +22,6 @@ export interface EditableFoodItem extends ObservedFood {
    * still treats the row as that choice. A model name is not this flag.
    */
   userMilkTypeChoice?: UserMilkTypeChoice;
-  /** 「其他」 note. Not an uncertainty reason, so it does not use one of the eight slots. */
-  otherMilkNotice?: string;
 }
 
 export function hasKnownPortion<T extends ObservedFood>(food: T): food is T & FoodEstimate {

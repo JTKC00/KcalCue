@@ -428,6 +428,41 @@ const baseNutritionProfiles: NutritionProfile[] = [
     densityBasis: "全脂奶公開單點值。",
   },
   {
+    id: "unsweetened-soy-milk",
+    displayName: "無糖豆漿",
+    canonicalName: "soy-milk",
+    category: "dairy",
+    preparations: ["raw", "unknown"],
+    aliases: ["unsweetened soy milk"],
+    composite: false,
+    // USDA FDC 175215, SR Legacy: Soymilk (all flavors), unsweetened,
+    // with added calcium, vitamins A and D. Retrieved 2026-10-09.
+    nutrientsPer100g: pointMacros(33, 2.86, 1.74, 1.61),
+    // FDC household portion: 1 US cup = 243 g; 1 US cup = 236.5882365 ml.
+    // Volume convention: NIST SI Guide, Appendix B.9 (US customary cup).
+    gramsPerUnit: { g: 1, ml: 243 / 236.5882365, cup: 243 },
+    source: usdaSource("175215", "USDA SR Legacy：無糖豆漿"),
+    dataNotice: LOCAL_DATA_NOTICE,
+    densityBasis: "無糖豆漿公開參考值；加糖或調味版本可能不同。",
+  },
+  {
+    id: "oat-milk",
+    displayName: "燕麥奶參考",
+    canonicalName: "oat-milk",
+    category: "dairy",
+    preparations: ["raw", "unknown"],
+    aliases: [],
+    composite: false,
+    // USDA FDC 2705412, Survey (FNDDS): Oat milk. Retrieved 2026-10-09.
+    // This generic survey entry is not an unsweetened product label.
+    nutrientsPer100g: pointMacros(45, 0.66, 5.37, 2.33),
+    // FDC household portions: 1 US cup = 244 g, 1 fl oz = 30.5 g.
+    gramsPerUnit: { g: 1, ml: 244 / 236.5882365, cup: 244 },
+    source: usdaSource("2705412", "USDA FNDDS：燕麥奶"),
+    dataNotice: LOCAL_DATA_NOTICE,
+    densityBasis: "燕麥奶通用參考值；品牌、糖及用油量可能不同。",
+  },
+  {
     id: "french-fries",
     displayName: "薯條",
     canonicalName: "french-fries",

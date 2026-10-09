@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 
+import { PLANT_MILK_PHOTO_NOTICE } from "@/lib/domain/photo-milk-analysis";
+
 import { confidenceCopy, copy, unitCopy } from "@/content/zh-HK";
 import {
   portionUnits,
@@ -102,8 +104,10 @@ export function FoodEditor({
   const choseOther = item.userMilkTypeChoice === "other"
     || item.otherMilkNotice === PHOTO_MILK_OTHER_REASON
     || item.uncertaintyReasons.includes(PHOTO_MILK_OTHER_REASON);
-  const confirmMilk = photoGenericMilkNeedsConfirmation(item) && !choseOther;
-  const mergedMilk = item.duplicateMilkNotice === MERGED_DUPLICATE_MILK_NOTICE
+  const confirmMilk = !choseOther && !item.userMilkTypeChoice && (
+    photoGenericMilkNeedsConfirmation(item) || item.otherMilkNotice === PLANT_MILK_PHOTO_NOTICE
+  );
+  const mergedMilk = Boolean(item.duplicateMilkNotice)
     || item.uncertaintyReasons.includes(MERGED_DUPLICATE_MILK_NOTICE);
   const otherUncertainty = item.uncertaintyReasons.find((reason) =>
     reason !== MERGED_DUPLICATE_MILK_NOTICE && reason !== PHOTO_MILK_OTHER_REASON);
@@ -235,12 +239,12 @@ export function FoodEditor({
         </p>
       ) : null}
 
-      {choseOther && nutrition?.reasons[0] !== PHOTO_MILK_OTHER_REASON ? (
+      {(item.otherMilkNotice || choseOther) && nutrition?.reasons[0] !== (item.otherMilkNotice ?? PHOTO_MILK_OTHER_REASON) ? (
         <p className="food-uncertainty" role="status">{item.otherMilkNotice ?? PHOTO_MILK_OTHER_REASON}</p>
       ) : null}
 
       {mergedMilk ? (
-        <p className="food-uncertainty" role="status">{MERGED_DUPLICATE_MILK_NOTICE}</p>
+        <p className="food-uncertainty" role="status">{item.duplicateMilkNotice ?? MERGED_DUPLICATE_MILK_NOTICE}</p>
       ) : null}
 
       {otherUncertainty ? (
