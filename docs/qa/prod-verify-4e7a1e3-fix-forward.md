@@ -9,7 +9,7 @@ Base：`main @ 4e7a1e3900b4c5dc1bc32d3ecccc0f74d724b4b5`。來源：James 提供
 | --- | --- | --- |
 | A 奶類通知 | PASS | 分析端以前沒有產生 `otherMilkNotice`，共用 schema 也未保留它；UI 只為「其他」顯示通知。現在分析端產生植物奶通知，共用 schema／推導出的 client types／保存的 analysis 保留它，食物卡顯示兩種通知。API 測試涵蓋泛稱牛奶、oat milk、oat beverage 紙盒，以及明確同一份的合併；ResultView 與 E2E 驗證顯示。 |
 | B 植物奶選擇 | PASS | 原本只有全脂參考，植物奶負向規則會阻擋乳製奶，沒有相應參考資料。明確 chooser 選擇現在使用獨立 USDA 參考。250 ml 燕麥奶 115–120 kcal，無糖豆漿 80–85 kcal，均計入總數；API resolve／save、單元及 360／375 px E2E 驗證，編輯後 `userMilkTypeChoice` 保留。 |
-| C 容器誤合併 | PASS | 原本同類包裝字樣或相同名稱／備註足以觸發合併；fallback 也可能忽略不同容器。現在需要明確同一份的證據。紙盒＋玻璃杯、前／後玻璃杯保留兩列；模型已回傳一列而 visibleEvidence 顯示多容器時，加 `duplicateMilkNotice` 讓使用者新增／拆分。單一玻璃杯仍一列；不相加合併份量。 |
+| C 容器誤合併 | PASS | 原本同類包裝字樣或相同名稱／備註足以觸發合併；fallback 也可能忽略不同容器。現在需要明確同一份的證據；否定／不確定是否同一份不會授權合併。紙盒＋玻璃杯、前／後玻璃杯保留兩列；模型已回傳一列而 visibleEvidence 顯示多容器時，加 `duplicateMilkNotice` 讓使用者新增／拆分。單一玻璃杯仍一列；不相加合併份量。 |
 | 既有回歸 | PASS | chooser 五個按鈕；全脂 250 ml、手動鮮奶仍 155–160 kcal 且納入總數；360／375 px 無水平溢出；植物奶不配全脂，沒有新增模型 kcal 欄位。全部既有測試保留。 |
 | 修正後正式照片／生產 QA | NOT CHECKED | 本次沒有部署；此結果是合成 vision 回傳、API boundary、client rendering 及本機 E2E 的驗證，不能當作已修復正式 revision 的證據。 |
 
@@ -25,7 +25,7 @@ Base：`main @ 4e7a1e3900b4c5dc1bc32d3ecccc0f74d724b4b5`。來源：James 提供
 ## 驗證
 
 - 新測試先在 base 執行，重現通知缺漏、oat／soy resolver 不計入及 distinct-container 合併的失敗；同一份合併與單杯基準通過。
-- `npm test`：55 files，934/934 PASS（新增 17 tests）。
+- `npm test`：55 files，936/936 PASS（新增 19 tests）。
 - `npm run eval`：93/93 cases PASS。
 - `npm run typecheck`：PASS。
 - `npm run lint`：PASS，0 errors；13 個既有 warnings。

@@ -8,6 +8,8 @@ const SEPARATE_CONTAINER =
   /另一杯|另一盒|另一瓶|第二杯|第二盒|兩杯|兩盒|兩瓶|兩個杯|兩隻杯|兩個玻璃杯|旁邊|前方|後方|前面|後面|another glass|another cup|second glass|two glasses|two cups|two cartons|front|back|separate|distinct/;
 const SAME_SERVING =
   /同一(?:紙盒|盒|瓶|樽|隻杯|杯|玻璃杯|份|容器)|只有一(?:個紙盒|隻杯|個杯)|same (?:carton|bottle|glass|cup|serving|container)|一(?:盒|杯)飲品被(?:拆|分)成兩項/;
+const UNCERTAIN_SAME_SERVING =
+  /未能|未知|未確定|不確定|無法|未確認|可能|是否|不是|並非|未必|\b(?:not|maybe|might|may|whether|unclear|cannot|could|unsure)\b/;
 const CARTON = /紙盒|紙包|利樂|carton|一盒|盒裝/;
 const BOTTLE = /瓶子|玻璃樽|一瓶|一樽|瓶裝|(?:^|\s)bottle(?:$|\s)/;
 const GLASS = /玻璃杯|杯裝|一杯|(?:^|\s)(?:glass|cup)(?:$|\s)/;
@@ -88,6 +90,21 @@ function servingEvidence(analysis: FoodAnalysis, foods: readonly ObservedFood[])
   );
 }
 
+/** A question or negation about the same serving is not an affirmative observation. */
+function explicitlySameServing(analysis: FoodAnalysis, foods: readonly ObservedFood[]): boolean {
+  const statements = [
+    ...foods.flatMap(food => [
+      food.displayName, food.normalizedName, food.notes ?? "",
+      food.preparationMethod ?? "", ...(food.visibleIngredients ?? []),
+      ...food.uncertaintyReasons,
+    ]),
+    ...analysis.visibleEvidence,
+    ...analysis.uncertaintyReasons,
+    ...analysis.estimatedInformation,
+  ].map(normalizeFoodName).filter(text => SAME_SERVING.test(text));
+  return statements.length > 0 && statements.every(text => !UNCERTAIN_SAME_SERVING.test(text));
+}
+
 /**
  * Every milk row must carry the same container kind on its own fields.
  * A sandwich that says 包裝, or a meal note that says 紙盒, is not evidence
@@ -113,7 +130,7 @@ export function dedupeIdenticalContainerMilk(analysis: FoodAnalysis): FoodAnalys
     milkIndexes.length >= 2 &&
     compatibleFamilies(milkFoods) &&
     sameMilkContainer(milkFoods) &&
-    SAME_SERVING.test(servingEvidence(analysis, milkFoods)) &&
+    explicitlySameServing(analysis, milkFoods) &&
     !SEPARATE_CONTAINER.test(servingEvidence(analysis, milkFoods))
   ) {
     const drop = new Set(milkIndexes);
@@ -145,7 +162,7 @@ export function dedupeIdenticalContainerMilk(analysis: FoodAnalysis): FoodAnalys
     const cartonAndGlass = CARTON.test(evidence) && GLASS.test(evidence);
     const multipleGlasses = /兩杯|兩隻杯|兩個杯|兩個玻璃杯|two glasses|two cups/.test(evidence) ||
       (/前方|前面|front/.test(evidence) && /後方|後面|back/.test(evidence));
-    if ((cartonAndGlass || multipleGlasses) && !SAME_SERVING.test(evidence)) {
+    if ((cartonAndGlass || multipleGlasses) && !explicitlySameServing(analysis, milkFoods)) {
       return {
         ...analysis,
         foods: analysis.foods.map((food, index) =>

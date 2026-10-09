@@ -75,9 +75,9 @@ describe("photo generic milk", () => {
     expect(provider.resolve(saved.items[0] as typeof chosen).includedInTotal).toBe(true);
   });
 
-  it("keeps two carton rows when no evidence explicitly says they are the same serving", () => {
+  it.each(["紙盒", "未能確認是否同一紙盒", "not the same carton"])("keeps two carton rows without affirmative same-serving evidence: %s", (evidence) => {
     const row = food("牛奶", "milk", { preparationMethod: "紙盒" });
-    const analysis = { ...duplicateGenericMilkCartonAnalysis, foods: [row, { ...row }], uncertaintyReasons: [], visibleEvidence: ["紙盒"], unknownInformation: [] };
+    const analysis = { ...duplicateGenericMilkCartonAnalysis, foods: [row, { ...row }], uncertaintyReasons: [], visibleEvidence: [evidence], unknownInformation: [] };
     expect(dedupeIdenticalContainerMilk(analysis).foods).toHaveLength(2);
   });
 
@@ -91,6 +91,7 @@ describe("photo generic milk", () => {
       const match = provider.resolve(item);
       expect(match.profile?.id, item.displayName).toBe("whole-milk");
       expect(match.includedInTotal, item.displayName).toBe(true);
+      expect(roundRange(calculateFoodNutrition(item, match).ranges!.calories, 5), item.displayName).toEqual({ min: 155, max: 160 });
       expect(photoGenericMilkNeedsConfirmation(item), item.displayName).toBe(false);
     }
   });
