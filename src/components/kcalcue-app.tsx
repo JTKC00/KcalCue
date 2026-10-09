@@ -14,7 +14,7 @@ import {
   type EditableFoodItem,
   type PortionPreset,
 } from "@/lib/domain/editable-meal";
-import { dedupeIdenticalContainerMilk } from "@/lib/domain/milk-dedupe";
+import { preparePhotoMilkAnalysis } from "@/lib/domain/photo-milk-analysis";
 import { contradictoryDairyMilkLabel, mealPlantMilkContext, photoGenericMilkNeedsConfirmation, type MealPlantMilkContext } from "@/lib/nutrition/canonical";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { PHOTO_GENERIC_MILK_CONFIRMATION_REASON, PHOTO_MILK_OTHER_REASON, PLANT_MILK_CONTRADICTION_REASON } from "@/lib/nutrition/negative-rules";
@@ -598,7 +598,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
 
       const parsed = foodAnalysisSchema.safeParse(body.analysis);
       if (!parsed.success) throw getError("invalid_response");
-      const recognized = dedupeIdenticalContainerMilk(parsed.data);
+      const recognized = preparePhotoMilkAnalysis(parsed.data);
 
       const responseMode = body.mode === "live" ? "live" : "demo";
       setActiveMode(responseMode);

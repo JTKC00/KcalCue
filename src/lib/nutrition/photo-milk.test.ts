@@ -31,6 +31,9 @@ import {
 import { isMilkTypeUncertainty } from "./photo-milk";
 import { findLowFatMilkProfile, resolveNutritionMatch, type ResolvableFood } from "./resolver";
 import type { NutritionProfile } from "./types";
+import { NutritionService } from "./service";
+import { createEditableFoodItems, renameFoodItem } from "@/lib/domain/editable-meal";
+import { mealInputSchema } from "@/lib/meals/types";
 
 function food(
   displayName: string,
@@ -54,6 +57,30 @@ function food(
 const provider = new LocalNutritionProvider();
 
 describe("photo generic milk", () => {
+  it.each(["oat", "soy"] as const)("counts a 250 ml %s choice and preserves the choice after an edit and save parsing", (choice) => {
+    const chosen = food("牛奶", "milk", { userMilkTypeChoice: choice, entrySource: "photo", identityLevel: "dish", notes: "植物奶紙盒" });
+    const match = provider.resolve(chosen);
+    expect(match.profile?.id).toBe(choice === "oat" ? "oat-milk" : "unsweetened-soy-milk");
+    expect(match.profile?.id).not.toBe("whole-milk");
+    expect(match.includedInTotal).toBe(true);
+    const calculated = new NutritionService(provider).calculateMeal([chosen]);
+    expect(calculated.includedCount).toBe(1);
+    expect(calculated.totals.calories.min).toBeGreaterThan(0);
+    expect(calculated.totals.calories).toEqual(calculated.foods[0].ranges?.calories);
+    expect(roundRange(calculated.totals.calories, 5)).toEqual(choice === "oat" ? { min: 115, max: 120 } : { min: 80, max: 85 });
+    const item = { ...createEditableFoodItems([chosen])[0], userMilkTypeChoice: choice, entrySource: "photo" as const };
+    const edited = renameFoodItem({ ...item, portionMin: 250, portionMax: 250 }, choice === "oat" ? "燕麥奶" : "豆漿");
+    const saved = mealInputSchema.parse({ id: "11111111-1111-4111-8111-111111111111", mutationId: "22222222-2222-4222-8222-222222222222", version: 0, date: "2026-10-09", time: "08:00", timezone: "Asia/Hong_Kong", photoPath: null, mealType: "breakfast", mode: "live", analysis: null, items: [edited] });
+    expect(saved.items[0].userMilkTypeChoice).toBe(choice);
+    expect(provider.resolve(saved.items[0] as typeof chosen).includedInTotal).toBe(true);
+  });
+
+  it("keeps two carton rows when no evidence explicitly says they are the same serving", () => {
+    const row = food("牛奶", "milk", { preparationMethod: "紙盒" });
+    const analysis = { ...duplicateGenericMilkCartonAnalysis, foods: [row, { ...row }], uncertaintyReasons: [], visibleEvidence: ["紙盒"], unknownInformation: [] };
+    expect(dedupeIdenticalContainerMilk(analysis).foods).toHaveLength(2);
+  });
+
   it("keeps typed 牛奶 and 鮮奶 on whole milk", () => {
     for (const item of [
       food("牛奶", "milk"),

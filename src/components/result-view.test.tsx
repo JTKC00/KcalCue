@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { copy } from "@/content/zh-HK";
 import { createEditableFoodItems } from "@/lib/domain/editable-meal";
+import { foodAnalysisSchema } from "@/lib/domain/food-analysis";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { ResultView } from "./result-view";
 
@@ -30,6 +31,14 @@ function food(
 }
 
 describe("ResultView coverage copy", () => {
+  it("renders both milk notices after the analyze response crosses the shared schema", () => {
+    const analysis = foodAnalysisSchema.parse({ analysisStatus: "success", foods: [{ ...food("牛奶", "milk"), otherMilkNotice: "包裝顯示植物奶，請核對種類及份量。", duplicateMilkNotice: "已合併重複嘅牛奶項目，如果係兩杯可以再加返" }], uncertaintyReasons: [], visibleEvidence: [], estimatedInformation: [], unknownInformation: [] });
+    const items = createEditableFoodItems(analysis.foods).map(item => ({ ...item, entrySource: "photo" as const }));
+    render(<ResultView analysis={analysis} items={items} mode="live" previewUrl={null} previewFailed={false} isHeic={false} onNameChange={noop} onPortionChange={noop} onUnitChange={noop} onPreset={noop} onDelete={noop} onAdd={noop} onReset={noop} />);
+    expect(screen.getByText("包裝顯示植物奶，請核對種類及份量。")).toBeInTheDocument();
+    expect(screen.getByText("已合併重複嘅牛奶項目，如果係兩杯可以再加返")).toBeInTheDocument();
+  });
+
   it("does not substitute reference calories for an invalid saved correction", () => {
     const provider = new LocalNutritionProvider();
     const foods = [food("白飯", "cooked white rice")];

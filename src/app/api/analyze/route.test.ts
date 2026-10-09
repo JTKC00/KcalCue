@@ -43,6 +43,10 @@ import { ANALYZE_RATE_LIMIT, clearRateLimitStore } from "@/lib/server/rate-limit
 import { acquireLiveAnalysis, createLiveAnalysisAdmission } from "@/lib/server/live-analysis-admission";
 import { acquirePublicBody, createPublicBodyAdmission } from "@/lib/server/public-body-admission";
 import { reserveDailyLiveAnalysis } from "@/lib/server/durable-analysis-quota";
+import { foodAnalysisSchema } from "@/lib/domain/food-analysis";
+import { oatMilkCartonPhotoAnalysis } from "@/lib/nutrition/oat-milk-photo.fixture";
+import { duplicateGenericMilkCartonAnalysis } from "@/lib/nutrition/duplicate-milk-carton.fixture";
+import { MERGED_DUPLICATE_MILK_NOTICE } from "@/lib/domain/milk-dedupe";
 import { POST } from "./route";
 import { provenanceMetadata } from "@/test/provenance-fixture";
 
@@ -176,6 +180,50 @@ describe("POST /api/analyze", () => {
     expect(analyzeImage).not.toHaveBeenCalled();
     expect(acquireLiveAnalysis).not.toHaveBeenCalled();
     expect(reserveDailyLiveAnalysis).not.toHaveBeenCalled();
+  });
+
+  it.each(["generic", "oat milk", "oat beverage"])("serializes a plant-milk notice for a carton-only %s label and preserves it on client parsing", async (label) => {
+    const analysis = label === "generic" ? oatMilkCartonPhotoAnalysis : {
+      ...oatMilkCartonPhotoAnalysis, foods: [{ ...oatMilkCartonPhotoAnalysis.foods[0], displayName: label === "oat milk" ? "燕麥奶" : "燕麥飲品", normalizedName: label }],
+    };
+    analyzeImage.mockResolvedValueOnce(analysis);
+    const response = await POST(jpegRequest());
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.analysis.foods[0].otherMilkNotice).toEqual(expect.any(String));
+    expect(foodAnalysisSchema.parse(body.analysis).foods[0]).toHaveProperty("otherMilkNotice", body.analysis.foods[0].otherMilkNotice);
+  });
+
+  it("serializes a duplicate notice when two descriptions explicitly name the same carton", async () => {
+    analyzeImage.mockResolvedValueOnce(duplicateGenericMilkCartonAnalysis);
+    const body = await (await POST(jpegRequest())).json();
+    expect(body.analysis.foods).toHaveLength(1);
+    expect(body.analysis.foods[0].duplicateMilkNotice).toBe(MERGED_DUPLICATE_MILK_NOTICE);
+    expect(foodAnalysisSchema.parse(body.analysis).foods[0].duplicateMilkNotice).toBe(MERGED_DUPLICATE_MILK_NOTICE);
+  });
+
+  it.each([
+    ["carton plus glass", ["180 ml 紙盒牛奶", "獨立玻璃杯牛奶"]],
+    ["front and back glasses", ["前方玻璃杯牛奶", "後方玻璃杯牛奶"]],
+  ])("keeps %s separate even when both rows repeat the carton wording", async (_name, visibleEvidence) => {
+    const row = { ...oatMilkCartonPhotoAnalysis.foods[0], portionMin: 180, portionMax: 180, preparationMethod: "紙盒飲品", notes: "牛奶包裝" };
+    analyzeImage.mockResolvedValueOnce({ ...oatMilkCartonPhotoAnalysis, foods: [row, { ...row }], uncertaintyReasons: [], visibleEvidence, unknownInformation: [] });
+    const body = await (await POST(jpegRequest())).json();
+    expect(body.analysis.foods).toHaveLength(2);
+  });
+
+  it.each([["180 ml 紙盒牛奶", "旁邊一杯牛奶"], ["後方玻璃杯牛奶", "前方玻璃杯牛奶"]])("warns when one milk row has distinct visible containers %s %s", async (...visibleEvidence) => {
+    analyzeImage.mockResolvedValueOnce({ ...oatMilkCartonPhotoAnalysis, visibleEvidence, uncertaintyReasons: [] });
+    const body = await (await POST(jpegRequest())).json();
+    expect(body.analysis.foods).toHaveLength(1);
+    expect(body.analysis.foods[0].duplicateMilkNotice).toBe(MERGED_DUPLICATE_MILK_NOTICE);
+  });
+
+  it("keeps a single glass as one item without a duplicate notice", async () => {
+    analyzeImage.mockResolvedValueOnce({ ...oatMilkCartonPhotoAnalysis, foods: [{ ...oatMilkCartonPhotoAnalysis.foods[0], notes: "一杯牛奶" }], visibleEvidence: ["一杯牛奶"], uncertaintyReasons: [] });
+    const body = await (await POST(jpegRequest())).json();
+    expect(body.analysis.foods).toHaveLength(1);
+    expect(body.analysis.foods[0].duplicateMilkNotice).toBeUndefined();
   });
 
   it("returns a validated live analysis", async () => {
