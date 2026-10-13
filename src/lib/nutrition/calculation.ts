@@ -1,4 +1,5 @@
 import type { ObservedFood } from "@/lib/domain/food-analysis";
+import { SUSPECTED_DUPLICATE_MILK_NOTICE } from "@/lib/domain/milk-dedupe";
 import type {
   MealCoverage,
   NutrientRange,
@@ -96,6 +97,16 @@ export function calculateFoodNutrition(
   food: ObservedFood,
   match: NutritionMatch | null,
 ): CalculatedFood {
+  if (food.suspectedDuplicateMilk === true) {
+    return {
+      food,
+      profile: null,
+      match,
+      ranges: null,
+      includedInTotal: false,
+      unavailableReason: SUSPECTED_DUPLICATE_MILK_NOTICE,
+    };
+  }
   if (food.portionMin === null || food.portionMax === null) {
     return {
       food, profile: null, match: null, ranges: null, includedInTotal: false,
@@ -145,7 +156,10 @@ export function calculateMealNutrition(foods: CalculatedFood[]): CalculatedMeal 
   const totals = emptyRanges();
   let includedCount = 0;
 
+  let totalCount = 0;
   for (const food of foods) {
+    if (food.food.suspectedDuplicateMilk === true) continue;
+    totalCount += 1;
     if (!food.ranges || !food.includedInTotal) continue;
     includedCount += 1;
     addRange(totals.calories, food.ranges.calories);
@@ -158,9 +172,9 @@ export function calculateMealNutrition(foods: CalculatedFood[]): CalculatedMeal 
     foods,
     totals,
     midpointCalories: (totals.calories.min + totals.calories.max) / 2,
-    coverage: classifyMealCoverage(includedCount, foods.length),
+    coverage: classifyMealCoverage(includedCount, totalCount),
     includedCount,
-    totalCount: foods.length,
+    totalCount,
   };
 }
 

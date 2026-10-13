@@ -12,7 +12,7 @@ import {
 import type { EditableFoodItem, PortionPreset } from "@/lib/domain/editable-meal";
 import { roundRange, type CalculatedFood } from "@/lib/nutrition/calculation";
 import { templateRangeNeedsFollowUp } from "@/lib/nutrition/recipe-templates";
-import { MERGED_DUPLICATE_MILK_NOTICE } from "@/lib/domain/milk-dedupe";
+import { MERGED_DUPLICATE_MILK_NOTICE, SUSPECTED_DUPLICATE_MILK_NOTICE } from "@/lib/domain/milk-dedupe";
 import { photoGenericMilkNeedsConfirmation } from "@/lib/nutrition/canonical";
 import { PHOTO_MILK_CHOICES, type PhotoMilkChoiceId } from "@/lib/nutrition/photo-milk";
 import { PHOTO_MILK_OTHER_REASON } from "@/lib/nutrition/negative-rules";
@@ -33,6 +33,7 @@ interface FoodEditorProps {
   onPreset: (preset: PortionPreset) => void;
   onDelete: () => void;
   onMilkChoice?: (choice: PhotoMilkChoiceId) => void;
+  onConfirmSeparateMilk?: () => void;
 }
 
 const presetLabels: Record<PortionPreset, string> = {
@@ -98,6 +99,7 @@ export function FoodEditor({
   onPreset,
   onDelete,
   onMilkChoice,
+  onConfirmSeparateMilk,
 }: FoodEditorProps) {
   const nutrition = calculation.match;
   const fieldId = `food-${item.id}`;
@@ -109,6 +111,7 @@ export function FoodEditor({
   );
   const mergedMilk = Boolean(item.duplicateMilkNotice)
     || item.uncertaintyReasons.includes(MERGED_DUPLICATE_MILK_NOTICE);
+  const suspectedMilk = item.suspectedDuplicateMilk === true;
   const otherUncertainty = item.uncertaintyReasons.find((reason) =>
     reason !== MERGED_DUPLICATE_MILK_NOTICE && reason !== PHOTO_MILK_OTHER_REASON);
 
@@ -245,6 +248,16 @@ export function FoodEditor({
 
       {mergedMilk ? (
         <p className="food-uncertainty" role="status">{item.duplicateMilkNotice ?? MERGED_DUPLICATE_MILK_NOTICE}</p>
+      ) : null}
+
+      {suspectedMilk ? (
+        <fieldset className="preset-fieldset">
+          <legend>{SUSPECTED_DUPLICATE_MILK_NOTICE}</legend>
+          <div className="milk-choice-control">
+            <button type="button" onClick={() => onConfirmSeparateMilk?.()}>係另一份，計入</button>
+            <button type="button" onClick={onDelete}>係重複，移除</button>
+          </div>
+        </fieldset>
       ) : null}
 
       {otherUncertainty ? (

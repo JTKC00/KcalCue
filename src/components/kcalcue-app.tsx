@@ -620,6 +620,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
         setStage("result");
         const knownFoods = photoFoods.flatMap((food, index) =>
           hasKnownPortion(food) && localMatches[index] && !photoGenericMilkNeedsConfirmation(food, photoContext)
+            && food.suspectedDuplicateMilk !== true
             ? [{ index, food, match: localMatches[index]! }] : [],
         );
         if (responseMode === "live" && knownFoods.some((entry) => !entry.match.includedInTotal)) {
@@ -645,6 +646,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
                 const match = localMatches[index];
                 const food = photoFoods[index];
                 if (!match || match.includedInTotal || !unchangedFood(item, index)) return item;
+                if (food?.suspectedDuplicateMilk === true) return item;
                 if (food && photoGenericMilkNeedsConfirmation(food, photoContext)) return item;
                 return {
                   ...item,
@@ -672,6 +674,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
                 if (knownIndex < 0 || !unchangedFood(item, index) ||
                     matches[knownIndex] === localMatches[index]) return item;
                 if (item.userMilkTypeChoice) return item;
+                if (item.suspectedDuplicateMilk === true) return item;
                 if (contradictoryDairyMilkLabel(item, mealContextRef.current)) return item;
                 if (photoGenericMilkNeedsConfirmation(item, mealContextRef.current)) return item;
                 return { ...item, nutritionMatch: matches[knownIndex] };
@@ -807,6 +810,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
           updateItem(id, (item) => {
             if (item.displayName !== name) return item;
             if (item.userMilkTypeChoice) return item;
+            if (item.suspectedDuplicateMilk === true) return item;
             if (contradictoryDairyMilkLabel(item, mealContextRef.current)) return item;
             return {
               ...item,
@@ -842,6 +846,20 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
       return;
     }
     handleNameChange(id, choice.displayName, choice.id);
+  };
+
+  const handleConfirmSeparateMilk = (id: string) => {
+    updateItem(id, (item) => {
+      if (item.suspectedDuplicateMilk !== true) return item;
+      const next: EditableFoodItem = { ...item };
+      delete next.suspectedDuplicateMilk;
+      return {
+        ...next,
+        nutritionMatch: hasKnownPortion(next)
+          ? nutritionProvider.resolve(next, mealContextRef.current)
+          : null,
+      };
+    });
   };
 
   const handlePortionChange = (
@@ -973,6 +991,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
           onPreset={handlePreset}
           onDelete={(id) => setItems((current) => current.filter((item) => item.id !== id))}
           onMilkChoice={handleMilkChoice}
+          onConfirmSeparateMilk={handleConfirmSeparateMilk}
           onAdd={() => setItems((current) => [...current, createManualItem()])}
           onReset={onNewMeal ?? reset}
         />

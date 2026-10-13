@@ -3,6 +3,7 @@ import sharp from "sharp";
 import path from "node:path";
 
 import { productionGlassMilkUnknownAnalysis } from "../src/lib/nutrition/photo-milk-prod-qa.fixture";
+import { c3Run1SingleOatCartonAnalysis, c4TwoMilkContainersAnalysis } from "../src/lib/nutrition/m7-milk-dedupe.fixture";
 
 const userId = "11111111-1111-4111-8111-111111111111";
 type TestRecord = {
@@ -2182,4 +2183,49 @@ test("QA124 server milk notices survive client parsing and render beside the spl
   await expect(page.locator(".food-card").getByText(plantNotice, { exact: true })).toBeVisible();
   await expect(page.locator(".food-card").getByText(duplicateNotice, { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "新增食物", exact: true })).toBeVisible();
+});
+
+test("M7 C3-run1 one oat carton described twice merges and does not double kcal", async ({ page, context }) => {
+  const backend = cloud();
+  await backend.install(context);
+  await page.route("**/api/analyze", route => route.fulfill({
+    json: { mode: "live", analysis: c3Run1SingleOatCartonAnalysis },
+  }));
+  await page.route("**/api/nutrition/resolve", route => route.fulfill({
+    status: 500,
+    json: { error: { code: "unexpected_nutrition" } },
+  }));
+  await page.goto("/");
+  await login(page);
+  await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
+  const png = await sharp({ create: { width: 80, height: 60, channels: 3, background: "white" } }).png().toBuffer();
+  await page.locator('input[type="file"]').nth(1).setInputFiles({ name: "oat.png", mimeType: "image/png", buffer: png });
+  await page.getByRole("button", { name: "開始分析", exact: true }).click();
+  await expect(page.locator(".food-card")).toHaveCount(1);
+  await expect(page.getByText("已合併重複嘅牛奶項目，如果係兩杯可以再加返", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "暫未能計算", exact: true })).toBeVisible();
+  await expect(page.getByText("包裝顯示植物奶，請核對種類及份量。", { exact: true })).toHaveCount(0);
+});
+
+test("M7 C4 two described milk containers stay two rows without a plant-packaging notice", async ({ page, context }) => {
+  const backend = cloud();
+  await backend.install(context);
+  await page.route("**/api/analyze", route => route.fulfill({
+    json: { mode: "live", analysis: c4TwoMilkContainersAnalysis },
+  }));
+  await page.route("**/api/nutrition/resolve", route => route.fulfill({
+    status: 500,
+    json: { error: { code: "unexpected_nutrition" } },
+  }));
+  await page.goto("/");
+  await login(page);
+  await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
+  const png = await sharp({ create: { width: 80, height: 60, channels: 3, background: "white" } }).png().toBuffer();
+  await page.locator('input[type="file"]').nth(1).setInputFiles({ name: "oatmilk.png", mimeType: "image/png", buffer: png });
+  await page.getByRole("button", { name: "開始分析", exact: true }).click();
+  await expect(page.locator(".food-card")).toHaveCount(2);
+  await expect(page.getByText("已合併重複嘅牛奶項目，如果係兩杯可以再加返", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("可能係同一份飲品重複列出", { exact: false })).toHaveCount(0);
+  await expect(page.getByText("包裝顯示植物奶，請核對種類及份量。", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "暫未能計算", exact: true })).toBeVisible();
 });

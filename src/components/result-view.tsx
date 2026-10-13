@@ -41,6 +41,7 @@ interface ResultViewProps {
   onPreset: (id: string, preset: PortionPreset) => void;
   onDelete: (id: string) => void;
   onMilkChoice?: (id: string, choice: PhotoMilkChoiceId) => void;
+  onConfirmSeparateMilk?: (id: string) => void;
   onAdd: () => void;
   onReset: () => void;
 }
@@ -108,6 +109,7 @@ export function ResultView({
   onPreset,
   onDelete,
   onMilkChoice,
+  onConfirmSeparateMilk,
   onAdd,
   onReset,
 }: ResultViewProps) {
@@ -270,6 +272,7 @@ export function ResultView({
                   onPreset={(preset) => onPreset(item.id, preset)}
                   onDelete={() => onDelete(item.id)}
                   onMilkChoice={(choice) => onMilkChoice?.(item.id, choice)}
+                  onConfirmSeparateMilk={() => onConfirmSeparateMilk?.(item.id)}
                 />
               ))}
             </div>

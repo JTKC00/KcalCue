@@ -47,6 +47,7 @@ import { foodAnalysisSchema } from "@/lib/domain/food-analysis";
 import { oatMilkCartonPhotoAnalysis } from "@/lib/nutrition/oat-milk-photo.fixture";
 import { duplicateGenericMilkCartonAnalysis } from "@/lib/nutrition/duplicate-milk-carton.fixture";
 import { MERGED_DUPLICATE_MILK_NOTICE } from "@/lib/domain/milk-dedupe";
+import { c3Run1SingleOatCartonAnalysis } from "@/lib/nutrition/m7-milk-dedupe.fixture";
 import { POST } from "./route";
 import { provenanceMetadata } from "@/test/provenance-fixture";
 
@@ -200,6 +201,15 @@ describe("POST /api/analyze", () => {
     expect(body.analysis.foods).toHaveLength(1);
     expect(body.analysis.foods[0].duplicateMilkNotice).toBe(MERGED_DUPLICATE_MILK_NOTICE);
     expect(foodAnalysisSchema.parse(body.analysis).foods[0].duplicateMilkNotice).toBe(MERGED_DUPLICATE_MILK_NOTICE);
+  });
+
+  it("merges C3-run1 identical oat-milk rows that only say the photo shows one carton", async () => {
+    analyzeImage.mockResolvedValueOnce(c3Run1SingleOatCartonAnalysis);
+    const body = await (await POST(jpegRequest())).json();
+    expect(body.analysis.foods).toHaveLength(1);
+    expect(body.analysis.foods[0].duplicateMilkNotice).toBe(MERGED_DUPLICATE_MILK_NOTICE);
+    expect(body.analysis.foods[0].suspectedDuplicateMilk).toBeUndefined();
+    expect(foodAnalysisSchema.parse(body.analysis).foods).toHaveLength(1);
   });
 
   it.each([

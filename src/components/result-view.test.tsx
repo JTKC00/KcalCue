@@ -2,11 +2,13 @@
 
 import "../test/setup";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { copy } from "@/content/zh-HK";
 import { createEditableFoodItems } from "@/lib/domain/editable-meal";
 import { foodAnalysisSchema } from "@/lib/domain/food-analysis";
+import { SUSPECTED_DUPLICATE_MILK_NOTICE } from "@/lib/domain/milk-dedupe";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { ResultView } from "./result-view";
 
@@ -37,6 +39,36 @@ describe("ResultView coverage copy", () => {
     render(<ResultView analysis={analysis} items={items} mode="live" previewUrl={null} previewFailed={false} isHeic={false} onNameChange={noop} onPortionChange={noop} onUnitChange={noop} onPreset={noop} onDelete={noop} onAdd={noop} onReset={noop} />);
     expect(screen.getByText("包裝顯示植物奶，請核對種類及份量。")).toBeInTheDocument();
     expect(screen.getByText("已合併重複嘅牛奶項目，如果係兩杯可以再加返")).toBeInTheDocument();
+  });
+
+  it("asks before counting a suspected duplicate milk row", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.fn();
+    const remove = vi.fn();
+    const analysis = foodAnalysisSchema.parse({
+      analysisStatus: "success",
+      foods: [
+        { ...food("燕麥奶", "oat milk"), unit: "ml" as const, portionMin: 250, portionMax: 250 },
+        { ...food("燕麥奶", "oat milk"), unit: "ml" as const, portionMin: 250, portionMax: 250, suspectedDuplicateMilk: true },
+      ],
+      uncertaintyReasons: [],
+      visibleEvidence: [],
+      estimatedInformation: [],
+      unknownInformation: [],
+    });
+    const provider = new LocalNutritionProvider();
+    const items = createEditableFoodItems(analysis.foods, analysis.foods.map(item => provider.resolve({
+      ...item,
+      entrySource: "photo",
+      userMilkTypeChoice: "oat",
+    }))).map(item => ({ ...item, entrySource: "photo" as const, userMilkTypeChoice: "oat" as const }));
+    render(<ResultView analysis={analysis} items={items} mode="live" previewUrl={null} previewFailed={false} isHeic={false} onNameChange={noop} onPortionChange={noop} onUnitChange={noop} onPreset={noop} onDelete={remove} onConfirmSeparateMilk={confirm} onAdd={noop} onReset={noop} />);
+    expect(screen.getAllByText(SUSPECTED_DUPLICATE_MILK_NOTICE).length).toBeGreaterThan(0);
+    expect(screen.getByRole("heading", { name: "約 115–120 kcal" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "係另一份，計入" }));
+    expect(confirm).toHaveBeenCalledOnce();
+    await user.click(screen.getByRole("button", { name: "係重複，移除" }));
+    expect(remove).toHaveBeenCalledOnce();
   });
 
   it("does not substitute reference calories for an invalid saved correction", () => {
