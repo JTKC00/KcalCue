@@ -2203,8 +2203,9 @@ test("M7 C3-run1 one oat carton described twice merges and does not double kcal"
   await page.getByRole("button", { name: "開始分析", exact: true }).click();
   await expect(page.locator(".food-card")).toHaveCount(1);
   await expect(page.getByText("已合併重複嘅牛奶項目，如果係兩杯可以再加返", { exact: true })).toBeVisible();
+  await expect(page.getByText("包裝顯示植物奶，請核對種類及份量。", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "暫未能計算", exact: true })).toBeVisible();
-  await expect(page.getByText("包裝顯示植物奶，請核對種類及份量。", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "係另一份，計入", exact: true })).toHaveCount(0);
 });
 
 test("M7 C4 two described milk containers stay two rows without a plant-packaging notice", async ({ page, context }) => {

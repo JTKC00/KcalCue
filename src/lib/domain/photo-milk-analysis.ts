@@ -13,12 +13,28 @@ function withoutUnknownMilkQuestion(text: string): string {
     .replace(/未能確定是否為[^。；;]*/g, " ")
     .replace(/未知是否為[^。；;]*/g, " ")
     .replace(/不確定是否為[^。；;]*/g, " ")
-    .replace(/未能確認是[^。；;]*還是[^。；;]*/g, " ");
+    .replace(/未能確認是[^。；;]*還是[^。；;]*/g, " ")
+    .replace(/未能確定是[^。；;]*/g, " ");
+}
+
+/**
+ * 「沒有可見標籤」and「沒有品牌或包裝文字」are the absence of a label.
+ * 「也可能是植物奶」is a guess, not something the package says.
+ */
+function withoutNegatedOrGuessedPlantCue(text: string): string {
+  return text
+    .replace(/沒有(?:可見)?(?:品牌或)?(?:包裝文字|包裝|標籤|標示)/g, " ")
+    .replace(/未見(?:品牌|包裝|標籤|標示)/g, " ")
+    .replace(/no (?:visible )?(?:brand|label|packaging)/gi, " ")
+    .replace(/也可能是植物奶/g, " ")
+    .replace(/可能是植物奶/g, " ")
+    .replace(/might be plant milk/gi, " ");
 }
 
 /** The notice claims the package shows plant milk, so a bare name is not enough. */
 export function packagingShowsPlantMilk(text: string): boolean {
-  const normalized = normalizeFoodName(withoutUnknownMilkQuestion(text));
+  const readable = withoutNegatedOrGuessedPlantCue(withoutUnknownMilkQuestion(text));
+  const normalized = normalizeFoodName(readable);
   return PACKAGING_LABEL.test(normalized) && PLANT_MILK_LABEL.test(normalized);
 }
 

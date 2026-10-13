@@ -22,9 +22,16 @@ import type { FoodAnalysis, ObservedFood } from "@/lib/domain/food-analysis";
 
 function oat(note: string, extra: Partial<ObservedFood> = {}): ObservedFood {
   return {
-    ...c3Run1SingleOatCartonAnalysis.foods[0],
-    notes: note,
+    displayName: "燕麥奶",
+    normalizedName: "oat milk",
+    identityLevel: "ingredient",
+    portionMin: 250,
+    portionMax: 250,
+    unit: "ml",
+    recognitionConfidence: 0.74,
+    portionConfidence: 0.58,
     uncertaintyReasons: [],
+    notes: note,
     ...extra,
   };
 }
@@ -56,11 +63,13 @@ describe("issue 127 milk duplicate matrix", () => {
     expect(merged.foods[0]).toMatchObject({
       displayName: "燕麥奶",
       normalizedName: "oat milk",
-      notes: "相片只顯示一盒燕麥奶",
+      recognitionConfidence: 0.99,
+      notes: "包裝可讀到「OATLY」、「THE ORIGINAL」、「WATER HAVER BARISTA EDITION」、「100% cool for vegans」及「1L」；標示為燕麥奶飲品。",
       duplicateMilkNotice: MERGED_DUPLICATE_MILK_NOTICE,
+      otherMilkNotice: PLANT_MILK_PHOTO_NOTICE,
     });
     expect(merged.foods[0].suspectedDuplicateMilk).toBeUndefined();
-    expect(merged.foods[0].otherMilkNotice).toBeUndefined();
+    expect(merged.foods.filter(food => food.suspectedDuplicateMilk === true)).toHaveLength(0);
     expect(foodAnalysisSchema.parse(merged).foods[0].duplicateMilkNotice).toBe(MERGED_DUPLICATE_MILK_NOTICE);
 
     const explicit = dedupeIdenticalContainerMilk(duplicateGenericMilkCartonAnalysis);
@@ -186,12 +195,16 @@ describe("issue 127 milk duplicate matrix", () => {
     expect(single.foods).toHaveLength(1);
     expect(single.foods[0].duplicateMilkNotice).toBeUndefined();
     expect(single.foods[0].suspectedDuplicateMilk).toBeUndefined();
+    expect(single.foods[0].otherMilkNotice).toBe(PLANT_MILK_PHOTO_NOTICE);
     expect(single.foods[0].displayName).toBe("燕麥奶");
+    expect(single.foods[0].notes).toContain("包裝顯示為燕麥奶");
   });
 
-  it("keeps C4's two described containers and does not claim an unlabelled package shows plant milk", () => {
+  it("keeps C4's two described containers and drops the plant notice when no label is visible", () => {
+    expect(c4TwoMilkContainersAnalysis.foods.every(food => food.otherMilkNotice === PLANT_MILK_PHOTO_NOTICE)).toBe(true);
     const distinct = prepared(c4TwoMilkContainersAnalysis);
     expect(distinct.foods).toHaveLength(2);
+    expect(distinct.foods.map(food => [food.portionMin, food.portionMax])).toEqual([[250, 400], [200, 350]]);
     expect(distinct.foods.every(food => food.duplicateMilkNotice == null)).toBe(true);
     expect(distinct.foods.every(food => food.suspectedDuplicateMilk == null)).toBe(true);
     expect(distinct.foods.every(food => food.otherMilkNotice == null)).toBe(true);
@@ -217,6 +230,18 @@ describe("issue 127 milk duplicate matrix", () => {
       unknownInformation: ["未能確認是否為牛奶、植物奶或其他白色飲品。"],
     }));
     expect(unlabelledGuess.foods[0].otherMilkNotice).toBeUndefined();
+
+    const negatedLabel = prepared(analysis([
+      oat("玻璃杯", {
+        displayName: "牛奶",
+        normalizedName: "milk",
+        preparationMethod: "杯裝",
+        uncertaintyReasons: ["白色飲品沒有可見標籤，單憑外觀未能確定是牛奶，也可能是植物奶。"],
+        notes: "前方透明玻璃杯內可見白色飲品；沒有品牌或包裝文字可供確認。",
+        otherMilkNotice: PLANT_MILK_PHOTO_NOTICE,
+      }),
+    ]));
+    expect(negatedLabel.foods[0].otherMilkNotice).toBeUndefined();
   });
 
   it("repeats the same decision for the masked shapes", () => {
