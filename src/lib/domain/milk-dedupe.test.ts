@@ -12,6 +12,7 @@ import { roundRange } from "@/lib/nutrition/calculation";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { NutritionService } from "@/lib/nutrition/service";
 import { duplicateGenericMilkCartonAnalysis } from "@/lib/nutrition/duplicate-milk-carton.fixture";
+import { productionGlassMilkUnknownAnalysis } from "@/lib/nutrition/photo-milk-prod-qa.fixture";
 import {
   c3Run1SingleOatCartonAnalysis,
   c3Run2SingleOatCartonAnalysis,
@@ -149,6 +150,37 @@ describe("issue 127 milk duplicate matrix", () => {
     expect(service.calculateMeal(items).includedCount).toBe(2);
   });
 
+  it("does not count two identical carton rows when only the meal text mentions a glass", () => {
+    const held = prepared(analysis(
+      [
+        oat("紙盒燕麥奶", { preparationMethod: "紙盒" }),
+        oat("紙盒燕麥奶", { preparationMethod: "紙盒" }),
+      ],
+      { visibleEvidence: ["旁邊有一個玻璃杯"] },
+    ));
+    expect(held.foods).toHaveLength(2);
+    expect(held.foods.filter(food => food.suspectedDuplicateMilk === true)).toHaveLength(1);
+    expect(held.foods.every(food => food.duplicateMilkNotice == null)).toBe(true);
+    const items = createEditableFoodItems(held.foods).map(item => ({
+      ...item,
+      entrySource: "photo" as const,
+      userMilkTypeChoice: "oat" as const,
+    }));
+    expect(service.calculateMeal(items).includedCount).toBe(1);
+
+    const frontAndBack = prepared(analysis(
+      [oat("紙盒", { preparationMethod: "紙盒" }), oat("紙盒", { preparationMethod: "紙盒" })],
+      { visibleEvidence: ["前方玻璃杯", "後方紙盒"] },
+    ));
+    expect(frontAndBack.foods.filter(food => food.suspectedDuplicateMilk === true)).toHaveLength(1);
+    const frontItems = createEditableFoodItems(frontAndBack.foods).map(item => ({
+      ...item,
+      entrySource: "photo" as const,
+      userMilkTypeChoice: "oat" as const,
+    }));
+    expect(service.calculateMeal(frontItems).includedCount).toBe(1);
+  });
+
   it("(e) does not treat uncertain or negated same-serving wording as a merge", () => {
     const uncertain = prepared(analysis(
       [oat("紙盒", { preparationMethod: "紙盒" }), oat("紙盒", { preparationMethod: "紙盒" })],
@@ -242,6 +274,15 @@ describe("issue 127 milk duplicate matrix", () => {
       }),
     ]));
     expect(negatedLabel.foods[0].otherMilkNotice).toBeUndefined();
+
+    const unlabelledGlass = prepared({
+      ...productionGlassMilkUnknownAnalysis,
+      foods: [{
+        ...productionGlassMilkUnknownAnalysis.foods[0],
+        otherMilkNotice: PLANT_MILK_PHOTO_NOTICE,
+      }],
+    });
+    expect(unlabelledGlass.foods[0].otherMilkNotice).toBeUndefined();
   });
 
   it("repeats the same decision for the masked shapes", () => {

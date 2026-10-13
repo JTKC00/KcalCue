@@ -215,11 +215,13 @@ describe("POST /api/analyze", () => {
   it.each([
     ["carton plus glass", ["180 ml 紙盒牛奶", "獨立玻璃杯牛奶"]],
     ["front and back glasses", ["前方玻璃杯牛奶", "後方玻璃杯牛奶"]],
-  ])("keeps %s separate even when both rows repeat the carton wording", async (_name, visibleEvidence) => {
+  ])("holds back one identical carton row when only the meal text says %s", async (_name, visibleEvidence) => {
     const row = { ...oatMilkCartonPhotoAnalysis.foods[0], portionMin: 180, portionMax: 180, preparationMethod: "紙盒飲品", notes: "牛奶包裝" };
     analyzeImage.mockResolvedValueOnce({ ...oatMilkCartonPhotoAnalysis, foods: [row, { ...row }], uncertaintyReasons: [], visibleEvidence, unknownInformation: [] });
     const body = await (await POST(jpegRequest())).json();
     expect(body.analysis.foods).toHaveLength(2);
+    expect(body.analysis.foods.filter((food: { suspectedDuplicateMilk?: boolean }) => food.suspectedDuplicateMilk === true)).toHaveLength(1);
+    expect(body.analysis.foods.every((food: { duplicateMilkNotice?: string }) => food.duplicateMilkNotice == null)).toBe(true);
   });
 
   it.each([["180 ml 紙盒牛奶", "旁邊一杯牛奶"], ["後方玻璃杯牛奶", "前方玻璃杯牛奶"]])("warns when one milk row has distinct visible containers %s %s", async (...visibleEvidence) => {

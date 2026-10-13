@@ -2171,7 +2171,18 @@ test("QA124 server milk notices survive client parsing and render beside the spl
   await page.route("**/api/analyze", route => route.fulfill({ json: {
     mode: "live", analysis: {
       ...productionGlassMilkUnknownAnalysis,
-      foods: [{ ...productionGlassMilkUnknownAnalysis.foods[0], otherMilkNotice: plantNotice, duplicateMilkNotice: duplicateNotice }],
+      uncertaintyReasons: ["飲用份量不是整盒。"],
+      visibleEvidence: ["紙盒寫有燕麥奶。"],
+      unknownInformation: [],
+      foods: [{
+        ...productionGlassMilkUnknownAnalysis.foods[0],
+        displayName: "燕麥奶",
+        normalizedName: "oat milk",
+        notes: "紙盒標示為燕麥奶。",
+        uncertaintyReasons: ["飲用份量不是整盒。"],
+        otherMilkNotice: plantNotice,
+        duplicateMilkNotice: duplicateNotice,
+      }],
     },
   } }));
   await page.goto("/");

@@ -117,6 +117,34 @@ function servingEvidence(analysis: FoodAnalysis, foods: readonly ObservedFood[])
   return evidenceStatements(analysis, foods, true).join(" ");
 }
 
+function joinedRowText(foods: readonly ObservedFood[]): string {
+  return normalizeFoodName(foods.map(milkRowText).join(" "));
+}
+
+/**
+ * A second container has to be written on the milk rows themselves.
+ * Meal-level text that merely mentions a 杯 is not enough to count both rows.
+ */
+function rowsShowDistinctContainers(foods: readonly ObservedFood[]): boolean {
+  const text = joinedRowText(foods);
+  const opposed = (/左邊|左侧/.test(text) && /右邊|右侧/.test(text))
+    || (/前方|前面|front/.test(text) && /後方|後面|back/.test(text));
+  return SEPARATE_CONTAINER.test(text)
+    || opposed
+    || distinctPhysicalContainers(foods)
+    || (CARTON.test(text) && GLASS.test(text))
+    || (BOTTLE.test(text) && GLASS.test(text));
+}
+
+/** Meal text can suggest another container, but that is a question for the user. */
+function mealOnlySuggestsAnotherContainer(analysis: FoodAnalysis, foods: readonly ObservedFood[]): boolean {
+  if (rowsShowDistinctContainers(foods)) return false;
+  const evidence = servingEvidence(analysis, foods);
+  return SEPARATE_CONTAINER.test(evidence)
+    || (CARTON.test(evidence) && GLASS.test(evidence))
+    || (BOTTLE.test(evidence) && GLASS.test(evidence));
+}
+
 /** A question or negation about the same serving is not an affirmative observation. */
 function explicitlySameServing(analysis: FoodAnalysis, foods: readonly ObservedFood[]): boolean {
   const statements = evidenceStatements(analysis, foods, false).filter(text => SAME_SERVING.test(text));
@@ -208,25 +236,23 @@ function markSuspectedDuplicates(
 /**
  * Merge only with shared-container evidence and no sign of a second container.
  * Identical canonical keys on the same container kind are enough: the model
- * often writes 「只顯示一盒」 instead of 「同一盒」. Same-family rows that
- * lack that evidence stay on screen for confirmation and do not count twice.
+ * often writes 「只顯示一盒」 instead of 「同一盒」. That merge is conservative
+ * and can undercount two real cartons of the same drink. Same-family rows that
+ * lack that evidence, including a 杯 that appears only in meal text, stay on
+ * screen for confirmation and do not count twice.
  */
 export function dedupeIdenticalContainerMilk(analysis: FoodAnalysis): FoodAnalysis {
   if (!analysis || !Array.isArray(analysis.foods)) return analysis;
   const milkIndexes = analysis.foods.flatMap((food, index) => (isMilkDrink(food) ? [index] : []));
   const milkFoods = milkIndexes.map((index) => analysis.foods[index]);
   if (milkIndexes.length >= 2 && compatibleFamilies(milkFoods)) {
-    const evidence = servingEvidence(analysis, milkFoods);
-    const cartonAndGlass = CARTON.test(evidence) && GLASS.test(evidence);
-    const bottleAndGlass = BOTTLE.test(evidence) && GLASS.test(evidence);
-    const separate = SEPARATE_CONTAINER.test(evidence)
-      || distinctPhysicalContainers(milkFoods)
-      || cartonAndGlass
-      || bottleAndGlass;
+    const rowsAreDistinct = rowsShowDistinctContainers(milkFoods);
+    const mealOnlySeparate = mealOnlySuggestsAnotherContainer(analysis, milkFoods);
     const uncertain = uncertainSameServing(analysis, milkFoods);
     const negated = negatedDistinctServing(analysis, milkFoods);
     if (
-      !separate &&
+      !rowsAreDistinct &&
+      !mealOnlySeparate &&
       !uncertain &&
       !negated &&
       sameMilkContainer(milkFoods) &&
@@ -234,7 +260,7 @@ export function dedupeIdenticalContainerMilk(analysis: FoodAnalysis): FoodAnalys
     ) {
       return mergeMilkRows(analysis, milkIndexes, milkFoods);
     }
-    if (!separate && !negated) {
+    if (!rowsAreDistinct && !negated) {
       return markSuspectedDuplicates(analysis, milkIndexes);
     }
   }
