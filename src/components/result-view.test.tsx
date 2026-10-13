@@ -57,11 +57,16 @@ describe("ResultView coverage copy", () => {
       unknownInformation: [],
     });
     const provider = new LocalNutritionProvider();
-    const items = createEditableFoodItems(analysis.foods, analysis.foods.map(item => provider.resolve({
-      ...item,
-      entrySource: "photo",
-      userMilkTypeChoice: "oat",
-    }))).map(item => ({ ...item, entrySource: "photo" as const, userMilkTypeChoice: "oat" as const }));
+    const items = createEditableFoodItems(analysis.foods, analysis.foods.map(item => {
+      if (item.portionMin === null || item.portionMax === null) throw new Error("portion");
+      return provider.resolve({
+        ...item,
+        portionMin: item.portionMin,
+        portionMax: item.portionMax,
+        entrySource: "photo",
+        userMilkTypeChoice: "oat",
+      });
+    })).map(item => ({ ...item, entrySource: "photo" as const, userMilkTypeChoice: "oat" as const }));
     render(<ResultView analysis={analysis} items={items} mode="live" previewUrl={null} previewFailed={false} isHeic={false} onNameChange={noop} onPortionChange={noop} onUnitChange={noop} onPreset={noop} onDelete={remove} onConfirmSeparateMilk={confirm} onAdd={noop} onReset={noop} />);
     expect(screen.getAllByText(SUSPECTED_DUPLICATE_MILK_NOTICE).length).toBeGreaterThan(0);
     expect(screen.getByRole("heading", { name: "約 115–120 kcal" })).toBeInTheDocument();

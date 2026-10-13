@@ -11,3 +11,23 @@ if (browser) {
     });
   }
 }
+
+// jsdom's Blob has no stream(). Undici's Response reads stream() when a test
+// builds `new Response(new Blob(...))`. Node's own Blob already has it.
+const RuntimeBlob = globalThis.Blob;
+if (RuntimeBlob && typeof RuntimeBlob.prototype.stream !== "function") {
+  Object.defineProperty(RuntimeBlob.prototype, "stream", {
+    configurable: true,
+    writable: true,
+    value(this: Blob) {
+      return new ReadableStream({
+        start: (controller) => {
+          void this.arrayBuffer().then((buffer) => {
+            controller.enqueue(new Uint8Array(buffer));
+            controller.close();
+          }, (error: unknown) => controller.error(error));
+        },
+      });
+    },
+  });
+}

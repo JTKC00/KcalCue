@@ -96,8 +96,15 @@ describe("issue 127 milk duplicate matrix", () => {
     expect(meal.totals.calories).toEqual(one.totals.calories);
     expect(meal.totals.calories.max).toBeLessThan(both.totals.calories.max);
     expect(roundRange(meal.totals.calories, 5)).toEqual({ min: 115, max: 120 });
-    expect(provider.resolve(items[1]).includedInTotal).toBe(false);
-    expect(provider.resolve(items[1]).reasons[0]).toBe(SUSPECTED_DUPLICATE_MILK_NOTICE);
+    const suspected = items[1];
+    if (suspected.portionMin === null || suspected.portionMax === null) throw new Error("portion");
+    const suspectedMatch = provider.resolve({
+      ...suspected,
+      portionMin: suspected.portionMin,
+      portionMax: suspected.portionMax,
+    });
+    expect(suspectedMatch.includedInTotal).toBe(false);
+    expect(suspectedMatch.reasons[0]).toBe(SUSPECTED_DUPLICATE_MILK_NOTICE);
 
     const confirmed = items.map(item => {
       if (item.suspectedDuplicateMilk !== true) return item;
