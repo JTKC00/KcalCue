@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { productionGlassMilkUnknownAnalysis } from "../src/lib/nutrition/photo-milk-prod-qa.fixture";
 import { c3Run1SingleOatCartonAnalysis, c4TwoMilkContainersAnalysis } from "../src/lib/nutrition/m7-milk-dedupe.fixture";
+import { qaSuspectedMilkAnalysis } from "../src/lib/domain/qa-suspected-milk";
 
 const userId = "11111111-1111-4111-8111-111111111111";
 type TestRecord = {
@@ -2240,4 +2241,65 @@ test("M7 C4 two described milk containers stay two rows without a plant-packagin
   await expect(page.getByText("可能係同一份飲品重複列出", { exact: false })).toHaveCount(0);
   await expect(page.getByText("包裝顯示植物奶，請核對種類及份量。", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "暫未能計算", exact: true })).toBeVisible();
+});
+
+async function openSuspectedMilkFixture(page: Page, context: BrowserContext) {
+  const backend = cloud();
+  await backend.install(context);
+  await page.route("**/api/analyze", route => route.fulfill({
+    json: { mode: "live", analysis: qaSuspectedMilkAnalysis, analysisProvenance: null },
+  }));
+  await page.route("**/api/nutrition/resolve", route => route.fulfill({
+    status: 500,
+    json: { error: { code: "unexpected_nutrition" } },
+  }));
+  await page.goto("/");
+  await login(page);
+  await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
+  const png = await sharp({ create: { width: 80, height: 60, channels: 3, background: "white" } }).png().toBuffer();
+  await page.locator('input[type="file"]').nth(1).setInputFiles({ name: "oat.png", mimeType: "image/png", buffer: png });
+  await page.getByRole("button", { name: "開始分析", exact: true }).click();
+  await expect(page.locator(".food-card")).toHaveCount(2);
+  await expect(page.getByRole("heading", { name: "約 155–160 kcal", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "係另一份，計入", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "係重複，移除", exact: true })).toBeVisible();
+  return backend;
+}
+
+test("suspected oat row can be counted as a separate serving, saved, and read back", async ({ page, context }) => {
+  const backend = await openSuspectedMilkFixture(page, context);
+  await page.getByRole("button", { name: "係另一份，計入", exact: true }).click();
+  await expect(page.getByRole("button", { name: "係另一份，計入", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "係重複，移除", exact: true })).toHaveCount(0);
+  await expect(page.locator(".food-card")).toHaveCount(2);
+  await expect(page.getByRole("heading", { name: "約 310–315 kcal", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  await expect.poll(() => backend.records.size).toBe(1);
+  const saved = () => [...backend.records.values()][0].items as Array<{ suspectedDuplicateMilk?: boolean }>;
+  expect(saved()).toHaveLength(2);
+  expect(saved().every(item => item.suspectedDuplicateMilk == null)).toBe(true);
+  await page.getByRole("button", { name: "歷史", exact: true }).click();
+  await page.getByRole("button", { name: "查看／修正", exact: true }).click();
+  await expect(page.locator(".food-card")).toHaveCount(2);
+  await expect(page.getByRole("heading", { name: "約 310–315 kcal", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "係另一份，計入", exact: true })).toHaveCount(0);
+  expect(backend.mealReadUrls.length).toBeGreaterThan(0);
+});
+
+test("suspected oat row can be removed as a duplicate, saved, and read back", async ({ page, context }) => {
+  const backend = await openSuspectedMilkFixture(page, context);
+  await page.getByRole("button", { name: "係重複，移除", exact: true }).click();
+  await expect(page.locator(".food-card")).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "係另一份，計入", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "約 155–160 kcal", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  await expect.poll(() => backend.records.size).toBe(1);
+  const saved = [...backend.records.values()][0].items as unknown[];
+  expect(saved).toHaveLength(1);
+  await page.getByRole("button", { name: "歷史", exact: true }).click();
+  await page.getByRole("button", { name: "查看／修正", exact: true }).click();
+  await expect(page.locator(".food-card")).toHaveCount(1);
+  await expect(page.getByRole("heading", { name: "約 155–160 kcal", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "係重複，移除", exact: true })).toHaveCount(0);
+  expect(backend.mealReadUrls.length).toBeGreaterThan(0);
 });

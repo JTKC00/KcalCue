@@ -577,6 +577,9 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
         // One ID per explicit analysis action. Transport replays of this POST
         // must not reserve or invoke the paid provider a second time.
         formData.set("attemptId", crypto.randomUUID());
+        if (new URLSearchParams(window.location.search).get("qaSuspectedMilk") === "1") {
+          formData.set("qaSuspectedMilk", "1");
+        }
       }
 
       const [response] = await Promise.all([

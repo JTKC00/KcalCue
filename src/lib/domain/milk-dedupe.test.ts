@@ -13,6 +13,7 @@ import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { NutritionService } from "@/lib/nutrition/service";
 import { duplicateGenericMilkCartonAnalysis } from "@/lib/nutrition/duplicate-milk-carton.fixture";
 import { productionGlassMilkUnknownAnalysis } from "@/lib/nutrition/photo-milk-prod-qa.fixture";
+import { qaSuspectedMilkAnalysis } from "@/lib/domain/qa-suspected-milk";
 import {
   c3Run1SingleOatCartonAnalysis,
   c3Run2SingleOatCartonAnalysis,
@@ -57,6 +58,31 @@ const provider = new LocalNutritionProvider();
 const service = new NutritionService(provider);
 
 describe("issue 127 milk duplicate matrix", () => {
+  it("holds the QA fixture's second whole-milk row out of the confirmed total", () => {
+    const held = prepared(qaSuspectedMilkAnalysis);
+    expect(held.foods).toHaveLength(2);
+    expect(held.foods[0].displayName).toBe("全脂牛奶");
+    expect(held.foods[0].suspectedDuplicateMilk).toBeUndefined();
+    expect(held.foods[1].suspectedDuplicateMilk).toBe(true);
+    expect(preparePhotoMilkAnalysis(held)).toEqual(held);
+    const items = createEditableFoodItems(held.foods).map(item => ({
+      ...item,
+      entrySource: "photo" as const,
+    }));
+    const meal = service.calculateMeal(items);
+    expect(meal.includedCount).toBe(1);
+    expect(meal.totalCount).toBe(1);
+    expect(roundRange(meal.totals.calories, 5)).toEqual({ min: 155, max: 160 });
+    const separate = items.map(item => {
+      if (item.suspectedDuplicateMilk !== true) return item;
+      const next = { ...item };
+      delete next.suspectedDuplicateMilk;
+      return next;
+    });
+    expect(service.calculateMeal(separate).includedCount).toBe(2);
+    expect(roundRange(service.calculateMeal(separate).totals.calories, 5)).toEqual({ min: 310, max: 315 });
+  });
+
   it("(a) merges the same canonical key on the same container when nothing says there is a second container", () => {
     const merged = prepared(c3Run1SingleOatCartonAnalysis);
     expect(c3Run1SingleOatCartonAnalysis.foods).toHaveLength(2);

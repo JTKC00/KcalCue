@@ -15,7 +15,7 @@ const image = `asia-east1-docker.pkg.dev/demo-kcalcue/kcalcue/web@${digest}`;
 // The fake service template is contaminated with Gemini. A revision describe
 // returns the deployed env/secret replacement, unless a failure mode forces
 // the candidate to stay contaminated or to carry the wrong digest.
-function run(action: "pause" | "resume" | "deploy" | "rollback" | "stage" | "promote" | "preflight" | "untag" | "access-stage" | "access-promote", failure = "", options: { nutritionSecretVersion?: string; smokeTag?: string; omitSmokeTag?: boolean; existingSmokeTag?: boolean; allowedEmails?: string[]; revision?: string } = {}) {
+function run(action: "pause" | "resume" | "deploy" | "rollback" | "stage" | "promote" | "preflight" | "untag" | "access-stage" | "access-promote", failure = "", options: { nutritionSecretVersion?: string; smokeTag?: string; omitSmokeTag?: boolean; existingSmokeTag?: boolean; allowedEmails?: string[]; revision?: string; qaSuspectedMilk?: boolean } = {}) {
   const directory = mkdtempSync(path.join(tmpdir(), "kcalcue-cloud-routing-test-"));
   temporary.push(directory);
   const executable = path.join(directory, "gcloud.mjs");
@@ -169,6 +169,7 @@ else if (matches('run', 'services', 'update') || matches('run', 'deploy')) {
   }
   if (isCurrent && failure === 'serving-secret-drift') env.push({ name: 'OTHER_API_KEY', valueFrom: { secretKeyRef: { name: 'kcalcue-other', key: '1' } } });
   if (!isCurrent && failure === 'extra-secret') env.push({ name: 'OTHER_API_KEY', valueFrom: { secretKeyRef: { name: 'kcalcue-other', key: '1' } } });
+  if (!isCurrent && failure === 'qa-suspected-milk') env.push({ name: 'KCALCUE_QA_SUSPECTED_MILK', value: '1' });
   if (!isCurrent && (failure === 'wrong-nutrition-name' || failure === 'wrong-nutrition-version')) {
     env = env.map(entry => {
       if (entry.name !== 'NUTRITION_API_KEY' || !entry.valueFrom) return entry;
@@ -276,6 +277,7 @@ else if (matches('run', 'services', 'update') || matches('run', 'deploy')) {
   const result = spawnSync(process.execPath, ["scripts/cloud-run.mjs", action, "--config", config,
     ...(action === "deploy" || action === "stage" ? ["--tag", "trial-test"] : []),
     ...(action === "stage" && !options.omitSmokeTag ? ["--smoke-tag", smokeTag] : []),
+    ...(options.qaSuspectedMilk ? ["--qa-suspected-milk"] : []),
     ...(action === "untag" && !options.omitSmokeTag ? ["--tag", smokeTag] : []),
     ...(action === "rollback" ? ["--revision", "kcalcue-00002-old"] : []),
     ...(action === "promote" && failure !== "missing-revision" ? ["--revision", "kcalcue-00003-new"] : []),
@@ -333,6 +335,7 @@ describe("Cloud Run stage and promote", () => {
     });
     expect(finalState.candidateEnv).not.toHaveProperty("GEMINI_MODEL");
     expect(finalState.candidateEnv).not.toHaveProperty("GEMINI_API_KEY");
+    expect(finalState.candidateEnv).not.toHaveProperty("KCALCUE_QA_SUSPECTED_MILK");
     expect(finalState.secretFlag).toBe("--set-secrets=OPENAI_API_KEY=kcalcue-openai:1");
     expect(finalState.listedEnv).toEqual(expect.arrayContaining([
       { name: "KCALCUE_VISION_PROVIDER", value: "gemini" },
@@ -346,6 +349,28 @@ describe("Cloud Run stage and promote", () => {
     const created = calls.findIndex(call => call[0] === "run" && call[1] === "revisions" && call[3] === "kcalcue-00003-new");
     expect(created).toBeGreaterThan(calls.findIndex(call => call[1] === "deploy"));
     expect(calls.at(-1)?.slice(0, 3)).toEqual(["run", "services", "describe"]);
+  });
+
+  it("sets the suspected-milk fixture only on a zero-traffic stage", () => {
+    const staged = run("stage", "", { qaSuspectedMilk: true });
+    expect(staged.result.status, staged.result.stderr).toBe(0);
+    expect(trafficChanged(staged.calls)).toBe(false);
+    expect(staged.finalState.candidateEnv?.KCALCUE_QA_SUSPECTED_MILK).toBe("1");
+    expect(staged.finalState.routedRevision).toBe("kcalcue-00001-old");
+
+    const promoted = run("promote", "", { qaSuspectedMilk: true });
+    expect(promoted.result.status).toBe(1);
+    expect(promoted.result.stderr).toContain("only be set on a zero-traffic stage");
+    expect(promoted.calls).toEqual([]);
+  });
+
+  it.each(["promote", "rollback"] as const)("refuses production traffic for a revision that has the suspected-milk fixture: %s", action => {
+    const { result, calls, finalState } = run(action, "qa-suspected-milk");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("QA suspected-milk fixture cannot receive production traffic");
+    expect(result.stderr).toContain("traffic was not changed");
+    expect(trafficChanged(calls)).toBe(false);
+    expect(finalState.routedRevision).toBe("kcalcue-00001-old");
   });
 
   it.each(["stage", "promote"] as const)("rejects a Gemini candidate before production traffic changes: %s", action => {

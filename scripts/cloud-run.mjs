@@ -8,7 +8,7 @@ import { z } from "zod";
 const help = `Cloud Run private trial (explicit commands; staging never promotes)
   node scripts/cloud-run.mjs preflight --config /private/trial-config.json
   node scripts/cloud-run.mjs build --config /private/trial-config.json --tag <immutable-tag>
-  node scripts/cloud-run.mjs stage --config /private/trial-config.json --tag <verified-tag> --smoke-tag <cloud-run-tag>
+  node scripts/cloud-run.mjs stage --config /private/trial-config.json --tag <verified-tag> --smoke-tag <cloud-run-tag> [--qa-suspected-milk]
   node scripts/cloud-run.mjs promote --config /private/trial-config.json --revision <candidate-revision>
   node scripts/cloud-run.mjs untag --config /private/trial-config.json --tag <smoke-tag>
   node scripts/cloud-run.mjs access-stage --config /private/trial-config.json --smoke-tag <cloud-run-tag>
@@ -17,6 +17,7 @@ const help = `Cloud Run private trial (explicit commands; staging never promotes
   node scripts/cloud-run.mjs pause --config /private/trial-config.json
   node scripts/cloud-run.mjs resume --config /private/trial-config.json
 stage creates a zero-traffic candidate, assigns --smoke-tag for a tagged preview URL, and does not call update-traffic.
+--qa-suspected-milk is stage-only. It sets KCALCUE_QA_SUSPECTED_MILK=1 on that candidate. promote, rollback, and access-promote refuse any revision that has the variable.
 promote is separate and requires the exact candidate revision after inspection and approval. A smoke tag is not promotion authority.
 untag --tag removes only that smoke tag and preserves the current production traffic allocation.
 access-stage reuses the current production image and changes only the account allowlist, at zero traffic.
@@ -42,6 +43,7 @@ const deployRetired = "deploy was split for safety and no longer stages and prom
 function main() {
   const { values, positionals } = parseArgs({ allowPositionals: true, options: {
     config: { type: "string" }, tag: { type: "string" }, "smoke-tag": { type: "string" }, revision: { type: "string" }, help: { type: "boolean" },
+    "qa-suspected-milk": { type: "boolean" },
   } });
   if (values.help || !positionals.length) { console.log(help); return; }
   const action = positionals[0];
@@ -67,6 +69,9 @@ function main() {
   if (action === "untag") {
     if (values.tag === undefined) throw new Error("Provide the smoke --tag to remove.");
     assertSmokeTag(values.tag);
+  }
+  if (values["qa-suspected-milk"] === true && action !== "stage") {
+    throw new Error("KCALCUE_QA_SUSPECTED_MILK can only be set on a zero-traffic stage.");
   }
   if ((action === "promote" || action === "access-promote") && !isRevision(values.revision)) throw new Error("Provide the verified candidate --revision.");
   if (action === "rollback" && !isRevision(values.revision)) throw new Error("Provide the previously verified --revision.");
@@ -393,7 +398,7 @@ function main() {
     if (analysis !== "true" && analysis !== "false") throw new Error("Existing analysis switch is unknown; deployment stopped before mutation.");
     return { revision, analysisEnabled: analysis === "true", image: container.image };
   }
-  function withRuntimeFile(analysisEnabled, fn) {
+  function withRuntimeFile(analysisEnabled, fn, extras = {}) {
     const temporary = mkdtempSync(path.join(tmpdir(), "kcalcue-deploy-"));
     try {
       const envFile = path.join(temporary, "runtime.json");
@@ -408,9 +413,16 @@ function main() {
         KCALCUE_ANALYSIS_ENABLED: String(analysisEnabled),
         OPENAI_MODEL: productionModel,
         KCALCUE_VISION_PROVIDER: "openai",
+        ...extras,
       }), { mode: 0o600 });
       return fn(envFile);
     } finally { rmSync(temporary, { recursive: true, force: true }); }
+  }
+  function assertNoQaSuspectedMilk(container) {
+    if (!Array.isArray(container?.env)) throw new Error("Revision environment is uncertain; traffic was not changed.");
+    if (container.env.some(entry => entry?.name === "KCALCUE_QA_SUSPECTED_MILK")) {
+      throw new Error("QA suspected-milk fixture cannot receive production traffic; traffic was not changed.");
+    }
   }
   function pinnedImageForTag(tag) {
     const image = `${config.region}-docker.pkg.dev/${config.projectId}/kcalcue/web:${tag}`;
@@ -419,6 +431,8 @@ function main() {
     return `${imagePrefix}${digest}`;
   }
   function routeRevision(revision, analysisEnabled, expectedImage) {
+    const { container } = describeRevision(revision);
+    assertNoQaSuspectedMilk(container);
     assertCandidate(revision, analysisEnabled, expectedImage);
     gcloud(["run", "services", "update-traffic", "kcalcue", `--region=${config.region}`, `--to-revisions=${revision}=100`]);
     verifyTraffic(revision);
@@ -457,11 +471,12 @@ function main() {
     const pinnedImage = pinnedImageForTag(values.tag);
     const serving = readServingState();
     const analysisEnabled = serving ? serving.analysisEnabled : false;
+    const qaExtras = values["qa-suspected-milk"] === true ? { KCALCUE_QA_SUSPECTED_MILK: "1" } : {};
     const revision = withRuntimeFile(analysisEnabled, envFile => gcloud(["run", "deploy", "kcalcue", `--image=${pinnedImage}`,
       `--region=${config.region}`, `--service-account=kcalcue-runtime@${config.projectId}.iam.gserviceaccount.com`,
       "--allow-unauthenticated", "--no-traffic", "--port=8080", "--cpu=1", "--memory=1Gi", "--concurrency=4", "--timeout=120s",
       "--min=0", "--max=1", "--min-instances=0", "--max-instances=1", "--cpu-throttling", "--no-cpu-boost",
-      `--env-vars-file=${envFile}`, secretFlag, `--tag=${values["smoke-tag"]}`, "--format=value(status.latestCreatedRevisionName)"], true));
+      `--env-vars-file=${envFile}`, secretFlag, `--tag=${values["smoke-tag"]}`, "--format=value(status.latestCreatedRevisionName)"], true), qaExtras);
     let previewUrl;
     try {
       assertCandidate(revision, analysisEnabled, pinnedImage);
@@ -520,6 +535,7 @@ function main() {
       throw new Error("Rollback target is not a ready revision with the expected account, project and analysis settings; traffic was not changed.");
     }
     assertProductionProvider(target.described, target.container, { requireProvider: false, expectedImage: null });
+    assertNoQaSuspectedMilk(target.container);
     gcloud(["run", "services", "update-traffic", "kcalcue", `--region=${config.region}`, `--to-revisions=${values.revision}=100`]);
     verifyTraffic(values.revision);
     console.log(`PASS: ${values.revision} receives 100% of traffic after rollback.`);
@@ -569,6 +585,7 @@ function main() {
     if (firebaseFields().some(([name, expected]) => envValue(candidate.container, name) !== expected)) {
       throw new Error("Firebase configuration differs from config; traffic was not changed.");
     }
+    assertNoQaSuspectedMilk(candidate.container);
     assertCandidate(values.revision, source.analysisEnabled, source.image);
     assertAccessEnvShape(candidate.container);
     assertSameAccessRuntime(candidate.described, candidate.container, source.runtime);
