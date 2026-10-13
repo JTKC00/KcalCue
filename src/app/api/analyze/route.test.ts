@@ -242,7 +242,7 @@ describe("POST /api/analyze", () => {
     expect(body.analysis.foods[0].displayName).toBe("全脂牛奶");
     expect(foodAnalysisSchema.parse(body.analysis)).toEqual(body.analysis);
     expect(preparePhotoMilkAnalysis(body.analysis)).toEqual(body.analysis);
-    expect(qaSuspectedMilkAnalysis.foods.every(food => food.suspectedDuplicateMilk == null)).toBe(true);
+    expect(qaSuspectedMilkAnalysis.foods.every(food => !("suspectedDuplicateMilk" in food))).toBe(true);
   });
 
   it("merges C3-run1 identical oat-milk rows that only say the photo shows one carton", async () => {
