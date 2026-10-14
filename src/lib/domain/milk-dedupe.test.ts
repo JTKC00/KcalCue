@@ -388,6 +388,21 @@ describe("issue 127 milk duplicate matrix", () => {
       expect(toMeal(items.foods).includedCount).toBe(3);
     });
 
+    it("does not interpret a meal-level two-carton count as two oat cartons when the second is soy", () => {
+      const soy = oat("另一盒豆漿", {
+        displayName: "豆漿", normalizedName: "soy milk", preparationMethod: "紙盒",
+      });
+      const items = prepared(analysis([carton(), carton(), soy, glass()], {
+        visibleEvidence: ["畫面有兩盒飲品：燕麥奶及豆漿，旁邊另有玻璃杯"],
+      }));
+      expect(items.foods).toHaveLength(4);
+      expect(items.foods.filter(food => food.normalizedName === "oat milk" && food.suspectedDuplicateMilk)).toHaveLength(1);
+      expect(items.foods.find(food => food.normalizedName === "soy milk")?.suspectedDuplicateMilk).toBeUndefined();
+      expect(items.foods.find(food => food.normalizedName === "whole milk")?.suspectedDuplicateMilk).toBeUndefined();
+      expect(toMeal(items.foods).includedCount).toBe(3);
+      expect(toMeal(items.foods).coverage).toBe("partial");
+    });
+
     it("withholds an unknown-kind milk row when its carton family is unambiguous", () => {
       const genericCarton = oat("紙盒白色飲品", {
         displayName: "牛奶", normalizedName: "milk", preparationMethod: "紙盒",

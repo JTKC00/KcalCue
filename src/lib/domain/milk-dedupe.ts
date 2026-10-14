@@ -293,23 +293,38 @@ function candidateMilkGroups(foods: readonly ObservedFood[], milkIndexes: readon
 function groupShowsSeparateSameKind(
   analysis: FoodAnalysis,
   group: readonly ObservedFood[],
+  otherMilkRows: readonly ObservedFood[],
 ): boolean {
-  const statements = evidenceStatements(analysis, group, true);
-  const text = statements.join(" ");
   if (negatedDistinctServing(analysis, group)) return true;
   const rowText = group.map(food => normalizeFoodName(milkRowText(food)));
   const opposite = rowText.some(row => /左邊|左侧|left/.test(row))
     && rowText.some(row => /右邊|右侧|right/.test(row));
   if (opposite) return true;
+  const ownEvidence = rowText.join(" ");
+  const mealEvidence = normalizeFoodName([
+    ...analysis.visibleEvidence, ...analysis.uncertaintyReasons,
+    ...analysis.estimatedInformation, ...analysis.unknownInformation,
+  ].join(" "));
   const kinds = group.flatMap(food => [...containerKinds(food)]);
+  const separateSameKind = (kind: "carton" | "bottle" | "glass", pattern: RegExp) => {
+    if (pattern.test(ownEvidence)) return true;
+    // A meal-level "two cartons" can describe one oat carton and one
+    // separate soy carton. Never assign that count to the oat subgroup if
+    // another milk row carries the same vessel kind.
+    const anotherKindInPhoto = otherMilkRows.some(food => containerKinds(food).has(kind));
+    return !anotherKindInPhoto && pattern.test(mealEvidence);
+  };
   if (kinds.includes("carton")) {
-    return /另一盒|第二盒|兩盒|两盒|兩個紙盒|two cartons|another carton|second carton/.test(text);
+    return separateSameKind("carton",
+      /另一盒|第二盒|兩盒|两盒|兩個紙盒|two cartons|another carton|second carton/);
   }
   if (kinds.includes("bottle")) {
-    return /另一瓶|第二瓶|兩瓶|two bottles|another bottle|second bottle/.test(text);
+    return separateSameKind("bottle",
+      /另一瓶|第二瓶|兩瓶|two bottles|another bottle|second bottle/);
   }
   if (kinds.includes("glass")) {
-    return /另一杯|第二杯|兩杯|兩個玻璃杯|two glasses|two cups|another glass|second glass/.test(text);
+    return separateSameKind("glass",
+      /另一杯|第二杯|兩杯|兩個玻璃杯|two glasses|two cups|another glass|second glass/);
   }
   return false;
 }
@@ -321,7 +336,9 @@ function dedupeMultipleMilkGroups(analysis: FoodAnalysis, milkIndexes: readonly 
   const replacements = new Map<number, ObservedFood>();
   for (const indexes of groups) {
     const group = indexes.map(index => analysis.foods[index]);
-    if (groupShowsSeparateSameKind(analysis, group)) continue;
+    const otherMilkRows = milkIndexes.filter(index => !indexes.includes(index))
+      .map(index => analysis.foods[index]);
+    if (groupShowsSeparateSameKind(analysis, group, otherMilkRows)) continue;
     const keeper = indexes.reduce((best, index) =>
       specificity(analysis.foods[index]) > specificity(analysis.foods[best]) ? index : best);
     // A global note about a different container is not sufficient for an
