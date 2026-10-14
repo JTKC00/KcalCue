@@ -3,7 +3,8 @@ import sharp from "sharp";
 import path from "node:path";
 
 import { productionGlassMilkUnknownAnalysis } from "../src/lib/nutrition/photo-milk-prod-qa.fixture";
-import { c3Run1SingleOatCartonAnalysis, c4TwoMilkContainersAnalysis } from "../src/lib/nutrition/m7-milk-dedupe.fixture";
+import { c3Run1SingleOatCartonAnalysis, c4TwoMilkContainersAnalysis, m6CartonAndGlassAnalysis } from "../src/lib/nutrition/m7-milk-dedupe.fixture";
+import { preparePhotoMilkAnalysis } from "../src/lib/domain/photo-milk-analysis";
 import { qaSuspectedMilkAnalysis } from "../src/lib/domain/qa-suspected-milk";
 
 const userId = "11111111-1111-4111-8111-111111111111";
@@ -2305,3 +2306,66 @@ test("suspected oat row can be removed as a duplicate, saved, and read back", as
   await expect(page.getByRole("button", { name: "係重複，移除", exact: true })).toHaveCount(0);
   expect(backend.mealReadUrls.length).toBeGreaterThan(0);
 });
+
+
+// This exercises the real server-side milk grouping on a 3-row photo response,
+// not a hand-crafted suspectedDuplicateMilk flag. Cloud is synthetic E2E.
+for (const decision of ["remove", "confirm"] as const) {
+  test(`P1 one oat carton duplicated beside a real milk glass: ${decision} persists after History readback`,
+  async ({ page, context }) => {
+    const backend = cloud();
+    await backend.install(context);
+    const carton = m6CartonAndGlassAnalysis.foods[0];
+    const glass = m6CartonAndGlassAnalysis.foods[1];
+    const modelAnalysis = {
+      ...m6CartonAndGlassAnalysis,
+      foods: [carton, { ...carton, notes: "相片中同一紙盒燕麥奶" },
+        { ...glass, displayName: "全脂牛奶", normalizedName: "whole milk" }],
+      visibleEvidence: ["一盒燕麥奶", "旁邊另外一個玻璃杯盛全脂牛奶"],
+    };
+    const serverAnalysis = preparePhotoMilkAnalysis(modelAnalysis);
+    expect(serverAnalysis.foods).toHaveLength(3);
+    expect(serverAnalysis.foods.filter(item => item.suspectedDuplicateMilk)).toHaveLength(1);
+    await page.route("**/api/analyze", route => route.fulfill({
+      json: { mode: "live", analysis: serverAnalysis, analysisProvenance: null },
+    }));
+    await page.route("**/api/nutrition/resolve", route => route.fulfill({
+      status: 500, json: { error: { code: "unexpected_nutrition" } },
+    }));
+    await page.goto("/");
+    await login(page);
+    await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
+    const png = await sharp({
+      create: { width: 80, height: 60, channels: 3, background: "white" },
+    }).png().toBuffer();
+    await page.locator('input[type="file"]').nth(1).setInputFiles({
+      name: "oat-and-glass.png", mimeType: "image/png", buffer: png,
+    });
+    await page.getByRole("button", { name: "開始分析", exact: true }).click();
+    await expect(page.locator(".food-card")).toHaveCount(3);
+    await expect(page.getByText(/有 1 項飲品可能重複，尚待你確認/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "係另一份，計入", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "係重複，移除", exact: true })).toBeVisible();
+    if (decision === "remove") {
+      await page.getByRole("button", { name: "係重複，移除", exact: true }).click();
+      await expect(page.locator(".food-card")).toHaveCount(2);
+    } else {
+      await page.getByRole("button", { name: "係另一份，計入", exact: true }).click();
+      await expect(page.locator(".food-card")).toHaveCount(3);
+    }
+    await expect(page.getByText(/有 1 項飲品可能重複，尚待你確認/)).toHaveCount(0);
+    await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+    await expect.poll(() => backend.records.size).toBe(1);
+    const saved = [...backend.records.values()][0].items as Array<{
+      normalizedName: string; suspectedDuplicateMilk?: true;
+    }>;
+    expect(saved.length).toBe(decision === "remove" ? 2 : 3);
+    expect(saved.every(item => item.suspectedDuplicateMilk == null)).toBe(true);
+    expect(saved.some(item => item.normalizedName === "whole milk")).toBe(true);
+    await page.getByRole("button", { name: "歷史", exact: true }).click();
+    await page.getByRole("button", { name: "查看／修正", exact: true }).click();
+    await expect(page.locator(".food-card")).toHaveCount(decision === "remove" ? 2 : 3);
+    await expect(page.getByRole("button", { name: "係另一份，計入", exact: true })).toHaveCount(0);
+    expect(backend.mealReadUrls.length).toBeGreaterThan(0);
+  });
+}

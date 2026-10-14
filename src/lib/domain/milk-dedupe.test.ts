@@ -328,4 +328,107 @@ describe("issue 127 milk duplicate matrix", () => {
       }
     }
   });
+
+  describe("P1 group-aware mixed-container deduplication", () => {
+    const carton = () => oat("相片中一盒燕麥奶", { preparationMethod: "紙盒" });
+    const glass = () => oat("獨立玻璃杯", {
+      displayName: "全脂牛奶", normalizedName: "whole milk",
+      preparationMethod: "玻璃杯", portionMin: 250, portionMax: 250,
+    });
+    const toMeal = (foods: ObservedFood[]) => service.calculateMeal(
+      createEditableFoodItems(foods).map(item => ({
+        ...item, entrySource: "photo" as const,
+        userMilkTypeChoice: item.normalizedName === "oat milk" ? "oat" as const : "whole" as const,
+      })),
+    );
+
+    it.each(["cartons-first", "glass-first", "interleaved"] as const)(
+      "never double-counts a duplicated oat carton beside a genuine glass (%s)", order => {
+        const foods = order === "glass-first"
+          ? [glass(), carton(), carton()]
+          : order === "interleaved"
+            ? [carton(), glass(), carton()]
+            : [carton(), carton(), glass()];
+        const result = prepared(analysis(foods, {
+          visibleEvidence: ["畫面一盒燕麥奶，另外一個玻璃杯盛全脂牛奶"],
+        }));
+        expect(result.foods).toHaveLength(3);
+        expect(result.foods.filter(item => item.suspectedDuplicateMilk)).toHaveLength(1);
+        expect(result.foods.filter(item => item.normalizedName === "whole milk" && item.suspectedDuplicateMilk)).toHaveLength(0);
+        const actual = toMeal(result.foods);
+        const expected = toMeal([carton(), glass()]);
+        expect(actual.includedCount).toBe(2);
+        expect(actual.totalCount).toBe(3);
+        expect(actual.coverage).toBe("partial");
+        expect(actual.totals).toEqual(expected.totals);
+        expect(actual.foods.filter(item => item.food.suspectedDuplicateMilk && item.includedInTotal)).toHaveLength(0);
+        expect(preparePhotoMilkAnalysis(result)).toEqual(result);
+      },
+    );
+
+    it("keeps distinct cartons of different milk types plus a glass", () => {
+      const soy = oat("紙盒豆漿", {
+        displayName: "豆漿", normalizedName: "soy milk", preparationMethod: "紙盒",
+      });
+      const items = prepared(analysis([carton(), soy, glass()]));
+      expect(items.foods).toHaveLength(3);
+      expect(items.foods.every(food => !food.suspectedDuplicateMilk && !food.duplicateMilkNotice)).toBe(true);
+      expect(toMeal(items.foods).totalCount).toBe(3);
+    });
+
+    it("preserves two explicitly distinct oat cartons even next to a glass", () => {
+      const items = prepared(analysis([
+        oat("左邊一盒燕麥奶", { preparationMethod: "紙盒" }),
+        oat("另一盒燕麥奶", { preparationMethod: "紙盒" }),
+        glass(),
+      ], { visibleEvidence: ["畫面兩盒燕麥奶，旁邊有一杯全脂牛奶"] }));
+      expect(items.foods).toHaveLength(3);
+      expect(items.foods.every(food => !food.suspectedDuplicateMilk && !food.duplicateMilkNotice)).toBe(true);
+      expect(toMeal(items.foods).totalCount).toBe(3);
+      expect(toMeal(items.foods).includedCount).toBe(3);
+    });
+
+    it("withholds an unknown-kind milk row when its carton family is unambiguous", () => {
+      const genericCarton = oat("紙盒白色飲品", {
+        displayName: "牛奶", normalizedName: "milk", preparationMethod: "紙盒",
+      });
+      const items = prepared(analysis([carton(), genericCarton, glass()]));
+      expect(items.foods).toHaveLength(3);
+      expect(items.foods.filter(food => food.suspectedDuplicateMilk)).toHaveLength(1);
+      expect(items.foods.find(food => food.normalizedName === "whole milk")?.suspectedDuplicateMilk).toBeUndefined();
+    });
+
+    it("leaves unresolved carton variants visible rather than merging by a glass's evidence", () => {
+      const variant = oat("紙盒燕麥奶，旁邊另有玻璃杯", { preparationMethod: "紙盒" });
+      const items = prepared(analysis([carton(), variant, glass()], {
+        visibleEvidence: ["盒裝燕麥奶和獨立玻璃杯"],
+      }));
+      expect(items.foods).toHaveLength(3);
+      expect(items.foods.filter(food => food.suspectedDuplicateMilk)).toHaveLength(1);
+    });
+
+    it("preserves specific uncertain/negated evidence for two separate cartons", () => {
+      const uncertain = prepared(analysis([
+        oat("未能確認是否同一紙盒", { preparationMethod: "紙盒" }),
+        carton(), glass(),
+      ]));
+      expect(uncertain.foods.filter(food => food.suspectedDuplicateMilk)).toHaveLength(1);
+      const negated = prepared(analysis([
+        oat("not the same carton", { preparationMethod: "紙盒" }),
+        carton(), glass(),
+      ]));
+      expect(negated.foods.filter(food => food.suspectedDuplicateMilk)).toHaveLength(0);
+    });
+
+    it("holds out both extra cartons if the same oat container is returned three times with a glass", () => {
+      const result = prepared(analysis([carton(), carton(), glass(), carton()], {
+        visibleEvidence: ["一盒燕麥奶和一杯全脂牛奶"],
+      }));
+      expect(result.foods).toHaveLength(4);
+      expect(result.foods.filter(food => food.suspectedDuplicateMilk)).toHaveLength(2);
+      expect(toMeal(result.foods).totals).toEqual(toMeal([carton(), glass()]).totals);
+      expect(toMeal(result.foods).coverage).toBe("partial");
+    });
+  });
+
 });

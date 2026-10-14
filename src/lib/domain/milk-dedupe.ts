@@ -234,6 +234,123 @@ function markSuspectedDuplicates(
 }
 
 /**
+ * Multi-row scenes are not one milk container. Build candidate groups by
+ * milk family and by the physical kind named on each row. A separate glass
+ * must never disable deduplication of a carton elsewhere in the same photo.
+ *
+ * Generic "milk" may join an explicit family only when its container kind
+ * points to exactly one such family; otherwise we avoid guessing its identity.
+ */
+function candidateMilkGroups(foods: readonly ObservedFood[], milkIndexes: readonly number[]): number[][] {
+  type ContainerKind = "carton" | "bottle" | "glass" | "package" | "unknown" | "mixed";
+  const kind = (food: ObservedFood): ContainerKind => {
+    // A row's name / preparation identifies *its own* vessel more reliably
+    // than a note that may describe other items elsewhere in the photo.
+    const ownVessel = containerKinds({
+      ...food,
+      notes: undefined,
+      visibleIngredients: undefined,
+      uncertaintyReasons: [],
+    });
+    const kinds = ownVessel.size > 0 ? ownVessel : containerKinds(food);
+    if (kinds.has("carton")) kinds.delete("package"); // package is often the carton wrapper
+    if (kinds.size === 0) return "unknown";
+    if (kinds.size > 1) return "mixed";
+    return [...kinds][0];
+  };
+  const entries = milkIndexes.map(index => ({
+    index, family: milkFamily(foods[index]), kind: kind(foods[index]),
+  }));
+  const resolved = entries.map(entry => {
+    if (entry.family !== "generic") return { ...entry };
+    const eligible = new Set(entries.filter(other =>
+      other.family !== "generic" &&
+      (entry.kind === "unknown" || (entry.kind !== "mixed" && other.kind === entry.kind))
+    ).map(other => other.family));
+    return { ...entry, family: eligible.size === 1 ? [...eligible][0] : entry.family };
+  });
+
+  const groups = new Map<string, number[]>();
+  for (const entry of resolved) {
+    // An unknown container can share the only concrete container kind in its
+    // family; with multiple kinds it remains separate, not silently dropped.
+    const possibleKinds = new Set(resolved.filter(other =>
+      other.family === entry.family && other.kind !== "unknown" && other.kind !== "mixed"
+    ).map(other => other.kind));
+    const effectiveKind = entry.kind === "unknown" && possibleKinds.size === 1
+      ? [...possibleKinds][0] : entry.kind;
+    const key = `${entry.family}:${effectiveKind}`;
+    groups.set(key, [...(groups.get(key) ?? []), entry.index]);
+  }
+  return [...groups.values()].filter(group => group.length >= 2);
+}
+
+/**
+ * Distinct *same-kind* physical servings are positive evidence against merging.
+ * "Another glass" elsewhere in a carton photo is NOT evidence for two cartons.
+ * Treat ambiguous pairs as pending, rather than silently counting both.
+ */
+function groupShowsSeparateSameKind(
+  analysis: FoodAnalysis,
+  group: readonly ObservedFood[],
+): boolean {
+  const statements = evidenceStatements(analysis, group, true);
+  const text = statements.join(" ");
+  if (negatedDistinctServing(analysis, group)) return true;
+  const rowText = group.map(food => normalizeFoodName(milkRowText(food)));
+  const opposite = rowText.some(row => /左邊|左侧|left/.test(row))
+    && rowText.some(row => /右邊|右侧|right/.test(row));
+  if (opposite) return true;
+  const kinds = group.flatMap(food => [...containerKinds(food)]);
+  if (kinds.includes("carton")) {
+    return /另一盒|第二盒|兩盒|两盒|兩個紙盒|two cartons|another carton|second carton/.test(text);
+  }
+  if (kinds.includes("bottle")) {
+    return /另一瓶|第二瓶|兩瓶|two bottles|another bottle|second bottle/.test(text);
+  }
+  if (kinds.includes("glass")) {
+    return /另一杯|第二杯|兩杯|兩個玻璃杯|two glasses|two cups|another glass|second glass/.test(text);
+  }
+  return false;
+}
+
+function dedupeMultipleMilkGroups(analysis: FoodAnalysis, milkIndexes: readonly number[]): FoodAnalysis {
+  const groups = candidateMilkGroups(analysis.foods, milkIndexes);
+  if (groups.length === 0) return analysis;
+  const dropped = new Set<number>();
+  const replacements = new Map<number, ObservedFood>();
+  for (const indexes of groups) {
+    const group = indexes.map(index => analysis.foods[index]);
+    if (groupShowsSeparateSameKind(analysis, group)) continue;
+    const keeper = indexes.reduce((best, index) =>
+      specificity(analysis.foods[index]) > specificity(analysis.foods[best]) ? index : best);
+    // A global note about a different container is not sufficient for an
+    // automatic merge. Keep extras visible and explicitly excluded instead.
+    const safeMerge = !rowsShowDistinctContainers(group)
+      && !mealOnlySuggestsAnotherContainer(analysis, group)
+      && !uncertainSameServing(analysis, group)
+      && sameMilkContainer(group)
+      && (explicitlySameServing(analysis, group) || sameCanonicalKey(group));
+    if (safeMerge) {
+      replacements.set(indexes[0], withMergeNotice(pickKept(group)));
+      for (const index of indexes.slice(1)) dropped.add(index);
+    } else {
+      for (const index of indexes) {
+        replacements.set(index, index === keeper
+          ? releaseSuspect(analysis.foods[index])
+          : { ...releaseSuspect(analysis.foods[index]), suspectedDuplicateMilk: true });
+      }
+    }
+  }
+  if (dropped.size === 0 && replacements.size === 0) return analysis;
+  return {
+    ...analysis,
+    foods: analysis.foods.flatMap((food, index) =>
+      dropped.has(index) ? [] : [replacements.get(index) ?? food]),
+  };
+}
+
+/**
  * Merge only with shared-container evidence and no sign of a second container.
  * Identical canonical keys on the same container kind are enough: the model
  * often writes 「只顯示一盒」 instead of 「同一盒」. That merge is conservative
@@ -245,6 +362,7 @@ export function dedupeIdenticalContainerMilk(analysis: FoodAnalysis): FoodAnalys
   if (!analysis || !Array.isArray(analysis.foods)) return analysis;
   const milkIndexes = analysis.foods.flatMap((food, index) => (isMilkDrink(food) ? [index] : []));
   const milkFoods = milkIndexes.map((index) => analysis.foods[index]);
+  if (milkIndexes.length >= 3) return dedupeMultipleMilkGroups(analysis, milkIndexes);
   if (milkIndexes.length >= 2 && compatibleFamilies(milkFoods)) {
     const rowsAreDistinct = rowsShowDistinctContainers(milkFoods);
     const mealOnlySeparate = mealOnlySuggestsAnotherContainer(analysis, milkFoods);
