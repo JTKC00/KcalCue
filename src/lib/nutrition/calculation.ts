@@ -156,10 +156,13 @@ export function calculateMealNutrition(foods: CalculatedFood[]): CalculatedMeal 
   const totals = emptyRanges();
   let includedCount = 0;
 
-  let totalCount = 0;
+  // Pending duplicate rows never contribute calories, but they must remain
+  // visible in the meal's coverage denominator. A matched confirmed serving
+  // cannot make a meal with unresolved duplicate rows look complete.
+  let confirmedCount = 0;
   for (const food of foods) {
     if (food.food.suspectedDuplicateMilk === true) continue;
-    totalCount += 1;
+    confirmedCount += 1;
     if (!food.ranges || !food.includedInTotal) continue;
     includedCount += 1;
     addRange(totals.calories, food.ranges.calories);
@@ -168,13 +171,17 @@ export function calculateMealNutrition(foods: CalculatedFood[]): CalculatedMeal 
     addRange(totals.fat, food.ranges.fat);
   }
 
+  const confirmedCoverage = classifyMealCoverage(includedCount, confirmedCount);
+  const hasPendingDuplicate = confirmedCount < foods.length;
   return {
     foods,
     totals,
     midpointCalories: (totals.calories.min + totals.calories.max) / 2,
-    coverage: classifyMealCoverage(includedCount, totalCount),
+    // Keep the reliable confirmed subtotal visible, but never call it a
+    // complete meal when an unresolved extra serving could change that total.
+    coverage: hasPendingDuplicate && confirmedCoverage === "complete" ? "partial" : confirmedCoverage,
     includedCount,
-    totalCount,
+    totalCount: foods.length,
   };
 }
 

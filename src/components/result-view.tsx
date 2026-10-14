@@ -127,7 +127,9 @@ export function ResultView({
     ? `請逐項核對${aiFoods.length < items.length ? `（${aiFoods.length} / ${items.length} 項為 AI 建議）` : ""}`
     : [...new Set(recognitionSources.map(source => source.label))].join("／") || "未有 AI 辨認資料";
   const nutritionConfidence = weakestNutritionConfidence(meal);
-  const unknownPortion = items.some(item => item.portionMin === null || item.portionMax === null);
+  const pendingDuplicateCount = items.filter(item => item.suspectedDuplicateMilk === true).length;
+  const unknownPortion = items.some(item =>
+    item.suspectedDuplicateMilk !== true && (item.portionMin === null || item.portionMax === null));
   const showTotal = !unknownPortion && mealShowsTotal(meal.coverage);
   const calories = roundRange(meal.totals.calories, 5);
   const finalCalories = mealCalories({ items, mode, calorieCorrection });
@@ -146,7 +148,8 @@ export function ResultView({
             <h1 id="result-title">手動記錄：<span>{manualCalories.min}</span> kcal</h1>
           ) : showTotal && !finalCalories.invalidCorrection ? (
             <h1 id="result-title">
-              約 <span>{calories.min}–{calories.max}</span> kcal
+              {pendingDuplicateCount > 0 ? "已確認項目合計：約 " : "約 "}
+              <span>{calories.min}–{calories.max}</span> kcal
             </h1>
           ) : (
             <h1 id="result-title" className="no-total">
@@ -158,7 +161,7 @@ export function ResultView({
           ) : finalCalories.invalidCorrection ? (
             <p className="midpoint" role="alert">已存的手動卡路里無效，請重新填寫或恢復參考估算。</p>
           ) : showTotal ? (
-            <p className="midpoint">中間估算：約 {midpoint} kcal</p>
+            <p className="midpoint">{pendingDuplicateCount > 0 ? "已確認部分中間估算" : "中間估算"}：約 {midpoint} kcal</p>
           ) : null}
         </div>
         <div className={`mode-chip mode-${mode}`}>
@@ -172,6 +175,12 @@ export function ResultView({
 
       <div className="result-grid">
         <div className="result-main-column">
+          {pendingDuplicateCount > 0 ? (
+            <p className="coverage-notice" role="status">
+              <AlertIcon />
+              有 {pendingDuplicateCount} 項飲品可能重複，尚待你確認。現時 kcal 及營養素只計已確認項目，並非整餐完整總量。
+            </p>
+          ) : null}
           {nutritionPending ? (
             <p className="coverage-notice" role="status">
               <RefreshIcon />

@@ -71,7 +71,8 @@ describe("issue 127 milk duplicate matrix", () => {
     }));
     const meal = service.calculateMeal(items);
     expect(meal.includedCount).toBe(1);
-    expect(meal.totalCount).toBe(1);
+    expect(meal.totalCount).toBe(2);
+    expect(meal.coverage).toBe("partial");
     expect(roundRange(meal.totals.calories, 5)).toEqual({ min: 155, max: 160 });
     const separate = items.map(item => {
       if (item.suspectedDuplicateMilk !== true) return item;
@@ -128,7 +129,8 @@ describe("issue 127 milk duplicate matrix", () => {
       return separate;
     }));
     expect(meal.includedCount).toBe(1);
-    expect(meal.totalCount).toBe(1);
+    expect(meal.totalCount).toBe(2);
+    expect(meal.coverage).toBe("partial");
     expect(meal.totals.calories).toEqual(one.totals.calories);
     expect(meal.totals.calories.max).toBeLessThan(both.totals.calories.max);
     expect(roundRange(meal.totals.calories, 5)).toEqual({ min: 115, max: 120 });

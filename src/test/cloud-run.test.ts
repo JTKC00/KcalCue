@@ -858,6 +858,17 @@ describe("allowlist-only access transition", () => {
     expect(trafficChanged(wrong.calls)).toBe(false);
   });
 
+  it("blocks access-promote of a QA-flagged candidate before update-traffic", () => {
+    const { result, calls, finalState } = run("access-promote", "qa-suspected-milk", added);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("QA suspected-milk fixture cannot receive production traffic");
+    expect(result.stderr).toContain("traffic was not changed");
+    expect(result.stdout).not.toContain("PASS:");
+    expect(trafficChanged(calls)).toBe(false);
+    expect(finalState.routedRevision).toBe("kcalcue-00001-old");
+    expect(calls.some(call => call.includes("update-traffic"))).toBe(false);
+  });
+
   it.each([
     ["candidate-not-ready", "Revision is not Ready"],
     ["digest-mismatch", "image digest does not match the staged image"],

@@ -2260,7 +2260,9 @@ async function openSuspectedMilkFixture(page: Page, context: BrowserContext) {
   await page.locator('input[type="file"]').nth(1).setInputFiles({ name: "oat.png", mimeType: "image/png", buffer: png });
   await page.getByRole("button", { name: "開始分析", exact: true }).click();
   await expect(page.locator(".food-card")).toHaveCount(2);
-  await expect(page.getByRole("heading", { name: "約 155–160 kcal", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "已確認項目合計：約 155–160 kcal", exact: true })).toBeVisible();
+  await expect(page.getByText(/有 1 項飲品可能重複，尚待你確認/)).toBeVisible();
+  await expect(page.getByText(/營養參考只包括 1 \/ 2 項/)).toBeVisible();
   await expect(page.getByRole("button", { name: "係另一份，計入", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "係重複，移除", exact: true })).toBeVisible();
   return backend;

@@ -69,7 +69,9 @@ describe("ResultView coverage copy", () => {
     })).map(item => ({ ...item, entrySource: "photo" as const, userMilkTypeChoice: "oat" as const }));
     render(<ResultView analysis={analysis} items={items} mode="live" previewUrl={null} previewFailed={false} isHeic={false} onNameChange={noop} onPortionChange={noop} onUnitChange={noop} onPreset={noop} onDelete={remove} onConfirmSeparateMilk={confirm} onAdd={noop} onReset={noop} />);
     expect(screen.getAllByText(SUSPECTED_DUPLICATE_MILK_NOTICE).length).toBeGreaterThan(0);
-    expect(screen.getByRole("heading", { name: "約 115–120 kcal" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "已確認項目合計：約 115–120 kcal" })).toBeInTheDocument();
+    expect(screen.getByText(/有 1 項飲品可能重複，尚待你確認/)).toBeInTheDocument();
+    expect(screen.getByText(/營養參考只包括 1 \/ 2 項/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "係另一份，計入" }));
     expect(confirm).toHaveBeenCalledOnce();
     await user.click(screen.getByRole("button", { name: "係重複，移除" }));
