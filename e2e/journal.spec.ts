@@ -2369,3 +2369,77 @@ for (const decision of ["remove", "confirm"] as const) {
     expect(backend.mealReadUrls.length).toBeGreaterThan(0);
   });
 }
+
+
+// Cardinality safety: a model's repeated food rows are not proof of extra
+// physical cartons. These are synthetic-account browser + History tests.
+for (const scenario of [
+  { physical: 2, reported: 3, decision: "remove", evidence: "兩盒燕麥奶" },
+  { physical: 2, reported: 3, decision: "confirm", evidence: "兩盒燕麥奶" },
+  { physical: 3, reported: 3, decision: "none", evidence: "三盒燕麥奶" },
+] as const) {
+  test(`P1 cardinality: ${scenario.physical} real / ${scenario.reported} AI oat cartons, ${scenario.decision}, cloud History`,
+    async ({ page, context }) => {
+      const backend = cloud();
+      await backend.install(context);
+      const carton = m6CartonAndGlassAnalysis.foods[0];
+      const glass = {
+        ...m6CartonAndGlassAnalysis.foods[1],
+        displayName: "全脂牛奶", normalizedName: "whole milk",
+      };
+      const model = {
+        ...m6CartonAndGlassAnalysis,
+        foods: [...Array.from({ length: scenario.reported }, () => ({ ...carton })), glass],
+        visibleEvidence: [scenario.evidence, "獨立玻璃杯盛全脂牛奶"],
+      };
+      const serverAnalysis = preparePhotoMilkAnalysis(model);
+      const pending = scenario.reported - scenario.physical;
+      expect(serverAnalysis.foods).toHaveLength(scenario.reported + 1);
+      expect(serverAnalysis.foods.filter(row => row.suspectedDuplicateMilk)).toHaveLength(pending);
+      expect(serverAnalysis.foods.filter(row => row.normalizedName === "whole milk" && row.suspectedDuplicateMilk)).toHaveLength(0);
+      await page.route("**/api/analyze", route => route.fulfill({
+        json: { mode: "live", analysis: serverAnalysis, analysisProvenance: null },
+      }));
+      await page.route("**/api/nutrition/resolve", route => route.fulfill({
+        status: 500, json: { error: { code: "unexpected_nutrition" } },
+      }));
+      await page.goto("/");
+      await login(page);
+      await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
+      const png = await sharp({
+        create: { width: 80, height: 60, channels: 3, background: "white" },
+      }).png().toBuffer();
+      await page.locator('input[type="file"]').nth(1).setInputFiles({
+        name: "multiple-cartons.png", mimeType: "image/png", buffer: png,
+      });
+      await page.getByRole("button", { name: "開始分析", exact: true }).click();
+      await expect(page.locator(".food-card")).toHaveCount(scenario.reported + 1);
+      if (pending > 0) {
+        await expect(page.getByText(/有 1 項飲品可能重複，尚待你確認/)).toBeVisible();
+        if (scenario.decision === "remove") {
+          await page.getByRole("button", { name: "係重複，移除", exact: true }).click();
+        } else {
+          await page.getByRole("button", { name: "係另一份，計入", exact: true }).click();
+        }
+        await expect(page.getByText(/有 1 項飲品可能重複，尚待你確認/)).toHaveCount(0);
+      } else {
+        await expect(page.getByRole("button", { name: "係另一份，計入", exact: true })).toHaveCount(0);
+        await expect(page.getByRole("button", { name: "係重複，移除", exact: true })).toHaveCount(0);
+      }
+      const expected = scenario.decision === "remove" ? scenario.physical + 1 : scenario.reported + 1;
+      await expect(page.locator(".food-card")).toHaveCount(expected);
+      await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+      await expect.poll(() => backend.records.size).toBe(1);
+      const saved = [...backend.records.values()][0].items as Array<{
+        normalizedName: string; suspectedDuplicateMilk?: true;
+      }>;
+      expect(saved).toHaveLength(expected);
+      expect(saved.filter(x => x.normalizedName === "oat milk")).toHaveLength(expected - 1);
+      expect(saved.every(x => !x.suspectedDuplicateMilk)).toBe(true);
+      expect(saved.some(x => x.normalizedName === "whole milk")).toBe(true);
+      await page.getByRole("button", { name: "歷史", exact: true }).click();
+      await page.getByRole("button", { name: "查看／修正", exact: true }).click();
+      await expect(page.locator(".food-card")).toHaveCount(expected);
+      expect(backend.mealReadUrls.length).toBeGreaterThan(0);
+    });
+}

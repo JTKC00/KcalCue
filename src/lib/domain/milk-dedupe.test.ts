@@ -435,6 +435,142 @@ describe("issue 127 milk duplicate matrix", () => {
       expect(negated.foods.filter(food => food.suspectedDuplicateMilk)).toHaveLength(0);
     });
 
+    describe("P1 verified carton cardinality (independent review regressions)", () => {
+      const cartons = (amount: number) => Array.from({ length: amount }, () => carton());
+      const actualMeal = (actual: number, extra: ObservedFood[] = [glass()]) =>
+        toMeal([...cartons(actual), ...extra]);
+
+      it.each([
+        ["one real / two model", 1, 2, "一盒燕麥奶"],
+        ["two real / two model", 2, 2, "兩盒燕麥奶"],
+        ["two real / three model", 2, 3, "兩盒燕麥奶"],
+        ["three real / three model", 3, 3, "三盒燕麥奶"],
+        ["three real / four model", 3, 4, "三盒燕麥奶"],
+        ["two real / three model simplified", 2, 3, "两盒燕麦奶"],
+        ["three real / three model english", 3, 3, "three oat milk cartons"],
+        ["two real / three model english", 2, 3, "two oat milk cartons"],
+        ["two real / three model digit", 2, 3, "2 cartons of oat milk"],
+      ] as const)("%s", (_label, actual, reported, evidence) => {
+        const rows = [...cartons(reported), glass()];
+        const preparedRows = prepared(analysis(rows, { visibleEvidence: [evidence, "一杯全脂牛奶"] }));
+        expect(preparedRows.foods).toHaveLength(reported + 1);
+        expect(preparedRows.foods.filter(item => item.suspectedDuplicateMilk)).toHaveLength(reported - actual);
+        expect(preparedRows.foods.every(item => !item.duplicateMilkNotice)).toBe(true);
+        const calculated = toMeal(preparedRows.foods);
+        expect(calculated.includedCount).toBe(actual + 1);
+        expect(calculated.totalCount).toBe(reported + 1);
+        expect(calculated.coverage).toBe(reported === actual ? "complete" : "partial");
+        expect(calculated.totals).toEqual(actualMeal(actual).totals);
+        expect(preparePhotoMilkAnalysis(preparedRows)).toEqual(preparedRows);
+      });
+
+      it.each([
+        ["two visible and two model", "兩盒燕麥奶", 2],
+        ["three visible but two model", "三盒燕麥奶", 3],
+        ["two visible with English count", "two oat milk cartons", 2],
+      ] as const)("the two-row path respects positive multiplicity: %s", (_label, evidence, count) => {
+        const result = prepared(analysis([...cartons(2)], {
+          visibleEvidence: [evidence],
+        }));
+        expect(result.foods).toHaveLength(2);
+        expect(result.foods.every(item => !item.suspectedDuplicateMilk && !item.duplicateMilkNotice)).toBe(true);
+        expect(toMeal(result.foods).includedCount).toBe(2);
+        expect(toMeal(result.foods).totals).toEqual(toMeal(cartons(2)).totals);
+        expect(count).toBeGreaterThanOrEqual(2);
+      });
+
+      it("keeps two real oat cartons despite an extra reported carton when another real milk glass exists", () => {
+        const rows = [...cartons(3), glass()];
+        const actual = prepared(analysis(rows, {
+          visibleEvidence: ["實際只有兩盒燕麥奶，另外有一個玻璃杯盛全脂牛奶"],
+        }));
+        expect(actual.foods).toHaveLength(4);
+        expect(actual.foods.filter(item => item.suspectedDuplicateMilk)).toHaveLength(1);
+        expect(toMeal(actual.foods).totals).toEqual(actualMeal(2).totals);
+        expect(toMeal(actual.foods).coverage).toBe("partial");
+
+        const withIndividualPositions = prepared(analysis([
+          oat("左邊一盒燕麥奶", { preparationMethod: "紙盒" }),
+          oat("右邊一盒燕麥奶", { preparationMethod: "紙盒" }),
+          oat("紙盒燕麥奶", { preparationMethod: "紙盒" }),
+          glass(),
+        ], { visibleEvidence: ["兩盒燕麥奶及一個玻璃杯"] }));
+        expect(withIndividualPositions.foods.filter(item => item.suspectedDuplicateMilk)).toHaveLength(1);
+        expect(toMeal(withIndividualPositions.foods).totals).toEqual(actualMeal(2).totals);
+      });
+
+      it("does not turn uncertain or contradictory cardinality into extra confirmed rows", () => {
+        const uncertain = prepared(analysis([...cartons(3), glass()], {
+          visibleEvidence: ["未能確認是否三盒燕麥奶，亦可能只有一盒"],
+        }));
+        expect(uncertain.foods.filter(x => x.suspectedDuplicateMilk)).toHaveLength(2);
+        expect(toMeal(uncertain.foods).totals).toEqual(actualMeal(1).totals);
+
+        const contradictory = prepared(analysis([...cartons(3), glass()], {
+          visibleEvidence: ["一盒燕麥奶", "三盒燕麥奶"],
+        }));
+        expect(contradictory.foods.filter(x => x.suspectedDuplicateMilk)).toHaveLength(2);
+        expect(toMeal(contradictory.foods).totals).toEqual(actualMeal(1).totals);
+
+        const negated = prepared(analysis([...cartons(3), glass()], {
+          visibleEvidence: ["不是三盒燕麥奶"],
+        }));
+        expect(negated.foods.filter(x => x.suspectedDuplicateMilk)).toHaveLength(2);
+      });
+
+      it("does not count a noted other soy carton as a second oat carton", () => {
+        const first = oat("一盒燕麥奶，旁邊另一盒豆漿", { preparationMethod: "紙盒" });
+        const soy = oat("另一盒豆漿", {
+          displayName: "豆漿", normalizedName: "soy milk", preparationMethod: "紙盒",
+        });
+        const out = prepared(analysis([first, carton(), soy, glass()], {
+          visibleEvidence: ["燕麥奶與豆漿各一盒，旁邊一杯全脂牛奶"],
+        }));
+        expect(out.foods.filter(x => x.normalizedName === "oat milk" && x.suspectedDuplicateMilk)).toHaveLength(1);
+        expect(toMeal(out.foods).includedCount).toBe(3);
+      });
+
+      it("does not treat uncertain negation as proof of a second carton", () => {
+        const out = prepared(analysis([
+          oat("可能不是同一紙盒", { preparationMethod: "紙盒" }),
+          carton(), carton(), glass(),
+        ]));
+        expect(out.foods.filter(x => x.suspectedDuplicateMilk)).toHaveLength(2);
+      });
+
+      it("cannot assign meal-level carton counts to the wrong milk family", () => {
+        const soy = oat("另一盒豆漿", {
+          displayName: "豆漿", normalizedName: "soy milk", preparationMethod: "紙盒",
+        });
+        const output = prepared(analysis([...cartons(3), soy, glass()], {
+          visibleEvidence: ["畫面有兩盒飲品：燕麥奶及豆漿，旁邊一杯牛奶"],
+        }));
+        expect(output.foods.filter(x => x.normalizedName === "oat milk" && x.suspectedDuplicateMilk)).toHaveLength(2);
+        expect(output.foods.find(x => x.normalizedName === "soy milk")?.suspectedDuplicateMilk).toBeUndefined();
+        expect(output.foods.find(x => x.normalizedName === "whole milk")?.suspectedDuplicateMilk).toBeUndefined();
+      });
+
+      it("recognizes each explicitly attributed count in the same statement across milk families", () => {
+        const soy = oat("紙盒豆漿", {
+          displayName: "豆漿", normalizedName: "soy milk", preparationMethod: "紙盒",
+        });
+        const result = prepared(analysis([...cartons(3), soy, glass()], {
+          visibleEvidence: ["兩盒燕麥奶及一盒豆漿，一杯全脂牛奶"],
+        }));
+        expect(result.foods.filter(x => x.suspectedDuplicateMilk)).toHaveLength(1);
+        expect(result.foods.find(x => x.normalizedName === "soy milk")?.suspectedDuplicateMilk).toBeUndefined();
+      });
+
+      it("honors explicit three carton multiplicity even when notes individually say one carton", () => {
+        const result = prepared(analysis([...cartons(3), glass()], {
+          visibleEvidence: ["三盒燕麥奶", "旁邊獨立玻璃杯"],
+        }));
+        expect(result.foods).toHaveLength(4);
+        expect(result.foods.every(x => !x.suspectedDuplicateMilk && !x.duplicateMilkNotice)).toBe(true);
+        expect(toMeal(result.foods).totals).toEqual(actualMeal(3).totals);
+      });
+    });
+
     it("holds out both extra cartons if the same oat container is returned three times with a glass", () => {
       const result = prepared(analysis([carton(), carton(), glass(), carton()], {
         visibleEvidence: ["一盒燕麥奶和一杯全脂牛奶"],
