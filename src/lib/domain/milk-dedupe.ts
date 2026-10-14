@@ -338,7 +338,22 @@ function evidencedMilkCount(
     `([一二兩两三四五六七八九1-9])\\s*(?:個|个|隻|只)?\\s*${chineseUnit}|\\b(one|two|three|four|five|six|seven|eight|nine|[1-9])\\s+(?:[a-z-]+\\s+){0,3}(?:${englishUnit})\\b`,
     "gi",
   );
-  const perRow = group.map(milkRowText).map(normalizeFoodName);
+  // Do not promote absence, negation, tentative language or a question to
+  // positive quantity evidence. This gate applies equally to meal-level text
+  // and individual model rows. It is intentionally conservative.
+  const affirmativeCountEvidence = (raw: string): boolean => {
+    // normalizeFoodName strips punctuation, including the question mark.
+    // Evaluate interrogation polarity against the original source first.
+    if (/[?？]/.test(raw)) return false;
+    const text = normalizeFoodName(raw);
+    return !/沒有|没有|没|未見|未见|未有|未能|未知|未確|未确|不確|不确|不能|不見|不见|並非|并非|不是|並不|并不|無法|无法|可能|或許|或许|疑似|估計|估计|是否|大概|\b(?:no|not|without|none|neither|never|maybe|might|may|perhaps|whether|unclear|unsure|uncertain|unknown|cannot|could|possibly|apparently)\b/i.test(text);
+  };
+  const specificFamilies = (text: string): MilkFamily[] =>
+    (["oat", "soy", "almond", "coconut", "dairy"] as const).filter(candidate =>
+      markers[candidate].test(text));
+
+  const perRowRaw = group.map(milkRowText);
+  const perRow = perRowRaw.map(normalizeFoodName);
   const leftRight = perRow.some(x => /左邊|左侧|left/.test(x))
     && perRow.some(x => /右邊|右侧|right/.test(x));
   const frontBack = perRow.some(x => /前方|前面|front/.test(x))
@@ -359,7 +374,8 @@ function evidencedMilkCount(
     vessel === "unknown" || containerKinds(other).has(vessel)).map(milkFamily)
     .filter(otherFamily => otherFamily !== "generic" && otherFamily !== family);
   const distinctRowMention = /另一盒|第二盒|另一杯|第二杯|另一瓶|第二瓶|another (?:carton|glass|cup|bottle)|second (?:carton|glass|cup|bottle)/g;
-  const groupStatements = perRow.some(value => {
+  const groupStatements = perRowRaw.some(value => {
+    if (!affirmativeCountEvidence(value)) return false;
     for (const match of value.matchAll(distinctRowMention)) {
       const after = value.slice(match.index ?? 0, (match.index ?? 0) + 22);
       // Even if the other milk family was omitted from model rows, the
@@ -378,12 +394,16 @@ function evidencedMilkCount(
   // when it identifies this family and vessel.
   const countStatements = [
     ...statements.map(value => ({ value, fromRow: false })),
-    ...perRow.map(value => ({ value, fromRow: true })),
+    ...perRowRaw.map(value => ({ value, fromRow: true })),
   ];
   const validCounts: number[] = [];
   for (const { value: raw, fromRow } of countStatements) {
-    const value = normalizeFoodName(raw);
-    if (/未能|未知|未確認|未确定|不確定|不确定|可能|是否|不是|並非|并非|不止|超過|超过|\b(?:not|maybe|might|unclear|whether|unknown|cannot)\b/i.test(value)) continue;
+    // Keep comma/clause boundaries intact for family attribution.
+    // Normalizing the entire statement here would erase punctuation and
+    // incorrectly bind 「兩盒燕麥奶，另一杯牛奶」 to both families.
+    const value = raw.toLowerCase().replace(/\s+/g, " ").trim();
+    if (!affirmativeCountEvidence(raw) ||
+        /不止|超過|超过|more than|at least/i.test(value)) continue;
     const matches = [...value.matchAll(quantity)];
     for (const [offset, match] of matches.entries()) {
       const count = number(match[1] ?? match[2]);
@@ -397,19 +417,22 @@ function evidencedMilkCount(
       const punctuationAfter = ["，", ",", "。", ";", "；"].map(p => value.indexOf(p, start))
         .filter(x => x >= 0);
       const to = Math.min(after, ...punctuationAfter, value.length);
-      const phrase = value.slice(from, to);
-      const attributed = markers[family].test(phrase);
-      // Do not claim a meal-wide "two cartons of drinks" for oat if the
-      // phrase itself contains BOTH oat and soy, or refers to other milk.
-      const referencesOtherFamily = otherMilkRows.some(other => {
-        if (vessel !== "unknown" && !containerKinds(other).has(vessel)) return false;
-        const otherFamily = milkFamily(other);
-        return otherFamily !== family && otherFamily !== "generic"
-          && markers[otherFamily].test(phrase);
-      });
-      if (referencesOtherFamily) continue;
-      if (!attributed && hasAnotherSameVessel) continue;
-      if (family === "generic" && hasAnotherSameVessel) continue;
+      // Bind count to the milk family immediately after the quantity when
+      // possible (「兩盒豆漿」 / "two cartons of soy milk"), otherwise to a
+      // uniquely named family immediately before it (「燕麥奶兩盒」).
+      // Never infer a milk family from another row's name or from a different
+      // family mentioned elsewhere in the overall meal.
+      const afterCount = value.slice(start + match[0].length, to);
+      const beforeCount = value.slice(from, start);
+      const afterFamilies = specificFamilies(match[0] + afterCount);
+      const beforeFamilies = specificFamilies(beforeCount);
+      const boundFamilies = afterFamilies.length > 0 ? afterFamilies : beforeFamilies;
+      if (boundFamilies.length !== 1 || boundFamilies[0] !== family) continue;
+      // When the count describes several drinks in a single clause, it cannot
+      // belong wholly to any one milk subgroup, even if that other milk type
+      // was omitted from the model's foods array.
+      if (specificFamilies(value.slice(from, to)).some(other => other !== family)
+          && matches.length === 1) continue;
       validCounts.push(count);
     }
   }

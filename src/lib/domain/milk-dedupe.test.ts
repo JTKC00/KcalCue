@@ -518,6 +518,82 @@ describe("issue 127 milk duplicate matrix", () => {
         expect(negated.foods.filter(x => x.suspectedDuplicateMilk)).toHaveLength(2);
       });
 
+      describe("P1 milk-family attribution and evidence-polarity admission", () => {
+        it.each([
+          ["other soy two cartons, Traditional Chinese", "燕麥奶紙盒，另外兩盒豆漿，旁邊一杯全脂牛奶"],
+          ["other soy three cartons, Traditional Chinese", "相片中見到燕麥奶紙盒，旁邊三盒豆漿及玻璃杯牛奶"],
+          ["other almond cartons, Traditional Chinese", "燕麥奶紙盒，另外兩盒杏仁奶及一杯全脂牛奶"],
+          ["other soy two cartons, English", "oat milk carton with two cartons of soy milk, and a glass of whole milk"],
+          ["other soy two cartons, Simplified Chinese", "一盒燕麦奶，旁边两盒豆浆和一杯牛奶"],
+        ] as const)("ignores count for a different milk family absent from model foods: %s", (_description, evidence) => {
+          const out = prepared(analysis([...cartons(3), glass()], { visibleEvidence: [evidence] }));
+          expect(out.foods).toHaveLength(4);
+          expect(out.foods.filter(item => item.normalizedName === "oat milk" && item.suspectedDuplicateMilk)).toHaveLength(2);
+          expect(out.foods.find(item => item.normalizedName === "whole milk")?.suspectedDuplicateMilk).toBeUndefined();
+          const actual = toMeal(out.foods);
+          expect(actual.coverage).toBe("partial");
+          expect(actual.includedCount).toBe(2);
+          expect(actual.totals).toEqual(actualMeal(1).totals);
+          expect(preparePhotoMilkAnalysis(out)).toEqual(out);
+        });
+
+        it.each([
+          "沒有三盒燕麥奶",
+          "未見三盒燕麥奶",
+          "没看到三盒燕麦奶",
+          "no three oat milk cartons",
+          "without three oat milk cartons",
+          "三盒燕麥奶？",
+          "three oat milk cartons?",
+          "是否三盒燕麥奶",
+          "可能有三盒燕麥奶",
+        ])("does not admit negative, uncertain or questioned quantity: %s", evidence => {
+          const out = prepared(analysis([...cartons(3), glass()], { visibleEvidence: [evidence] }));
+          expect(out.foods.filter(item => item.suspectedDuplicateMilk)).toHaveLength(2);
+          const actual = toMeal(out.foods);
+          expect(actual.includedCount).toBe(2);
+          expect(actual.coverage).toBe("partial");
+          expect(actual.totals).toEqual(actualMeal(1).totals);
+        });
+
+        it.each([
+          "沒有另一盒燕麥奶",
+          "燕麥奶，另一盒？",
+          "not another oat milk carton",
+        ])("does not admit model-row negative or uncertain second-carton wording: %s", note => {
+          const rows = [oat(note, { preparationMethod: "紙盒" }), carton(), glass()];
+          const out = prepared(analysis(rows));
+          expect(out.foods.filter(item => item.suspectedDuplicateMilk)).toHaveLength(1);
+          expect(toMeal(out.foods).totals).toEqual(actualMeal(1).totals);
+        });
+
+        it("keeps positive explicit counts in both languages and both attribution orders", () => {
+          for (const evidence of [
+            "兩盒燕麥奶及一盒豆漿，旁邊有玻璃杯牛奶",
+            "2 cartons of oat milk and one carton of soy milk, plus a glass of whole milk",
+            "燕麥奶兩盒，豆漿一盒，另有一杯牛奶",
+          ]) {
+            const soy = oat("豆漿紙盒", {
+              displayName: "豆漿", normalizedName: "soy milk", preparationMethod: "紙盒",
+            });
+            const out = prepared(analysis([...cartons(3), soy, glass()], {
+              visibleEvidence: [evidence],
+            }));
+            expect(out.foods.filter(item => item.normalizedName === "oat milk" && item.suspectedDuplicateMilk), evidence).toHaveLength(1);
+            expect(out.foods.find(item => item.normalizedName === "soy milk")?.suspectedDuplicateMilk, evidence).toBeUndefined();
+            expect(toMeal(out.foods).includedCount, evidence).toBe(4);
+          }
+        });
+
+        it("does not treat generalized two cartons of drinks naming oat and soy as two oat cartons", () => {
+          const out = prepared(analysis([...cartons(3), glass()], {
+            visibleEvidence: ["兩盒飲品：燕麥奶及豆漿；還有一杯牛奶"],
+          }));
+          expect(out.foods.filter(item => item.suspectedDuplicateMilk)).toHaveLength(2);
+          expect(toMeal(out.foods).totals).toEqual(actualMeal(1).totals);
+        });
+      });
+
       it("does not count a noted other soy carton as a second oat carton", () => {
         const first = oat("一盒燕麥奶，旁邊另一盒豆漿", { preparationMethod: "紙盒" });
         const soy = oat("另一盒豆漿", {

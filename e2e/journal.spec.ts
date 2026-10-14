@@ -2443,3 +2443,70 @@ for (const scenario of [
       expect(backend.mealReadUrls.length).toBeGreaterThan(0);
     });
 }
+
+
+// Count evidence is only safe when it explicitly affirms the same milk family.
+// Two rows that are not supported stay pending through the real UI flow and
+// can be resolved separately before synthetic cloud save and History readback.
+for (const scenario of [
+  { name: "other soy cartons omitted from food rows", evidence: "一盒燕麥奶，旁邊另外兩盒豆漿及一杯全脂牛奶", decision: "remove" },
+  { name: "questioned three oat cartons", evidence: "三盒燕麥奶？", decision: "confirm" },
+] as const) {
+  test(`P1 evidence admission: ${scenario.name}, ${scenario.decision}, cloud History`,
+    async ({ page, context }) => {
+      const backend = cloud();
+      await backend.install(context);
+      const oat = m6CartonAndGlassAnalysis.foods[0];
+      const dairy = {
+        ...m6CartonAndGlassAnalysis.foods[1],
+        displayName: "全脂牛奶", normalizedName: "whole milk",
+      };
+      const model = {
+        ...m6CartonAndGlassAnalysis,
+        foods: [{ ...oat }, { ...oat }, { ...oat }, dairy],
+        visibleEvidence: [scenario.evidence],
+      };
+      const preparedAnalysis = preparePhotoMilkAnalysis(model);
+      expect(preparedAnalysis.foods).toHaveLength(4);
+      expect(preparedAnalysis.foods.filter(x => x.suspectedDuplicateMilk)).toHaveLength(2);
+      expect(preparedAnalysis.foods.find(x => x.normalizedName === "whole milk")?.suspectedDuplicateMilk).toBeUndefined();
+      await page.route("**/api/analyze", route => route.fulfill({
+        json: { mode: "live", analysis: preparedAnalysis, analysisProvenance: null },
+      }));
+      await page.route("**/api/nutrition/resolve", route => route.fulfill({
+        status: 500, json: { error: { code: "unexpected_nutrition" } },
+      }));
+      await page.goto("/");
+      await login(page);
+      await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
+      const png = await sharp({
+        create: { width: 80, height: 60, channels: 3, background: "white" },
+      }).png().toBuffer();
+      await page.locator('input[type="file"]').nth(1).setInputFiles({
+        name: "cardinality-evidence.png", mimeType: "image/png", buffer: png,
+      });
+      await page.getByRole("button", { name: "開始分析", exact: true }).click();
+      await expect(page.locator(".food-card")).toHaveCount(4);
+      await expect(page.getByText(/有 2 項飲品可能重複，尚待你確認/)).toBeVisible();
+      for (let i = 0; i < 2; i++) {
+        const action = scenario.decision === "remove" ? "係重複，移除" : "係另一份，計入";
+        await page.getByRole("button", { name: action, exact: true }).first().click();
+      }
+      await expect(page.getByText(/可能重複，尚待你確認/)).toHaveCount(0);
+      const expected = scenario.decision === "remove" ? 2 : 4;
+      await expect(page.locator(".food-card")).toHaveCount(expected);
+      await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+      await expect.poll(() => backend.records.size).toBe(1);
+      const saved = [...backend.records.values()][0].items as Array<{
+        normalizedName: string; suspectedDuplicateMilk?: true;
+      }>;
+      expect(saved).toHaveLength(expected);
+      expect(saved.filter(x => x.normalizedName === "oat milk")).toHaveLength(expected - 1);
+      expect(saved.some(x => x.normalizedName === "whole milk")).toBe(true);
+      expect(saved.every(x => !x.suspectedDuplicateMilk)).toBe(true);
+      await page.getByRole("button", { name: "歷史", exact: true }).click();
+      await page.getByRole("button", { name: "查看／修正", exact: true }).click();
+      await expect(page.locator(".food-card")).toHaveCount(expected);
+      expect(backend.mealReadUrls.length).toBeGreaterThan(0);
+    });
+}
