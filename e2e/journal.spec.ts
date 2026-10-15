@@ -2597,3 +2597,61 @@ for (const scenario of [
       expect(backend.mealReadUrls.length).toBeGreaterThan(0);
     });
 }
+
+test("P1 two-row differing oat notes stay pending, remove duplicate, save + History", async ({ page, context }) => {
+  const backend = cloud();
+  await backend.install(context);
+  const left = {
+    ...m6CartonAndGlassAnalysis.foods[0],
+    notes: "燕麥奶紙盒，旁邊另一杯",
+  };
+  const right = {
+    ...m6CartonAndGlassAnalysis.foods[0],
+    notes: "燕麥奶紙盒，旁邊玻璃杯",
+  };
+  const glass = {
+    ...m6CartonAndGlassAnalysis.foods[1],
+    displayName: "全脂牛奶",
+    normalizedName: "whole milk",
+  };
+  const preparedAnalysis = preparePhotoMilkAnalysis({
+    ...m6CartonAndGlassAnalysis,
+    foods: [left, right, glass],
+    visibleEvidence: [],
+  });
+  expect(preparedAnalysis.foods.filter(x => x.suspectedDuplicateMilk)).toHaveLength(1);
+  await page.route("**/api/analyze", route => route.fulfill({
+    json: { mode: "live", analysis: preparedAnalysis, analysisProvenance: null },
+  }));
+  await page.route("**/api/nutrition/resolve", route => route.fulfill({
+    status: 500, json: { error: { code: "unexpected_nutrition" } },
+  }));
+  await page.goto("/");
+  await login(page);
+  await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
+  const png = await sharp({
+    create: { width: 80, height: 60, channels: 3, background: "white" },
+  }).png().toBuffer();
+  await page.locator('input[type="file"]').nth(1).setInputFiles({
+    name: "two-row-diff-notes.png", mimeType: "image/png", buffer: png,
+  });
+  await page.getByRole("button", { name: "開始分析", exact: true }).click();
+  await expect(page.locator(".food-card")).toHaveCount(3);
+  await expect(page.getByText(/有 1 項飲品可能重複，尚待你確認/)).toBeVisible();
+  await page.getByRole("button", { name: "係重複，移除", exact: true }).click();
+  await expect(page.getByText(/可能重複，尚待你確認/)).toHaveCount(0);
+  await expect(page.locator(".food-card")).toHaveCount(2);
+  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  await expect.poll(() => backend.records.size).toBe(1);
+  const saved = [...backend.records.values()][0].items as Array<{
+    normalizedName: string; suspectedDuplicateMilk?: true;
+  }>;
+  expect(saved).toHaveLength(2);
+  expect(saved.filter(x => x.normalizedName === "oat milk")).toHaveLength(1);
+  expect(saved.some(x => x.normalizedName === "whole milk")).toBe(true);
+  expect(saved.every(x => !x.suspectedDuplicateMilk)).toBe(true);
+  await page.getByRole("button", { name: "歷史", exact: true }).click();
+  await page.getByRole("button", { name: "查看／修正", exact: true }).click();
+  await expect(page.locator(".food-card")).toHaveCount(2);
+  expect(backend.mealReadUrls.length).toBeGreaterThan(0);
+});
