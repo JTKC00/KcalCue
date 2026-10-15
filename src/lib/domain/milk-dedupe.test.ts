@@ -797,6 +797,225 @@ describe("issue 127 milk duplicate matrix", () => {
       expect(toMeal(result.foods).totals).toEqual(toMeal([carton(), glass()]).totals);
       expect(toMeal(result.foods).coverage).toBe("partial");
     });
+
+    describe("P1 spatial referent, mixed-vessel notes, and negation polarity", () => {
+      const withCarton = (note: string) => oat(note, { preparationMethod: "紙盒" });
+      const dairyGlass = () => oat("玻璃杯全脂牛奶", {
+        displayName: "全脂牛奶",
+        normalizedName: "whole milk",
+      });
+      const nutritionOf = (foods: ObservedFood[]) => {
+        const meal = toMeal(foods);
+        return {
+          includedCount: meal.includedCount,
+          totalCount: meal.totalCount,
+          coverage: meal.coverage,
+          calories: meal.totals.calories,
+          protein: meal.totals.protein,
+          carbohydrates: meal.totals.carbs,
+          fat: meal.totals.fat,
+        };
+      };
+      const expectSameNutrition = (actual: ObservedFood[], expected: ObservedFood[], label: string) => {
+        const left = nutritionOf(actual);
+        const right = nutritionOf(expected);
+        expect(left.calories, label).toEqual(right.calories);
+        expect(left.protein, label).toEqual(right.protein);
+        expect(left.carbohydrates, label).toEqual(right.carbohydrates);
+        expect(left.fat, label).toEqual(right.fat);
+      };
+
+      it.each([
+        ["C1 front/back glasses", "燕麥奶紙盒，前方玻璃杯", "燕麥奶紙盒，後方玻璃杯"],
+        ["C2 left/right glasses", "燕麥奶紙盒，左邊玻璃杯", "燕麥奶紙盒，右邊玻璃杯"],
+        ["C3 glasses only", "前方玻璃杯", "後方另一杯"],
+        ["C4 glass beside carton", "前方玻璃杯旁燕麥奶紙盒", "後方玻璃杯旁燕麥奶紙盒"],
+        ["C5 English glass positions", "oat milk carton front glass", "oat milk carton back glass"],
+      ] as const)("spatial glass words do not confirm two oat cartons (%s)", (label, left, right) => {
+        for (const prep of [false, true]) {
+          const row = (note: string) => prep ? withCarton(note) : oat(note);
+          for (const foods of [[row(left), row(right)], [row(right), row(left)]]) {
+            const output = prepared(analysis(foods));
+            const tag = `${label} prep=${prep}`;
+            expect(output.foods, tag).toHaveLength(2);
+            expect(output.foods.filter(food => food.suspectedDuplicateMilk === true), tag).toHaveLength(1);
+            expect(output.foods.filter(food => food.suspectedDuplicateMilk !== true), tag).toHaveLength(1);
+            expectSameNutrition(output.foods, [row(left)], tag);
+            expect(nutritionOf(output.foods).coverage, tag).toBe("partial");
+            expect(preparePhotoMilkAnalysis(output), tag).toEqual(output);
+          }
+        }
+      });
+
+      it.each([
+        ["left/right cartons", "左邊燕麥奶紙盒", "右邊燕麥奶紙盒"],
+        ["front/back cartons", "前方紙盒燕麥奶", "後方紙盒燕麥奶"],
+        ["English left/right cartons", "left oat milk carton", "right oat milk carton"],
+        ["English front/back cartons", "front oat milk carton", "back oat milk carton"],
+        ["simplified left/right cartons", "左边燕麦奶纸盒", "右边燕麦奶纸盒"],
+        ["named second oat carton", "燕麥奶紙盒，另一盒燕麥奶", "燕麥奶紙盒，另一盒燕麥奶"],
+      ] as const)("binds an explicit position or second carton to the oat vessel without preparationMethod: %s", (_label, left, right) => {
+        const output = prepared(analysis([oat(left), oat(right)]));
+        expect(output.foods).toHaveLength(2);
+        expect(output.foods.filter(food => food.suspectedDuplicateMilk === true)).toHaveLength(0);
+        expect(nutritionOf(output.foods).coverage).toBe("complete");
+        expect(nutritionOf(output.foods).includedCount).toBe(2);
+        expectSameNutrition(output.foods, [oat(left), oat(right)], _label);
+      });
+
+      it.each([
+        ["English glass negation", "紙盒燕麥奶 not the same glass", "燕麥奶紙盒"],
+        ["Traditional glass negation", "紙盒燕麥奶，不是同一杯", "燕麥奶紙盒"],
+        ["English carton phrase", "oat milk carton, not the same glass", "oat milk carton"],
+        ["questioned glass", "紙盒燕麥奶，不是同一杯？", "燕麥奶紙盒"],
+        ["uncertain glass", "紙盒燕麥奶，可能不是同一杯", "燕麥奶紙盒"],
+        ["simplified carton and glass", "纸盒燕麦奶，不是同一杯", "燕麦奶纸盒"],
+        ["simplified outer glass phrase", "纸盒燕麦奶，并非同一玻璃杯", "燕麦奶纸盒"],
+      ] as const)("a note naming both a carton and a glass still groups the oat rows: %s", (label, first, second) => {
+        for (const foods of [
+          [oat(first), oat(second), dairyGlass()],
+          [dairyGlass(), oat(second), oat(first)],
+        ]) {
+          const output = prepared(analysis(foods));
+          expect(output.foods, label).toHaveLength(3);
+          expect(output.foods.filter(food => food.normalizedName === "oat milk" && food.suspectedDuplicateMilk === true), label).toHaveLength(1);
+          expect(output.foods.filter(food => food.normalizedName === "oat milk" && food.suspectedDuplicateMilk !== true), label).toHaveLength(1);
+          expect(output.foods.find(food => food.normalizedName === "whole milk")?.suspectedDuplicateMilk, label).toBeUndefined();
+          expectSameNutrition(output.foods, [oat(second), dairyGlass()], label);
+          expect(nutritionOf(output.foods).coverage, label).toBe("partial");
+          expect(nutritionOf(output.foods).includedCount, label).toBe(2);
+          expect(preparePhotoMilkAnalysis(output), label).toEqual(output);
+        }
+      });
+
+      it.each([
+        "不是同一紙盒？",
+        "not the same carton?",
+        "是否不同紙盒？",
+        "是不是另一個紙盒？",
+        "whether it is a different carton?",
+      ])("a question does not confirm a second oat carton: %s", evidence => {
+        for (const prep of [false, true]) {
+          const row = (note: string) => prep ? withCarton(note) : oat(note);
+          const output = prepared(analysis(
+            [row("燕麥奶紙盒"), row(evidence)],
+            { visibleEvidence: [evidence] },
+          ));
+          const tag = `${evidence} prep=${prep}`;
+          expect(output.foods, tag).toHaveLength(2);
+          expect(output.foods.filter(food => food.suspectedDuplicateMilk === true), tag).toHaveLength(1);
+          expectSameNutrition(output.foods, [row("燕麥奶紙盒")], tag);
+          expect(nutritionOf(output.foods).coverage, tag).toBe("partial");
+        }
+      });
+
+      it.each([
+        "not a different carton",
+        "no different carton",
+        "不是不同紙盒",
+        "並非不同的紙盒",
+        "并非不同的纸盒",
+        "without a different carton",
+      ])("outer negation of difference is not two oat cartons: %s", evidence => {
+        for (const prep of [false, true]) {
+          const row = (note: string) => prep ? withCarton(note) : oat("燕麥奶紙盒");
+          const output = prepared(analysis(
+            [row("燕麥奶紙盒"), row("燕麥奶紙盒")],
+            { visibleEvidence: [evidence] },
+          ));
+          const counted = output.foods.filter(food => food.suspectedDuplicateMilk !== true);
+          const tag = `${evidence} prep=${prep}`;
+          expect(counted, tag).toHaveLength(1);
+          expect(counted[0].normalizedName, tag).toBe("oat milk");
+          expectSameNutrition(output.foods, [row("燕麥奶紙盒")], tag);
+          expect(nutritionOf(output.foods).includedCount, tag).toBe(1);
+          if (output.foods.length === 2) {
+            expect(output.foods.filter(food => food.suspectedDuplicateMilk === true), tag).toHaveLength(1);
+            expect(nutritionOf(output.foods).coverage, tag).toBe("partial");
+          }
+        }
+      });
+
+      it.each([
+        ["row note not the same carton", "not the same carton"],
+        ["row note 不是同一紙盒", "不是同一紙盒"],
+        ["row note 並非同一紙盒", "並非同一紙盒"],
+        ["row note 并非同一纸盒", "并非同一纸盒"],
+      ] as const)("affirmative distinct carton wording still counts two oats: %s", (_label, evidence) => {
+        const output = prepared(analysis(
+          [oat("燕麥奶紙盒"), oat("燕麥奶紙盒")],
+          { visibleEvidence: [evidence] },
+        ));
+        expect(output.foods.filter(food => food.suspectedDuplicateMilk === true)).toHaveLength(0);
+        expect(nutritionOf(output.foods).includedCount).toBe(2);
+        expect(nutritionOf(output.foods).coverage).toBe("complete");
+        expectSameNutrition(output.foods, [oat("燕麥奶紙盒"), oat("燕麥奶紙盒")], evidence);
+      });
+
+      it("keeps two oat cartons and the dairy glass when the carton itself is not the same", () => {
+        const output = prepared(analysis([
+          oat("燕麥奶紙盒"),
+          oat("燕麥奶紙盒"),
+          dairyGlass(),
+        ], { visibleEvidence: ["不是同一紙盒"] }));
+        expect(output.foods.filter(food => food.suspectedDuplicateMilk === true)).toHaveLength(0);
+        expect(nutritionOf(output.foods).includedCount).toBe(3);
+        expect(nutritionOf(output.foods).coverage).toBe("complete");
+        expectSameNutrition(output.foods, [oat("燕麥奶紙盒"), oat("燕麥奶紙盒"), dairyGlass()], "不是同一紙盒");
+      });
+
+      it.each([
+        "唔係三盒燕麥奶，只係一盒",
+        "不係三盒燕麥奶",
+        "無三盒燕麥奶",
+        "沒有三盒燕麥奶",
+        "未見三盒燕麥奶",
+        "无三盒燕麦奶",
+        "冇三盒燕麥奶",
+      ])("negative quantity wording is not three oat cartons: %s", evidence => {
+        const rows = [oat("燕麥奶紙盒"), oat("燕麥奶紙盒"), oat("燕麥奶紙盒"), dairyGlass()];
+        const output = prepared(analysis(rows, { visibleEvidence: [evidence] }));
+        expect(output.foods.filter(food => food.suspectedDuplicateMilk === true), evidence).toHaveLength(2);
+        expect(output.foods.find(food => food.normalizedName === "whole milk")?.suspectedDuplicateMilk, evidence).toBeUndefined();
+        expect(nutritionOf(output.foods).includedCount, evidence).toBe(2);
+        expect(nutritionOf(output.foods).coverage, evidence).toBe("partial");
+        expectSameNutrition(output.foods, [oat("燕麥奶紙盒"), dairyGlass()], evidence);
+      });
+
+      it("does not read an unattributed 只係一盒 as three oat servings", () => {
+        const rows = [oat("燕麥奶紙盒"), oat("燕麥奶紙盒"), oat("燕麥奶紙盒"), dairyGlass()];
+        const output = prepared(analysis(rows, { visibleEvidence: ["只係一盒"] }));
+        expect(output.foods.filter(food => food.suspectedDuplicateMilk === true)).toHaveLength(2);
+        expectSameNutrition(output.foods, [oat("燕麥奶紙盒"), dairyGlass()], "只係一盒");
+      });
+
+      it("still counts unsweetened oat cartons when 無 is not a quantity negation", () => {
+        const rows = [oat("燕麥奶紙盒"), oat("燕麥奶紙盒"), oat("燕麥奶紙盒"), dairyGlass()];
+        const output = prepared(analysis(rows, { visibleEvidence: ["無糖燕麥奶兩盒"] }));
+        expect(output.foods.filter(food => food.normalizedName === "oat milk" && food.suspectedDuplicateMilk === true)).toHaveLength(1);
+        expect(output.foods.find(food => food.normalizedName === "whole milk")?.suspectedDuplicateMilk).toBeUndefined();
+        expect(nutritionOf(output.foods).includedCount).toBe(3);
+        expectSameNutrition(output.foods, [oat("燕麥奶紙盒"), oat("燕麥奶紙盒"), dairyGlass()], "無糖");
+      });
+
+      it("keeps a non-milk food while the spatial oat duplicate stays pending", () => {
+        const sandwich: ObservedFood = {
+          ...oat("火腿三明治"),
+          displayName: "三明治",
+          normalizedName: "sandwich",
+          identityLevel: "dish",
+        };
+        const output = prepared(analysis([
+          sandwich,
+          oat("燕麥奶紙盒，前方玻璃杯"),
+          oat("燕麥奶紙盒，後方玻璃杯"),
+        ]));
+        expect(output.foods.map(food => food.normalizedName)).toEqual(["sandwich", "oat milk", "oat milk"]);
+        expect(output.foods[0].suspectedDuplicateMilk).toBeUndefined();
+        expect(output.foods.filter(food => food.suspectedDuplicateMilk === true)).toHaveLength(1);
+        expectSameNutrition(output.foods, [sandwich, oat("燕麥奶紙盒，前方玻璃杯")], "sandwich");
+      });
+    });
   });
 
 });

@@ -17,11 +17,9 @@ const SAME_SERVING =
   /同一(?:紙盒|盒|瓶|樽|隻杯|杯|玻璃杯|份|容器)|只有一(?:個紙盒|隻杯|個杯)|same (?:carton|bottle|glass|cup|serving|container)|一(?:盒|杯)飲品被(?:拆|分)成兩項/;
 const UNCERTAIN_SAME_SERVING =
   /未能|未知|未確定|不確定|無法|未確認|可能|是否|不是|並非|未必|\b(?:not|maybe|might|may|whether|unclear|cannot|could|unsure)\b/;
-const NEGATED_SAME_SERVING =
-  /不是同一|並非同一|並不是同一|不是同一個|不同(?:紙盒|盒|杯|瓶|樽|容器)|not the same|different (?:carton|bottle|cup|glass|container)/;
-const CARTON = /紙盒|紙包|利樂|carton|一盒|盒裝/;
-const BOTTLE = /瓶子|玻璃樽|一瓶|一樽|瓶裝|(?:^|\s)bottle(?:$|\s)/;
-const GLASS = /玻璃杯|杯裝|一杯|(?:^|\s)(?:glass|cup)(?:$|\s)/;
+const CARTON = /紙盒|纸盒|紙包|纸包|利樂|利乐|carton|一盒|盒裝|盒装/;
+const BOTTLE = /瓶子|玻璃樽|一瓶|一樽|瓶裝|瓶装|(?:^|\s)bottle(?:$|\s)/;
+const GLASS = /玻璃杯|杯裝|杯装|另一(?:個|个|隻|只)?杯|第二(?:個|个|隻|只)?杯|(?<!同)一杯|(?:^|\s)(?:glass|cup)(?:$|\s)/;
 const WRAPPED = /包裝/;
 
 function releaseSuspect(food: ObservedFood): ObservedFood {
@@ -81,41 +79,59 @@ function groupVesselFromOwnContainers(foods: readonly ObservedFood[]): GroupVess
 }
 
 function splitClauses(raw: string): string[] {
-  return raw.split(/[，,。；;!?？]/).map(item => item.trim()).filter(Boolean);
+  // Question marks stay on the clause. Polarity has to see them; splitting
+  // them off first would turn「不是同一紙盒？」into an affirmative contrast.
+  return raw.split(/[，,。；;!！]/).map(item => item.trim()).filter(Boolean);
 }
 
-function affirmativeRowEvidence(raw: string): boolean {
+const COUNT_NEGATION =
+  /沒有|没有|没|未見|未见|未有|未能|未知|未確|未确|不確|不确|不能|不見|不见|並非|并非|不是|並不|并不|無法|无法|可能|或許|或许|疑似|估計|估计|是否|大概|唔係|唔系|不係|不系|(?:無|无|冇)(?=[一二兩两三四五六七八九1-9])|\b(?:no|not|without|none|neither|never|maybe|might|may|perhaps|whether|unclear|unsure|uncertain|unknown|cannot|could|possibly|apparently)\b/i;
+
+function affirmativeCountEvidence(raw: string): boolean {
   if (/[?？]/.test(raw)) return false;
-  const text = normalizeFoodName(raw);
-  return !/沒有|没有|没|未見|未见|未有|未能|未知|未確|未确|不確|不确|不能|不見|不见|並非|并非|並不|并不|無法|无法|可能|或許|或许|疑似|估計|估计|是否|大概|\b(?:no|not|without|none|neither|never|maybe|might|may|perhaps|whether|unclear|unsure|uncertain|unknown|cannot|could|possibly|apparently)\b/i.test(text);
+  return !COUNT_NEGATION.test(normalizeFoodName(raw));
+}
+
+type VesselKind = "carton" | "bottle" | "glass";
+type SpatialSide = "front" | "back" | "left" | "right";
+
+const UNCERTAIN_DISTINCT =
+  /未能|未知|未確認|未确定|不確定|不确定|可能|是否|是不是|\b(?:maybe|might|unclear|whether|unknown|perhaps|unsure)\b/i;
+
+const SAME_NEGATED: Record<VesselKind, RegExp> = {
+  carton: /不是同一(?:個|个)?(?:紙盒|纸盒|盒)|並非同一(?:個|个)?(?:紙盒|纸盒|盒)|并非同一(?:個|个)?(?:紙盒|纸盒|盒)|並不是同一(?:個|个)?(?:紙盒|纸盒|盒)|并不是同一(?:個|个)?(?:紙盒|纸盒|盒)|不是同一個(?:紙盒|纸盒)|not the same (?:carton|package)/i,
+  glass: /不是同一(?:個|个|隻|只)?(?:玻璃杯|杯)|並非同一(?:個|个|隻|只)?(?:玻璃杯|杯)|并非同一(?:個|个|隻|只)?(?:玻璃杯|杯)|並不是同一(?:個|个|隻|只)?(?:玻璃杯|杯)|并不是同一(?:個|个|隻|只)?(?:玻璃杯|杯)|not the same (?:glass|cup)/i,
+  bottle: /不是同一(?:支|個|个)?(?:瓶|樽)|並非同一(?:支|個|个)?(?:瓶|樽)|并非同一(?:支|個|个)?(?:瓶|樽)|not the same bottle/i,
+};
+
+const BARE_DIFFERENT: Record<VesselKind, RegExp> = {
+  carton: /不同(?:的)?(?:紙盒|纸盒|盒|包)|different (?:carton|package)/i,
+  glass: /不同(?:的)?(?:玻璃杯|杯)|different (?:glass|cup)/i,
+  bottle: /不同(?:的)?(?:瓶|樽)|different bottle/i,
+};
+
+function outerNegatesDifference(clause: string): boolean {
+  return /(?:不是|並非|并非|並不|并不|唔係|唔系|不係|不系|沒有|没有|無|无)\s*不同(?:的)?(?:紙盒|纸盒|盒|包|瓶|樽|杯|玻璃杯|容器)/.test(clause)
+    || /\b(?:no|not|without)\b\s+(?:a\s+|an\s+)?different\s+(?:carton|package|bottle|glass|cup|container)\b/i.test(clause);
 }
 
 /**
- * Which physical vessel the negated-sameness phrase actually contrasts.
- * "不是同一杯" contrasts glasses; it must not prove a second oat carton.
+ * Affirmative contrast ("not the same carton") names one vessel.
+ * A question, a hedge, or an outer negation ("not a different carton")
+ * does not. The "not" inside "not the same" is the contrast itself.
  */
-function negatedReferentVessel(clause: string): "carton" | "bottle" | "glass" | null {
-  if (!NEGATED_SAME_SERVING.test(normalizeFoodName(clause))) return null;
-  if (/不是同一(?:個|个)?(?:紙盒|纸盒|盒)|並非同一(?:個|个)?(?:紙盒|纸盒|盒)|並不是同一(?:個|个)?(?:紙盒|纸盒|盒)|not the same (?:carton|package)|different (?:carton|package)/i.test(clause)) {
-    return "carton";
+function affirmativeDistinctReferent(clause: string): VesselKind | "denied" | null {
+  if (/[?？]/.test(clause)) return null;
+  const normalized = normalizeFoodName(clause);
+  if (UNCERTAIN_DISTINCT.test(normalized)) return null;
+  if (outerNegatesDifference(clause) || outerNegatesDifference(normalized)) return "denied";
+  for (const vessel of ["carton", "glass", "bottle"] as const) {
+    if (SAME_NEGATED[vessel].test(clause) || SAME_NEGATED[vessel].test(normalized)) return vessel;
   }
-  if (/不是同一(?:個|个)?(?:杯|玻璃杯)|並非同一(?:個|个)?(?:杯|玻璃杯)|not the same (?:glass|cup)|different (?:glass|cup)/i.test(clause)) {
-    return "glass";
+  for (const vessel of ["carton", "glass", "bottle"] as const) {
+    if (BARE_DIFFERENT[vessel].test(clause) || BARE_DIFFERENT[vessel].test(normalized)) return vessel;
   }
-  if (/不是同一(?:支|個|个)?(?:瓶|樽)|not the same bottle|different bottle/i.test(clause)) {
-    return "bottle";
-  }
-  const text = normalizeFoodName(clause);
-  if (/不同(?:紙盒|纸盒|盒|包)/.test(text)) return "carton";
-  if (/不同(?:杯|玻璃杯)/.test(text)) return "glass";
-  if (/不同(?:瓶|樽)/.test(text)) return "bottle";
   return null;
-}
-
-function negatedReferentMatchesGroupVessel(clause: string, vessel: GroupVessel): boolean {
-  const referent = negatedReferentVessel(clause);
-  if (referent === null || vessel === "unknown") return false;
-  return referent === vessel;
 }
 
 function milkFamilyMarkers(): Record<MilkFamily, RegExp> {
@@ -140,106 +156,203 @@ function sameMilkFamilyClause(text: string, family: MilkFamily): boolean {
   return found.length === 1 && found[0] === family;
 }
 
-function separateVesselPattern(vessel: GroupVessel): RegExp {
-  if (vessel === "carton") {
-    return /另一(?:個|个)?(?:紙盒|纸盒|盒|包)|第二(?:個|个)?(?:紙盒|纸盒|盒|包)|another\s+(?:carton|package)|second\s+(?:carton|package)/gi;
-  }
-  if (vessel === "bottle") {
-    return /另一(?:支|個|个)?(?:瓶|樽)|第二(?:支|個|个)?(?:瓶|樽)|another\s+bottle|second\s+bottle/gi;
-  }
-  if (vessel === "glass") {
-    return /另一(?:個|个|隻|只)?(?:玻璃杯|杯)|第二(?:個|个|隻|只)?(?:玻璃杯|杯)|another\s+(?:glass|cup)|second\s+(?:glass|cup)/gi;
-  }
-  return /$^/g;
+const VESSEL_TOKEN =
+  /紙盒|纸盒|紙包|纸包|利樂包|利乐包|利樂|利乐|盒裝|盒装|\bcarton\b|\bpackage\b|玻璃杯|杯子|杯裝|杯装|\bglass\b|\bcup\b|另一(?:個|个|隻|只)?杯|第二(?:個|个|隻|只)?杯|玻璃樽|瓶子|\bbottle\b|瓶裝|瓶装|一瓶|一樽/gi;
+
+const SIDE_PATTERN: Record<SpatialSide, RegExp> = {
+  front: /前方|前面|\bfront\b/i,
+  back: /後方|后方|後面|后面|\bback\b/i,
+  left: /左邊|左边|左側|左侧|\bleft\b/i,
+  right: /右邊|右边|右側|右侧|\bright\b/i,
+};
+
+const ANOTHER_VESSEL =
+  /另一(?:個|个)?(?:紙盒|纸盒|盒|包)|第二(?:個|个)?(?:紙盒|纸盒|盒|包)|another\s+(?:carton|package)|second\s+(?:carton|package)|另一(?:個|个|隻|只)?(?:玻璃杯|杯)|第二(?:個|个|隻|只)?(?:玻璃杯|杯)|another\s+(?:glass|cup)|second\s+(?:glass|cup)|另一(?:支|個|个)?(?:瓶|樽)|第二(?:支|個|个)?(?:瓶|樽)|another\s+bottle|second\s+bottle/gi;
+
+function vesselKindOf(token: string): VesselKind {
+  if (/carton|package|紙盒|纸盒|紙包|纸包|利樂|利乐|盒裝|盒装/i.test(token)) return "carton";
+  if (/bottle|瓶|樽/i.test(token)) return "bottle";
+  return "glass";
 }
 
-function sameVesselPattern(vessel: GroupVessel): RegExp {
-  if (vessel === "carton") return /紙盒|紙包|盒|包|carton|package/i;
-  if (vessel === "bottle") return /瓶|樽|bottle/i;
-  if (vessel === "glass") return /杯|glass|cup/i;
-  return /$^/;
+function vesselSpans(clause: string): Array<{ kind: VesselKind; start: number; end: number }> {
+  return [...clause.matchAll(new RegExp(VESSEL_TOKEN.source, "gi"))].map(match => ({
+    kind: vesselKindOf(match[0]),
+    start: match.index ?? 0,
+    end: (match.index ?? 0) + match[0].length,
+  }));
 }
 
 function rowNoteClaimsBothSides(note: string): boolean {
-  const left = /左邊|左边|左側|左侧|\bleft\b/i.test(note);
-  const right = /右邊|右边|右側|右侧|\bright\b/i.test(note);
+  const left = SIDE_PATTERN.left.test(note);
+  const right = SIDE_PATTERN.right.test(note);
   if (left && right) return true;
-  const front = /前方|前面|\bfront\b/i.test(note);
-  const back = /後方|后方|後面|后面|\bback\b/i.test(note);
-  return front && back;
+  return SIDE_PATTERN.front.test(note) && SIDE_PATTERN.back.test(note);
 }
 
-/** Front/back or left/right split across different rows, not one duplicated note. */
-function distinctOpposedPositionsAcrossRows(foods: readonly ObservedFood[]): boolean {
+function clauseHasOnlySide(clause: string, side: SpatialSide): boolean {
+  const front = SIDE_PATTERN.front.test(clause);
+  const back = SIDE_PATTERN.back.test(clause);
+  const left = SIDE_PATTERN.left.test(clause);
+  const right = SIDE_PATTERN.right.test(clause);
+  if (side === "front") return front && !back;
+  if (side === "back") return back && !front;
+  if (side === "left") return left && !right;
+  return right && !left;
+}
+
+/** The vessel a position word modifies: the next vessel before another position, else the previous one. */
+function vesselModifiedBySide(clause: string, side: SpatialSide): VesselKind | null {
+  const pos = new RegExp(SIDE_PATTERN[side].source, SIDE_PATTERN[side].flags).exec(clause);
+  if (!pos || pos.index === undefined) return null;
+  const posEnd = pos.index + pos[0].length;
+  const vessels = vesselSpans(clause);
+  const anySide = /前方|前面|後方|后方|後面|后面|左邊|左边|左側|左侧|右邊|右边|右側|右侧|\b(?:front|back|left|right)\b/gi;
+  let nextSide = clause.length;
+  for (const match of clause.matchAll(anySide)) {
+    const at = match.index ?? 0;
+    if (at >= posEnd) {
+      nextSide = at;
+      break;
+    }
+  }
+  const following = vessels.find(span => span.start >= posEnd && span.start < nextSide);
+  if (following) return following.kind;
+  const preceding = [...vessels].reverse().find(span => span.end <= (pos.index ?? 0));
+  return preceding?.kind ?? null;
+}
+
+function nearestFamilyVessel(clause: string, family: MilkFamily): VesselKind | null {
+  if (!sameMilkFamilyClause(clause, family)) return null;
+  const marker = new RegExp(milkFamilyMarkers()[family].source, "i").exec(clause);
+  if (!marker || marker.index === undefined) return null;
+  const vessels = vesselSpans(clause);
+  if (vessels.length === 0) return null;
+  const anchor = marker.index;
+  const anchorEnd = anchor + marker[0].length;
+  const positioned = new Set(
+    (["front", "back", "left", "right"] as const)
+      .map(side => vesselModifiedBySide(clause, side))
+      .filter((kind): kind is VesselKind => kind !== null),
+  );
+  let best: { kind: VesselKind; distance: number; positioned: boolean } | null = null;
+  for (const span of vessels) {
+    const distance = anchorEnd <= span.start
+      ? span.start - anchorEnd
+      : span.end <= anchor ? anchor - span.end : 0;
+    const isPositioned = positioned.has(span.kind);
+    // 「前方玻璃杯旁燕麥奶紙盒」: 前方 binds to the glass. The oat phrase owns the carton.
+    const better = !best
+      || (best.positioned && !isPositioned)
+      || (best.positioned === isPositioned && distance < best.distance);
+    if (better) best = { kind: span.kind, distance, positioned: isPositioned };
+  }
+  return best?.kind ?? null;
+}
+
+/**
+ * Vessel named as this row's own drink. A glass that is only the target of
+ * "not the same glass" or of a position word beside a family-bound carton
+ * is a nearby object, not a second vessel for this row.
+ */
+function inferNoteVessels(food: ObservedFood): Set<VesselKind> {
+  const family = milkFamily(food);
+  const found = new Set<VesselKind>();
+  for (const clause of splitClauses(food.notes ?? "")) {
+    if (/[?？]/.test(clause)) continue;
+    const referent = affirmativeDistinctReferent(clause);
+    if (family === "generic") {
+      const kinds = new Set(vesselSpans(clause).map(span => span.kind).filter(kind => kind !== referent));
+      if (kinds.size === 1) found.add([...kinds][0]);
+      continue;
+    }
+    const owned = nearestFamilyVessel(clause, family);
+    if (!owned || owned === referent) continue;
+    found.add(owned);
+  }
+  return found;
+}
+
+function resolveGroupVessel(foods: readonly ObservedFood[]): GroupVessel {
+  const identity = groupVesselFromOwnContainers(foods);
+  if (identity !== "unknown") return identity;
   const family = foods.map(milkFamily).find(value => value !== "generic") ?? "generic";
-  const vessel = groupVesselFromOwnContainers(foods);
-  const sameVessel = sameVesselPattern(vessel);
-  const solely = (clause: string, side: "front" | "back" | "left" | "right"): boolean => {
-    const front = /前方|前面|\bfront\b/i.test(clause);
-    const back = /後方|后方|後面|后面|\bback\b/i.test(clause);
-    const left = /左邊|左边|左側|左侧|\bleft\b/i.test(clause);
-    const right = /右邊|右边|右側|右侧|\bright\b/i.test(clause);
-    if (side === "front") return front && !back;
-    if (side === "back") return back && !front;
-    if (side === "left") return left && !right;
-    return right && !left;
-  };
-  const qualifies = (note: string, side: "front" | "back" | "left" | "right"): boolean => {
+  if (family === "generic") return "unknown";
+  const inferred = new Set<VesselKind>();
+  for (const food of foods) {
+    for (const kind of inferNoteVessels(food)) inferred.add(kind);
+  }
+  return inferred.size === 1 ? [...inferred][0] : "unknown";
+}
+
+function spatialSideQualifies(
+  clause: string,
+  side: SpatialSide,
+  family: MilkFamily,
+  vessel: GroupVessel,
+): boolean {
+  if (!clauseHasOnlySide(clause, side)) return false;
+  if (/[?？]/.test(clause) || UNCERTAIN_DISTINCT.test(normalizeFoodName(clause))) return false;
+  const bound = vesselModifiedBySide(clause, side);
+  if (vessel === "unknown") {
+    if (family === "generic") return true;
+    return bound !== null && nearestFamilyVessel(clause, family) === bound;
+  }
+  if (bound !== vessel) return false;
+  const families = specificMilkFamilies(clause);
+  if (families.length > 1 || (families.length === 1 && families[0] !== family)) return false;
+  const attributed = nearestFamilyVessel(clause, family);
+  return attributed === null || attributed === vessel;
+}
+
+function opposedSpatialContainers(foods: readonly ObservedFood[]): boolean {
+  const family = foods.map(milkFamily).find(value => value !== "generic") ?? "generic";
+  const vessel = resolveGroupVessel(foods);
+  const qualifies = (food: ObservedFood, side: SpatialSide) => {
+    const note = food.notes ?? "";
     if (rowNoteClaimsBothSides(note)) return false;
-    return splitClauses(note).some(clause => {
-      if (!solely(clause, side)) return false;
-      if (vessel === "unknown") return true;
-      return sameMilkFamilyClause(clause, family) && sameVessel.test(clause);
-    });
+    return splitClauses(note).some(clause => spatialSideQualifies(clause, side, family, vessel));
   };
-  const opposedAcrossRows = (a: "front" | "back" | "left" | "right", b: "front" | "back" | "left" | "right") =>
-    foods.some((food, i) => qualifies(food.notes ?? "", a)
-      && foods.some((other, j) => i !== j && qualifies(other.notes ?? "", b)));
-  return opposedAcrossRows("front", "back") || opposedAcrossRows("left", "right");
+  const opposed = (left: SpatialSide, right: SpatialSide) =>
+    foods.some((food, index) => qualifies(food, left)
+      && foods.some((other, otherIndex) => index !== otherIndex && qualifies(other, right)));
+  return opposed("front", "back") || opposed("left", "right");
+}
+
+function anotherVesselKind(phrase: string): VesselKind {
+  if (/盒|包|carton|package/i.test(phrase)) return "carton";
+  if (/瓶|樽|bottle/i.test(phrase)) return "bottle";
+  return "glass";
+}
+
+function namedSecondSameVessel(foods: readonly ObservedFood[], vessel: GroupVessel, family: MilkFamily): boolean {
+  return foods.some(food => splitClauses(food.notes ?? "").some(clause => {
+    if (!affirmativeCountEvidence(clause)) return false;
+    return [...clause.matchAll(new RegExp(ANOTHER_VESSEL.source, "gi"))].some(match => {
+      const kind = anotherVesselKind(match[0]);
+      if (vessel !== "unknown" && kind !== vessel) return false;
+      const following = clause.slice((match.index ?? 0) + match[0].length);
+      return sameMilkFamilyClause(following, family);
+    });
+  }));
+}
+
+function clauseConfirmsDistinctVessel(clause: string, vessel: GroupVessel, family: MilkFamily): boolean {
+  const referent = affirmativeDistinctReferent(clause);
+  if (referent === null || referent === "denied") return false;
+  if (vessel === "unknown" || referent !== vessel) return false;
+  const found = specificMilkFamilies(clause);
+  return found.length === 0 || sameMilkFamilyClause(clause, family);
+}
+
+function distinctOpposedPositionsAcrossRows(foods: readonly ObservedFood[]): boolean {
+  return opposedSpatialContainers(foods);
 }
 
 function rowsAffirmSeparateSameVessel(foods: readonly ObservedFood[]): boolean {
   const family = foods.map(milkFamily).find(value => value !== "generic") ?? "generic";
-  const vessel = groupVesselFromOwnContainers(foods);
-  if (vessel === "unknown") return false;
-  const separateVessel = separateVesselPattern(vessel);
-  const sameVessel = sameVesselPattern(vessel);
-  const namedSecondVessel = foods.some(food => {
-    const note = food.notes ?? "";
-    if (!affirmativeRowEvidence(note)) return false;
-    return splitClauses(note).some(clause =>
-      [...clause.matchAll(separateVessel)].some(match => {
-        const following = clause.slice((match.index ?? 0) + match[0].length);
-        return sameMilkFamilyClause(following, family);
-      }));
-  });
-  const positionedRows = foods.map(food => {
-    const note = food.notes ?? "";
-    if (!affirmativeRowEvidence(note)) return new Set<string>();
-    const positions = new Set<string>();
-    for (const clause of splitClauses(note)) {
-      if (!sameMilkFamilyClause(clause, family) || !sameVessel.test(clause)) continue;
-      const left = /左邊|左边|左側|左侧|\bleft\b/i.test(clause);
-      const right = /右邊|右边|右側|右侧|\bright\b/i.test(clause);
-      const front = /前方|前面|\bfront\b/i.test(clause);
-      const back = /後方|后方|後面|后面|\bback\b/i.test(clause);
-      if (left && !right) positions.add("left");
-      if (right && !left) positions.add("right");
-      if (front && !back) positions.add("front");
-      if (back && !front) positions.add("back");
-    }
-    if ((positions.has("left") && positions.has("right"))
-        || (positions.has("front") && positions.has("back"))) {
-      return new Set<string>();
-    }
-    return positions;
-  });
-  const distinctPositionedRows = (a: string, b: string) =>
-    positionedRows.some((positions, i) => positions.has(a) && !positions.has(b) &&
-      positionedRows.some((other, j) => i !== j && other.has(b) && !other.has(a)));
-  return namedSecondVessel
-    || distinctPositionedRows("left", "right")
-    || distinctPositionedRows("front", "back");
+  const vessel = resolveGroupVessel(foods);
+  return namedSecondSameVessel(foods, vessel, family) || opposedSpatialContainers(foods);
 }
 
 type MilkFamily = "oat" | "soy" | "almond" | "coconut" | "dairy" | "generic";
@@ -337,19 +450,36 @@ function uncertainSameServing(analysis: FoodAnalysis, foods: readonly ObservedFo
     SAME_SERVING.test(text) && UNCERTAIN_SAME_SERVING.test(text));
 }
 
+function rawEvidenceText(analysis: FoodAnalysis, foods: readonly ObservedFood[]): string[] {
+  return [
+    ...foods.flatMap(food => [
+      food.displayName, food.normalizedName, food.notes ?? "",
+      food.preparationMethod ?? "", ...(food.visibleIngredients ?? []),
+      ...food.uncertaintyReasons,
+    ]),
+    ...analysis.visibleEvidence,
+    ...analysis.uncertaintyReasons,
+    ...analysis.estimatedInformation,
+    ...analysis.unknownInformation,
+  ];
+}
+
 function negatedDistinctServing(analysis: FoodAnalysis, foods: readonly ObservedFood[]): boolean {
   const family = foods.map(milkFamily).find(value => value !== "generic") ?? "generic";
-  const vessel = groupVesselFromOwnContainers(foods);
-  return evidenceStatements(analysis, foods, true).some(text =>
+  const vessel = resolveGroupVessel(foods);
+  // Keep the source text. Normalizing first deletes ? and would make a question
+  // look like an affirmative contrast.
+  return rawEvidenceText(analysis, foods).some(text =>
+    splitClauses(text).some(clause => clauseConfirmsDistinctVessel(clause, vessel, family)));
+}
+
+function questionedContainerEvidence(analysis: FoodAnalysis, foods: readonly ObservedFood[]): boolean {
+  return rawEvidenceText(analysis, foods).some(text =>
     splitClauses(text).some(clause => {
-      const normalized = normalizeFoodName(clause);
-      if (!NEGATED_SAME_SERVING.test(normalized)) return false;
-      if (/未能|未知|未確認|未确定|不確定|不确定|可能|是否|\b(?:maybe|might|unclear|whether|unknown|perhaps)\b/i.test(normalized)) {
-        return false;
-      }
-      if (!negatedReferentMatchesGroupVessel(clause, vessel)) return false;
-      const found = specificMilkFamilies(clause);
-      return found.length === 0 || sameMilkFamilyClause(clause, family);
+      const asks = /[?？]/.test(clause)
+        || UNCERTAIN_DISTINCT.test(clause)
+        || UNCERTAIN_DISTINCT.test(normalizeFoodName(clause));
+      return asks && /同一|不同|另一|第二|not the same|different|another|second/i.test(clause);
     }));
 }
 
@@ -437,19 +567,16 @@ function markSuspectedDuplicates(
 function candidateMilkGroups(foods: readonly ObservedFood[], milkIndexes: readonly number[]): number[][] {
   type ContainerKind = "carton" | "bottle" | "glass" | "package" | "unknown" | "mixed";
   const kind = (food: ObservedFood): ContainerKind => {
-    // A row's name / preparation identifies *its own* vessel more reliably
-    // than a note that may describe other items elsewhere in the photo.
-    const ownVessel = containerKinds({
-      ...food,
-      notes: undefined,
-      visibleIngredients: undefined,
-      uncertaintyReasons: [],
-    });
-    const kinds = ownVessel.size > 0 ? ownVessel : containerKinds(food);
-    if (kinds.has("carton")) kinds.delete("package"); // package is often the carton wrapper
-    if (kinds.size === 0) return "unknown";
-    if (kinds.size > 1) return "mixed";
-    return [...kinds][0];
+    // Identity fields can name two vessels. A note that mentions a carton
+    // and a nearby glass must not: that would drop the row from its group.
+    const own = rowOwnContainerKinds(food);
+    const identity = [...own].filter((item): item is VesselKind =>
+      item === "carton" || item === "bottle" || item === "glass");
+    if (identity.length > 1) return "mixed";
+    if (identity.length === 1) return identity[0];
+    const inferred = inferNoteVessels(food);
+    if (inferred.size === 1) return [...inferred][0];
+    return "unknown";
   };
   const entries = milkIndexes.map(index => ({
     index, family: milkFamily(foods[index]), kind: kind(foods[index]),
@@ -493,7 +620,7 @@ function evidencedMilkCount(
   group: readonly ObservedFood[],
 ): number {
   const family = group.map(milkFamily).find(value => value !== "generic") ?? "generic";
-  const vessel = groupVesselFromOwnContainers(group);
+  const vessel = resolveGroupVessel(group);
   const number = (raw: string): number | null => {
     const value = normalizeFoodName(raw);
     if (/^[1-9]$/.test(value)) return Number(value);
@@ -504,23 +631,13 @@ function evidencedMilkCount(
     return names[value] ?? null;
   };
   const chineseUnit = vessel === "glass" ? "(?:玻璃杯|杯)" :
-    vessel === "bottle" ? "(?:瓶|樽)" : "(?:紙盒|盒|包)";
+    vessel === "bottle" ? "(?:瓶|樽)" : "(?:紙盒|纸盒|盒|包)";
   const englishUnit = vessel === "glass" ? "glasses|cups?" :
     vessel === "bottle" ? "bottles?" : "cartons?|packages?";
   const quantity = new RegExp(
     `([一二兩两三四五六七八九1-9])\\s*(?:個|个|隻|只)?\\s*${chineseUnit}|\\b(one|two|three|four|five|six|seven|eight|nine|[1-9])\\s+(?:[a-z-]+\\s+){0,3}(?:${englishUnit})\\b`,
     "gi",
   );
-  // Do not promote absence, negation, tentative language or a question to
-  // positive quantity evidence. This gate applies equally to meal-level text
-  // and individual model rows. It is intentionally conservative.
-  const affirmativeCountEvidence = (raw: string): boolean => {
-    // normalizeFoodName strips punctuation, including the question mark.
-    // Evaluate interrogation polarity against the original source first.
-    if (/[?？]/.test(raw)) return false;
-    const text = normalizeFoodName(raw);
-    return !/沒有|没有|没|未見|未见|未有|未能|未知|未確|未确|不確|不确|不能|不見|不见|並非|并非|不是|並不|并不|無法|无法|可能|或許|或许|疑似|估計|估计|是否|大概|\b(?:no|not|without|none|neither|never|maybe|might|may|perhaps|whether|unclear|unsure|uncertain|unknown|cannot|could|possibly|apparently)\b/i.test(text);
-  };
   const specificFamilies = (text: string): MilkFamily[] => specificMilkFamilies(text);
 
   const perRowRaw = group.map(milkRowText);
@@ -529,71 +646,16 @@ function evidencedMilkCount(
     ...analysis.uncertaintyReasons, ...analysis.unknownInformation,
   ];
 
-  // A row can describe other containers in its notes. Only an explicit
-  // *same-family and same-vessel* referent may raise this group's count.
-  // "燕麥奶紙盒，另一杯" describes a cup, not a second oat carton.
-  const sameVessel = sameVesselPattern(vessel);
-  const separateVessel = separateVesselPattern(vessel);
-  const clauses = splitClauses;
-  const sameFamilyOnly = (text: string): boolean => sameMilkFamilyClause(text, family);
-
-  // An explicit "another carton of oat milk" is group-specific. Bare "another
-  // carton" is not: it could be soy or an unidentified drink. We intentionally
-  // cannot infer a second oat carton from the food row's *own* identity alone.
-  const namedSecondVessel = group.some(food => {
-    const note = food.notes ?? "";
-    if (!affirmativeRowEvidence(note)) return false;
-    return clauses(note).some(clause =>
-      [...clause.matchAll(separateVessel)].some(match => {
-        const following = clause.slice((match.index ?? 0) + match[0].length);
-        return sameFamilyOnly(following);
-      }));
-  });
-
-  // Location words must identify two *different food rows* as physical
-  // containers in this subgroup. A duplicated note containing both "left"
-  // and "right" does not prove two servings.
-  const positionedRows = group.map(food => {
-    const note = food.notes ?? "";
-    if (!affirmativeCountEvidence(note)) return new Set<string>();
-    const positions = new Set<string>();
-    for (const clause of clauses(note)) {
-      if (!sameFamilyOnly(clause) || !sameVessel.test(clause)) continue;
-      const left = /左邊|左边|左側|左侧|\bleft\b/i.test(clause);
-      const right = /右邊|右边|右側|右侧|\bright\b/i.test(clause);
-      const front = /前方|前面|\bfront\b/i.test(clause);
-      const back = /後方|后方|後面|后面|\bback\b/i.test(clause);
-      if (left && !right) positions.add("left");
-      if (right && !left) positions.add("right");
-      if (front && !back) positions.add("front");
-      if (back && !front) positions.add("back");
-    }
-    if ((positions.has("left") && positions.has("right"))
-        || (positions.has("front") && positions.has("back"))) {
-      return new Set<string>();
-    }
-    return positions;
-  });
-  const distinctPositionedRows = (a: string, b: string) =>
-    positionedRows.some((positions, i) => positions.has(a) && !positions.has(b) &&
-      positionedRows.some((other, j) => i !== j && other.has(b) && !other.has(a)));
-
-  // A negation of sameness asserts two containers only if it actually names
-  // this group's vessel type in a model-row note. "not the same glass" must
-  // never validate another oat carton.
-  const maybeDistinct = evidenceStatements(analysis, group, true).some(text =>
-    NEGATED_SAME_SERVING.test(text) &&
-    /未能|未知|未確認|未确定|不確定|不确定|可能|是否|\b(?:maybe|might|unclear|whether|unknown|perhaps)\b/i.test(text));
-  const scopedDistinct = !maybeDistinct && group.some(food =>
-    clauses(food.notes ?? "").some(clause => {
-      const normalized = normalizeFoodName(clause);
-      if (!NEGATED_SAME_SERVING.test(normalized)) return false;
-      if (!negatedReferentMatchesGroupVessel(clause, vessel)) return false;
-      return specificFamilies(clause).length === 0 || sameFamilyOnly(clause);
-    }));
-  const minimumCount = namedSecondVessel
-    || distinctPositionedRows("left", "right")
-    || distinctPositionedRows("front", "back")
+  // "another carton of oat milk" raises this group. "another glass" does not.
+  // A position word counts only when it modifies this group's own vessel.
+  const evidenceClauses = [
+    ...group.flatMap(food => splitClauses(food.notes ?? "")),
+    ...statements.flatMap(splitClauses),
+  ];
+  const scopedDistinct = evidenceClauses.some(clause =>
+    clauseConfirmsDistinctVessel(clause, vessel, family));
+  const minimumCount = namedSecondSameVessel(group, vessel, family)
+    || opposedSpatialContainers(group)
     || scopedDistinct ? 2 : 1;
 
   // Rows may repeat "一盒" because the model duplicated a serving. However,
@@ -605,11 +667,12 @@ function evidencedMilkCount(
   ];
   const validCounts: number[] = [];
   for (const { value: raw, fromRow } of countStatements) {
-    // Keep comma/clause boundaries intact for family attribution.
-    // Normalizing the entire statement here would erase punctuation and
-    // incorrectly bind 「兩盒燕麥奶，另一杯牛奶」 to both families.
-    const value = raw.toLowerCase().replace(/\s+/g, " ").trim();
-    if (!affirmativeCountEvidence(raw) ||
+    // Polarity is decided per clause, after the clause boundary is known.
+    // A negated clause must not erase an affirmative count in another clause,
+    // and a question mark must still be visible to that decision.
+    for (const clause of splitClauses(raw)) {
+    const value = clause.toLowerCase().replace(/\s+/g, " ").trim();
+    if (!affirmativeCountEvidence(clause) ||
         /不止|超過|超过|more than|at least/i.test(value)) continue;
     const matches = [...value.matchAll(quantity)];
     for (const [offset, match] of matches.entries()) {
@@ -641,6 +704,7 @@ function evidencedMilkCount(
       if (specificFamilies(value.slice(from, to)).some(other => other !== family)
           && matches.length === 1) continue;
       validCounts.push(count);
+    }
     }
   }
   if (validCounts.length > 0) {
@@ -698,7 +762,8 @@ export function dedupeIdenticalContainerMilk(analysis: FoodAnalysis): FoodAnalys
   if (milkIndexes.length >= 2 && compatibleFamilies(milkFoods)) {
     const rowsAreDistinct = rowsShowDistinctContainers(milkFoods);
     const mealOnlySeparate = mealOnlySuggestsAnotherContainer(analysis, milkFoods);
-    const uncertain = uncertainSameServing(analysis, milkFoods);
+    const uncertain = uncertainSameServing(analysis, milkFoods)
+      || questionedContainerEvidence(analysis, milkFoods);
     const negated = negatedDistinctServing(analysis, milkFoods);
     if (
       !rowsAreDistinct &&

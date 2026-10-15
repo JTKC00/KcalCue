@@ -2,10 +2,15 @@ import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import sharp from "sharp";
 import path from "node:path";
 
+import { foodAnalysisSchema, type FoodAnalysis, type ObservedFood } from "../src/lib/domain/food-analysis";
 import { productionGlassMilkUnknownAnalysis } from "../src/lib/nutrition/photo-milk-prod-qa.fixture";
 import { c3Run1SingleOatCartonAnalysis, c4TwoMilkContainersAnalysis, m6CartonAndGlassAnalysis } from "../src/lib/nutrition/m7-milk-dedupe.fixture";
 import { preparePhotoMilkAnalysis } from "../src/lib/domain/photo-milk-analysis";
 import { qaSuspectedMilkAnalysis } from "../src/lib/domain/qa-suspected-milk";
+import { createEditableFoodItems } from "../src/lib/domain/editable-meal";
+import { roundRange } from "../src/lib/nutrition/calculation";
+import { LocalNutritionProvider } from "../src/lib/nutrition/local-provider";
+import { NutritionService } from "../src/lib/nutrition/service";
 
 const userId = "11111111-1111-4111-8111-111111111111";
 type TestRecord = {
@@ -2653,5 +2658,265 @@ test("P1 two-row differing oat notes stay pending, remove duplicate, save + Hist
   await page.getByRole("button", { name: "歷史", exact: true }).click();
   await page.getByRole("button", { name: "查看／修正", exact: true }).click();
   await expect(page.locator(".food-card")).toHaveCount(2);
+  expect(backend.mealReadUrls.length).toBeGreaterThan(0);
+});
+
+function syntheticOat(note: string): ObservedFood {
+  return {
+    displayName: "燕麥奶",
+    normalizedName: "oat milk",
+    identityLevel: "ingredient",
+    portionMin: 250,
+    portionMax: 250,
+    unit: "ml",
+    recognitionConfidence: 0.74,
+    portionConfidence: 0.58,
+    uncertaintyReasons: [],
+    notes: note,
+  };
+}
+
+function syntheticWholeGlass(): ObservedFood {
+  return {
+    displayName: "全脂牛奶",
+    normalizedName: "whole milk",
+    identityLevel: "ingredient",
+    portionMin: 250,
+    portionMax: 250,
+    unit: "ml",
+    recognitionConfidence: 0.7,
+    portionConfidence: 0.5,
+    uncertaintyReasons: [],
+    notes: "玻璃杯全脂牛奶",
+  };
+}
+
+function visibleNutrition(foods: ObservedFood[]) {
+  const meal = new NutritionService(new LocalNutritionProvider()).calculateMeal(
+    createEditableFoodItems(foods).map(item => ({
+      ...item,
+      entrySource: "photo" as const,
+      ...(item.normalizedName === "oat milk" ? { userMilkTypeChoice: "oat" as const } : {}),
+      ...(item.normalizedName === "whole milk" ? { userMilkTypeChoice: "whole" as const } : {}),
+    })),
+  );
+  const calories = roundRange(meal.totals.calories, 5);
+  const macro = (range: { min: number; max: number }) => {
+    const rounded = roundRange(range, 1);
+    return `${rounded.min}–${rounded.max}g`;
+  };
+  return {
+    pendingHeading: `已確認項目合計：約 ${calories.min}–${calories.max} kcal`,
+    heading: `約 ${calories.min}–${calories.max} kcal`,
+    protein: macro(meal.totals.protein),
+    carbs: macro(meal.totals.carbs),
+    fat: macro(meal.totals.fat),
+    included: meal.includedCount,
+    total: meal.totalCount,
+    coverage: meal.coverage,
+  };
+}
+
+async function chooseOat(page: Page, pendingOnly: boolean) {
+  const cards = page.locator(".food-card");
+  const count = await cards.count();
+  for (let index = 0; index < count; index += 1) {
+    const card = cards.nth(index);
+    const pending = await card.getByRole("button", { name: "係重複，移除", exact: true }).count();
+    if (pendingOnly ? pending === 0 : pending > 0) continue;
+    const choice = card.getByRole("button", { name: "燕麥奶", exact: true });
+    if (await choice.count() > 0) await choice.click();
+  }
+}
+
+async function expectMealNutrition(page: Page, foods: ObservedFood[], pending: boolean) {
+  const expected = visibleNutrition(foods);
+  await expect(page.getByRole("heading", {
+    name: pending ? expected.pendingHeading : expected.heading,
+    exact: true,
+  })).toBeVisible();
+  await expect(page.locator(".macro-protein strong")).toHaveText(expected.protein);
+  await expect(page.locator(".macro-carbs strong")).toHaveText(expected.carbs);
+  await expect(page.locator(".macro-fat strong")).toHaveText(expected.fat);
+  if (pending) {
+    await expect(page.getByText(
+      `營養參考只包括 ${expected.included} / ${expected.total} 項有可靠營養資料的食物。`,
+    )).toBeVisible();
+  }
+  return expected;
+}
+
+async function openSyntheticMilk(
+  page: Page,
+  context: BrowserContext,
+  foods: ObservedFood[],
+  visibleEvidence: string[] = [],
+) {
+  const backend = cloud();
+  await backend.install(context);
+  const preparedAnalysis = preparePhotoMilkAnalysis(foodAnalysisSchema.parse({
+    analysisStatus: "success",
+    foods,
+    uncertaintyReasons: [],
+    visibleEvidence,
+    estimatedInformation: [],
+    unknownInformation: [],
+  } satisfies FoodAnalysis));
+  await page.route("**/api/analyze", route => route.fulfill({
+    json: { mode: "live", analysis: preparedAnalysis, analysisProvenance: null },
+  }));
+  await page.route("**/api/nutrition/resolve", route => route.fulfill({
+    status: 500, json: { error: { code: "unexpected_nutrition" } },
+  }));
+  await page.goto("/");
+  await login(page);
+  await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
+  const png = await sharp({
+    create: { width: 80, height: 60, channels: 3, background: "white" },
+  }).png().toBuffer();
+  await page.locator('input[type="file"]').nth(1).setInputFiles({
+    name: "synthetic-milk.png", mimeType: "image/png", buffer: png,
+  });
+  await page.getByRole("button", { name: "開始分析", exact: true }).click();
+  await expect(page.locator(".food-card")).toHaveCount(preparedAnalysis.foods.length);
+  return { backend, preparedAnalysis };
+}
+
+for (const decision of ["remove", "confirm"] as const) {
+  test(`P1 spatial glass notes keep one oat carton pending: ${decision}, save + History`, async ({ page, context }) => {
+    const { backend, preparedAnalysis } = await openSyntheticMilk(page, context, [
+      syntheticOat("燕麥奶紙盒，前方玻璃杯"),
+      syntheticOat("燕麥奶紙盒，後方玻璃杯"),
+    ]);
+    expect(preparedAnalysis.foods.filter(food => food.suspectedDuplicateMilk)).toHaveLength(1);
+    await expect(page.getByText(/有 1 項飲品可能重複，尚待你確認/)).toBeVisible();
+    await chooseOat(page, false);
+    await expectMealNutrition(page, preparedAnalysis.foods, true);
+    if (decision === "remove") {
+      await page.getByRole("button", { name: "係重複，移除", exact: true }).click();
+      await expect(page.locator(".food-card")).toHaveCount(1);
+    } else {
+      await page.getByRole("button", { name: "係另一份，計入", exact: true }).click();
+      await chooseOat(page, false);
+      await expect(page.locator(".food-card")).toHaveCount(2);
+    }
+    await expect(page.getByText(/可能重複，尚待你確認/)).toHaveCount(0);
+    const kept = decision === "remove"
+      ? preparedAnalysis.foods.filter(food => food.suspectedDuplicateMilk !== true)
+      : preparedAnalysis.foods.map(food => {
+        const next = { ...food };
+        delete next.suspectedDuplicateMilk;
+        return next;
+      });
+    await expectMealNutrition(page, kept, false);
+    await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+    await expect.poll(() => backend.records.size).toBe(1);
+    const saved = [...backend.records.values()][0].items as Array<{
+      displayName: string;
+      normalizedName: string;
+      suspectedDuplicateMilk?: boolean;
+      userMilkTypeChoice?: string;
+    }>;
+    expect(saved).toHaveLength(decision === "remove" ? 1 : 2);
+    expect(saved.every(item => item.displayName === "燕麥奶")).toBe(true);
+    expect(saved.every(item => item.normalizedName === "oat-milk")).toBe(true);
+    expect(saved.every(item => item.suspectedDuplicateMilk == null)).toBe(true);
+    expect(saved.every(item => item.userMilkTypeChoice === "oat")).toBe(true);
+    await page.getByRole("button", { name: "歷史", exact: true }).click();
+    await page.getByRole("button", { name: "查看／修正", exact: true }).click();
+    await expect(page.locator(".food-card")).toHaveCount(saved.length);
+    await expect(page.getByRole("button", { name: "係重複，移除", exact: true })).toHaveCount(0);
+    await expectMealNutrition(page, kept, false);
+    expect(backend.mealReadUrls.length).toBeGreaterThan(0);
+  });
+}
+
+test("P1 mixed-vessel oat note keeps the dairy glass and one pending oat through History", async ({ page, context }) => {
+  const { backend, preparedAnalysis } = await openSyntheticMilk(page, context, [
+    syntheticOat("紙盒燕麥奶 not the same glass"),
+    syntheticOat("燕麥奶紙盒"),
+    syntheticWholeGlass(),
+  ]);
+  expect(preparedAnalysis.foods.filter(food => food.suspectedDuplicateMilk)).toHaveLength(1);
+  expect(preparedAnalysis.foods.find(food => food.normalizedName === "whole milk")?.suspectedDuplicateMilk).toBeUndefined();
+  await expect(page.getByText(/有 1 項飲品可能重複，尚待你確認/)).toBeVisible();
+  await chooseOat(page, false);
+  await expectMealNutrition(page, preparedAnalysis.foods, true);
+  await page.getByRole("button", { name: "係重複，移除", exact: true }).click();
+  await expect(page.locator(".food-card")).toHaveCount(2);
+  const kept = preparedAnalysis.foods.filter(food => food.suspectedDuplicateMilk !== true);
+  await expectMealNutrition(page, kept, false);
+  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  await expect.poll(() => backend.records.size).toBe(1);
+  const saved = [...backend.records.values()][0].items as Array<{
+    normalizedName: string;
+    suspectedDuplicateMilk?: boolean;
+  }>;
+  expect(saved.map(item => item.normalizedName).sort()).toEqual(["oat-milk", "whole milk"]);
+  expect(saved.every(item => item.suspectedDuplicateMilk == null)).toBe(true);
+  await page.getByRole("button", { name: "歷史", exact: true }).click();
+  await page.getByRole("button", { name: "查看／修正", exact: true }).click();
+  await expect(page.locator(".food-card")).toHaveCount(2);
+  await expectMealNutrition(page, kept, false);
+  expect(backend.mealReadUrls.length).toBeGreaterThan(0);
+});
+
+test("P1 negated oat quantity stays pending until the duplicate rows are removed", async ({ page, context }) => {
+  const { backend, preparedAnalysis } = await openSyntheticMilk(page, context, [
+    syntheticOat("燕麥奶紙盒。唔係三盒燕麥奶，只係一盒"),
+    syntheticOat("燕麥奶紙盒"),
+    syntheticOat("燕麥奶紙盒"),
+    syntheticWholeGlass(),
+  ]);
+  expect(preparedAnalysis.foods.filter(food => food.suspectedDuplicateMilk)).toHaveLength(2);
+  expect(preparedAnalysis.foods.find(food => food.normalizedName === "whole milk")?.suspectedDuplicateMilk).toBeUndefined();
+  await expect(page.getByText(/有 2 項飲品可能重複，尚待你確認/)).toBeVisible();
+  await chooseOat(page, false);
+  await expectMealNutrition(page, preparedAnalysis.foods, true);
+  await page.getByRole("button", { name: "係重複，移除", exact: true }).first().click();
+  await page.getByRole("button", { name: "係重複，移除", exact: true }).click();
+  await expect(page.getByText(/可能重複，尚待你確認/)).toHaveCount(0);
+  await expect(page.locator(".food-card")).toHaveCount(2);
+  const kept = preparedAnalysis.foods.filter(food => food.suspectedDuplicateMilk !== true);
+  await expectMealNutrition(page, kept, false);
+  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  await expect.poll(() => backend.records.size).toBe(1);
+  const saved = [...backend.records.values()][0].items as Array<{
+    normalizedName: string;
+    suspectedDuplicateMilk?: boolean;
+  }>;
+  expect(saved.map(item => item.normalizedName).sort()).toEqual(["oat-milk", "whole milk"]);
+  expect(saved.every(item => item.suspectedDuplicateMilk == null)).toBe(true);
+  await page.getByRole("button", { name: "歷史", exact: true }).click();
+  await page.getByRole("button", { name: "查看／修正", exact: true }).click();
+  await expect(page.locator(".food-card")).toHaveCount(2);
+  await expectMealNutrition(page, kept, false);
+  expect(backend.mealReadUrls.length).toBeGreaterThan(0);
+});
+
+test("P1 two explicitly positioned oat cartons count with no pending confirmation", async ({ page, context }) => {
+  const { backend, preparedAnalysis } = await openSyntheticMilk(page, context, [
+    syntheticOat("左邊燕麥奶紙盒"),
+    syntheticOat("右邊燕麥奶紙盒"),
+  ]);
+  expect(preparedAnalysis.foods.filter(food => food.suspectedDuplicateMilk)).toHaveLength(0);
+  await expect(page.getByRole("button", { name: "係重複，移除", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "係另一份，計入", exact: true })).toHaveCount(0);
+  await chooseOat(page, false);
+  await expectMealNutrition(page, preparedAnalysis.foods, false);
+  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  await expect.poll(() => backend.records.size).toBe(1);
+  const saved = [...backend.records.values()][0].items as Array<{
+    normalizedName: string;
+    suspectedDuplicateMilk?: boolean;
+    userMilkTypeChoice?: string;
+  }>;
+  expect(saved).toHaveLength(2);
+  expect(saved.every(item => item.normalizedName === "oat-milk" && item.userMilkTypeChoice === "oat")).toBe(true);
+  expect(saved.every(item => item.suspectedDuplicateMilk == null)).toBe(true);
+  await page.getByRole("button", { name: "歷史", exact: true }).click();
+  await page.getByRole("button", { name: "查看／修正", exact: true }).click();
+  await expect(page.locator(".food-card")).toHaveCount(2);
+  await expectMealNutrition(page, preparedAnalysis.foods, false);
   expect(backend.mealReadUrls.length).toBeGreaterThan(0);
 });
