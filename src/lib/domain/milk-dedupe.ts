@@ -85,7 +85,7 @@ function splitClauses(raw: string): string[] {
 }
 
 const COUNT_NEGATION =
-  /沒有|没有|没|未見|未见|未有|未能|未知|未確|未确|不確|不确|不能|不見|不见|並非|并非|不是|並不|并不|無法|无法|可能|或許|或许|疑似|估計|估计|是否|大概|唔係|唔系|不係|不系|(?:無|无|冇)(?=[一二兩两三四五六七八九1-9])|\b(?:no|not|without|none|neither|never|maybe|might|may|perhaps|whether|unclear|unsure|uncertain|unknown|cannot|could|possibly|apparently)\b/i;
+  /沒有|没有|没|未見|未见|未有|未能|未知|未確|未确|不確|不确|不能|不見|不见|看不到|看不見|看不见|睇唔到|並非|并非|不是|並不|并不|無法|无法|可能|或許|或许|疑似|估計|估计|是否|大概|唔係|唔系|不係|不系|(?:無|无|冇|沒)(?=[一二兩两三四五六七八九1-9])|\b(?:no|not|without|none|neither|never|maybe|might|may|perhaps|whether|unclear|unsure|uncertain|unknown|cannot|could|possibly|apparently)\b/i;
 
 function affirmativeCountEvidence(raw: string): boolean {
   if (/[?？]/.test(raw)) return false;
@@ -285,6 +285,74 @@ function resolveGroupVessel(foods: readonly ObservedFood[]): GroupVessel {
   return inferred.size === 1 ? [...inferred][0] : "unknown";
 }
 
+/** 「同一杯」rejects a second serving. 「不是同一杯」is the contrast, so it stays. */
+function clauseDeniesSecondServing(clause: string): boolean {
+  if (/不是同一|並非同一|并非同一|並不是同一|并不是同一|not the same/i.test(clause)) return false;
+  return /同一(?:個|个|隻|只)?(?:杯|玻璃杯|盒|紙盒|纸盒|容器)|仍是同一|the same (?:glass|cup|carton|container)|same (?:glass|cup)/i.test(clause);
+}
+
+function secondServingKind(clause: string): VesselKind | "container" | null {
+  if (/另一(?:個|个)?(?:白色)?容器|另有一個(?:白色)?容器|another\s+(?:white\s+)?container|second\s+container/i.test(clause)) {
+    return "container";
+  }
+  if (/另一(?:個|个|隻|只)?(?:玻璃杯|杯)|第二(?:個|个|隻|只)?(?:玻璃杯|杯)|another\s+(?:glass|cup)|second\s+(?:glass|cup)/i.test(clause)) {
+    return "glass";
+  }
+  if (/另一(?:個|个)?(?:紙盒|纸盒|盒|包)|第二(?:個|个)?(?:紙盒|纸盒|盒|包)|another\s+(?:carton|package)|second\s+(?:carton|package)/i.test(clause)) {
+    return "carton";
+  }
+  if (/另一(?:支|個|个)?(?:瓶|樽)|another\s+bottle|second\s+bottle/i.test(clause)) return "bottle";
+  return null;
+}
+
+/**
+ * A second physical serving is a named other vessel, not a direction word.
+ * 「另一個白色容器」counts. 「前方」and「後方同一杯」do not.
+ * An untyped container does not invent a second carton for a known vessel.
+ */
+function clauseNamesSecondServing(clause: string, family: MilkFamily, vessel: GroupVessel): boolean {
+  if (/[?？]/.test(clause) || !affirmativeCountEvidence(clause) || clauseDeniesSecondServing(clause)) return false;
+  const kind = secondServingKind(clause);
+  if (!kind) return false;
+  if (vessel !== "unknown" && (kind === "container" || kind !== vessel)) return false;
+  if (family === "generic") {
+    return !/燕麥|燕麦|豆漿|豆浆|豆奶|杏仁|椰奶|椰子|\b(?:oat|soy|almond|coconut)\b/i.test(clause);
+  }
+  // 「另一杯」beside an oat carton is a different object. A second carton has
+  // to name this milk family; an unlabelled 「另一盒」does not.
+  if (vessel === "unknown" && kind === "glass") return false;
+  const found = specificMilkFamilies(clause);
+  return found.length === 1 && found[0] === family;
+}
+
+function boundCountsForFamily(clause: string, bound: VesselKind, family: MilkFamily): boolean {
+  if (family === "generic") {
+    return !/燕麥|燕麦|豆漿|豆浆|豆奶|杏仁|椰奶|椰子|\b(?:oat|soy|almond|coconut)\b/i.test(clause);
+  }
+  return nearestFamilyVessel(clause, family) === bound;
+}
+
+/** Front glass versus back carton is two servings. Front glass versus back glass is not. */
+function distinctPhysicalVesselPair(foods: readonly ObservedFood[]): boolean {
+  const family = foods.map(milkFamily).find(value => value !== "generic") ?? "generic";
+  const collect = (side: SpatialSide) => foods.flatMap(food => {
+    const note = food.notes ?? "";
+    if (rowNoteClaimsBothSides(note)) return [];
+    const kinds: VesselKind[] = [];
+    for (const clause of splitClauses(note)) {
+      if (!clauseHasOnlySide(clause, side)) continue;
+      if (/[?？]/.test(clause) || UNCERTAIN_DISTINCT.test(normalizeFoodName(clause))) continue;
+      if (clauseDeniesSecondServing(clause)) continue;
+      const bound = vesselModifiedBySide(clause, side);
+      if (!bound || !boundCountsForFamily(clause, bound, family)) continue;
+      kinds.push(bound);
+    }
+    return kinds;
+  });
+  const differs = (left: VesselKind[], right: VesselKind[]) => left.some(item => right.some(other => item !== other));
+  return differs(collect("front"), collect("back")) || differs(collect("left"), collect("right"));
+}
+
 function spatialSideQualifies(
   clause: string,
   side: SpatialSide,
@@ -293,10 +361,13 @@ function spatialSideQualifies(
 ): boolean {
   if (!clauseHasOnlySide(clause, side)) return false;
   if (/[?？]/.test(clause) || UNCERTAIN_DISTINCT.test(normalizeFoodName(clause))) return false;
+  if (clauseDeniesSecondServing(clause)) return false;
   const bound = vesselModifiedBySide(clause, side);
   if (vessel === "unknown") {
-    if (family === "generic") return true;
-    return bound !== null && nearestFamilyVessel(clause, family) === bound;
+    // Generic milk has no vessel yet. A bare direction, or a direction aimed
+    // at a nearby object, is not a second serving.
+    if (family === "generic" || bound === null) return false;
+    return nearestFamilyVessel(clause, family) === bound;
   }
   if (bound !== vessel) return false;
   const families = specificMilkFamilies(clause);
@@ -352,7 +423,12 @@ function distinctOpposedPositionsAcrossRows(foods: readonly ObservedFood[]): boo
 function rowsAffirmSeparateSameVessel(foods: readonly ObservedFood[]): boolean {
   const family = foods.map(milkFamily).find(value => value !== "generic") ?? "generic";
   const vessel = resolveGroupVessel(foods);
-  return namedSecondSameVessel(foods, vessel, family) || opposedSpatialContainers(foods);
+  const namedSecond = foods.some(food => splitClauses(food.notes ?? "").some(clause =>
+    clauseNamesSecondServing(clause, family, vessel)));
+  return namedSecondSameVessel(foods, vessel, family)
+    || opposedSpatialContainers(foods)
+    || distinctPhysicalVesselPair(foods)
+    || namedSecond;
 }
 
 type MilkFamily = "oat" | "soy" | "almond" | "coconut" | "dairy" | "generic";
@@ -585,7 +661,9 @@ function candidateMilkGroups(foods: readonly ObservedFood[], milkIndexes: readon
     if (entry.family !== "generic") return { ...entry };
     const eligible = new Set(entries.filter(other =>
       other.family !== "generic" &&
-      (entry.kind === "unknown" || (entry.kind !== "mixed" && other.kind === entry.kind))
+      entry.kind !== "unknown" &&
+      entry.kind !== "mixed" &&
+      other.kind === entry.kind
     ).map(other => other.family));
     return { ...entry, family: eligible.size === 1 ? [...eligible][0] : entry.family };
   });
@@ -654,8 +732,11 @@ function evidencedMilkCount(
   ];
   const scopedDistinct = evidenceClauses.some(clause =>
     clauseConfirmsDistinctVessel(clause, vessel, family));
+  const namedSecond = evidenceClauses.some(clause => clauseNamesSecondServing(clause, family, vessel));
   const minimumCount = namedSecondSameVessel(group, vessel, family)
     || opposedSpatialContainers(group)
+    || distinctPhysicalVesselPair(group)
+    || namedSecond
     || scopedDistinct ? 2 : 1;
 
   // Rows may repeat "一盒" because the model duplicated a serving. However,
@@ -715,6 +796,25 @@ function evidencedMilkCount(
   return minimumCount;
 }
 
+/**
+ * Which rows in one physical group stay confirmed.
+ * A more specific milk identity outranks a generic label. Rows with equal
+ * evidence keep the earliest model index. Display order is unchanged, and a
+ * serving in another group is never dropped to make room.
+ */
+function selectConfirmedIndexes(
+  indexes: readonly number[],
+  foods: readonly ObservedFood[],
+  limit: number,
+): Set<number> {
+  const ranked = indexes.slice().sort((left, right) => {
+    const byEvidence = specificity(foods[right]) - specificity(foods[left]);
+    if (byEvidence !== 0) return byEvidence;
+    return left - right;
+  });
+  return new Set(ranked.slice(0, Math.max(0, limit)));
+}
+
 function dedupeMultipleMilkGroups(analysis: FoodAnalysis, milkIndexes: readonly number[]): FoodAnalysis {
   const groups = candidateMilkGroups(analysis.foods, milkIndexes);
   if (groups.length === 0) return analysis;
@@ -723,11 +823,10 @@ function dedupeMultipleMilkGroups(analysis: FoodAnalysis, milkIndexes: readonly 
     const group = indexes.map(index => analysis.foods[index]);
     const confirmedLimit = Math.min(indexes.length, Math.max(1,
       evidencedMilkCount(analysis, group)));
-    // Preserve original order and separate vessel identities. Never silently
-    // merge a group of 3+ rows: only confirmed rows contribute nutrients.
-    for (const [ordinal, index] of indexes.entries()) {
+    const confirmed = selectConfirmedIndexes(indexes, analysis.foods, confirmedLimit);
+    for (const index of indexes) {
       const cleared = releaseSuspect(analysis.foods[index]);
-      replacements.set(index, ordinal < confirmedLimit
+      replacements.set(index, confirmed.has(index)
         ? cleared : { ...cleared, suspectedDuplicateMilk: true });
     }
   }

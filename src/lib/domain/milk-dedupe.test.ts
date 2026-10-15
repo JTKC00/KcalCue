@@ -1016,6 +1016,285 @@ describe("issue 127 milk duplicate matrix", () => {
         expectSameNutrition(output.foods, [sandwich, oat("燕麥奶紙盒，前方玻璃杯")], "sandwich");
       });
     });
+
+    describe("P1 generic identity, physical servings, and negated counts", () => {
+      const generic = (note: string, extra: Partial<ObservedFood> = {}) => oat(note, {
+        displayName: "牛奶",
+        normalizedName: "milk",
+        preparationMethod: undefined,
+        ...extra,
+      });
+      const sandwich = () => oat("火腿三明治", {
+        displayName: "三明治",
+        normalizedName: "sandwich",
+        identityLevel: "dish",
+        unit: "piece",
+        portionMin: 1,
+        portionMax: 1,
+      });
+      const confirmedNames = (foods: ObservedFood[]) => foods
+        .filter(food => food.suspectedDuplicateMilk !== true)
+        .map(food => food.normalizedName)
+        .sort();
+      const permutations = <T,>(items: readonly T[]): T[][] => {
+        if (items.length <= 1) return [items.slice()];
+        return items.flatMap((item, index) => permutations([
+          ...items.slice(0, index), ...items.slice(index + 1),
+        ]).map(rest => [item, ...rest]));
+      };
+
+      it.each([
+        ["前方", "後方"],
+        ["左邊", "右邊"],
+        ["這杯牛奶的前方", "這杯牛奶的後方"],
+        ["前方玻璃杯", "後方同一杯"],
+        ["front of the glass", "back of the same glass"],
+        ["前方有一個蘋果", "後方有一件三文治"],
+        ["milk, front apple", "milk, back sandwich"],
+        ["前方這杯牛奶", "後方仍是同一杯牛奶"],
+      ] as const)("generic spatial notes do not confirm two servings (%s / %s)", (left, right) => {
+        for (const ordered of [[left, right], [right, left]] as const) {
+          for (const foods of [
+            [generic(ordered[0]), generic(ordered[1])],
+            [sandwich(), generic(ordered[0]), generic(ordered[1])],
+          ]) {
+            const output = prepared(analysis(foods));
+            const milk = output.foods.filter(food => food.normalizedName === "milk");
+            expect(milk.filter(food => food.suspectedDuplicateMilk === true), ordered.join("|")).toHaveLength(1);
+            expect(milk.filter(food => food.suspectedDuplicateMilk !== true), ordered.join("|")).toHaveLength(1);
+            expect(output.foods.find(food => food.normalizedName === "sandwich")?.suspectedDuplicateMilk).toBeUndefined();
+            const actual = toMeal(output.foods);
+            const expected = toMeal(foods.filter(food => food.normalizedName !== "milk").concat([generic(ordered[0])]));
+            expect(actual.totals).toEqual(expected.totals);
+            expect(actual.coverage).not.toBe("complete");
+            expect(actual.foods.filter(item => item.food.suspectedDuplicateMilk && item.includedInTotal)).toHaveLength(0);
+            expect(preparePhotoMilkAnalysis(output)).toEqual(output);
+          }
+        }
+      });
+
+      it("keeps genuine separate generic containers", () => {
+        const pairs = [
+          ["前方玻璃杯牛奶", "後方紙盒牛奶"],
+          ["左邊一杯牛奶", "右邊另一杯牛奶"],
+        ] as const;
+        for (const [left, right] of pairs) {
+          const output = prepared(analysis([generic(left), generic(right)]));
+          expect(output.foods.filter(food => food.suspectedDuplicateMilk === true), left).toHaveLength(0);
+          expect(toMeal(output.foods).includedCount).toBe(2);
+          expect(toMeal(output.foods).coverage).toBe("complete");
+          expect(toMeal(output.foods).totals).toEqual(toMeal([generic(left), generic(right)]).totals);
+        }
+        const c4 = prepared(c4TwoMilkContainersAnalysis);
+        expect(c4.foods.filter(food => food.suspectedDuplicateMilk === true)).toHaveLength(0);
+        expect(c4.foods).toHaveLength(2);
+      });
+
+      it("does not let generic rows displace a 400 ml whole-milk glass in any order", () => {
+        const rows = [
+          generic("前方"),
+          generic("後方"),
+          oat("玻璃杯全脂牛奶", {
+            displayName: "全脂牛奶",
+            normalizedName: "whole milk",
+            portionMin: 400,
+            portionMax: 400,
+          }),
+        ];
+        const signatures = permutations(rows).map(foods => {
+          const output = prepared(analysis(foods));
+          expect(output.foods.find(food => food.portionMax === 400)?.suspectedDuplicateMilk).toBeUndefined();
+          expect(output.foods.filter(food => food.normalizedName === "milk" && food.suspectedDuplicateMilk === true)).toHaveLength(1);
+          const meal = toMeal(output.foods);
+          expect(meal.foods.filter(item => item.food.suspectedDuplicateMilk && item.includedInTotal)).toHaveLength(0);
+          return JSON.stringify({
+            names: confirmedNames(output.foods),
+            kcal: meal.totals.calories,
+            protein: meal.totals.protein,
+            carbohydrates: meal.totals.carbs,
+            fat: meal.totals.fat,
+          });
+        });
+        expect(new Set(signatures).size).toBe(1);
+        const glass = rows[2];
+        const keptGeneric = generic("前方");
+        expect(toMeal(prepared(analysis(rows)).foods).totals).toEqual(toMeal([keptGeneric, glass]).totals);
+      });
+
+      it("does not let ambiguous generic rows consume an oat carton's confirmation", () => {
+        const scenes = [
+          [generic("前方"), generic("後方"), oat("燕麥奶紙盒")],
+          [oat("燕麥奶紙盒"), generic("這杯牛奶的前方"), generic("這杯牛奶的後方")],
+          [generic("前方"), sandwich(), generic("後方"), oat("燕麥奶紙盒")],
+          [sandwich(), oat("燕麥奶紙盒"), generic("前方"), generic("後方")],
+        ];
+        const milkSignatures = scenes.map(foods => {
+          const output = prepared(analysis(foods));
+          expect(output.foods.find(food => food.normalizedName === "oat milk")?.suspectedDuplicateMilk).toBeUndefined();
+          expect(output.foods.find(food => food.normalizedName === "sandwich")?.suspectedDuplicateMilk).toBeUndefined();
+          expect(output.foods.filter(food => food.normalizedName === "milk" && food.suspectedDuplicateMilk === true)).toHaveLength(1);
+          expect(output.foods.filter(food => food.normalizedName === "oat milk" && food.suspectedDuplicateMilk !== true)).toHaveLength(1);
+          const meal = toMeal(output.foods);
+          expect(meal.foods.filter(item => item.food.suspectedDuplicateMilk && item.includedInTotal)).toHaveLength(0);
+          return JSON.stringify(meal.totals);
+        });
+        expect(milkSignatures[0]).toBe(milkSignatures[1]);
+        expect(milkSignatures[2]).toBe(milkSignatures[3]);
+      });
+
+      it.each([
+        "沒三盒燕麥奶",
+        "看不到三盒燕麥奶",
+        "沒有三盒燕麥奶",
+        "未見三盒燕麥奶",
+        "唔係三盒燕麥奶",
+        "冇三盒燕麥奶",
+        "无三盒燕麦奶",
+        "no three oat milk cartons",
+        "cannot see three oat milk cartons",
+      ])("negated three-carton evidence confirms one oat serving: %s", evidence => {
+        const rows = [oat("燕麥奶紙盒"), oat("燕麥奶紙盒"), oat("燕麥奶紙盒")];
+        const output = prepared(analysis(rows, { visibleEvidence: [evidence] }));
+        expect(output.foods.filter(food => food.suspectedDuplicateMilk === true)).toHaveLength(2);
+        expect(toMeal(output.foods).includedCount).toBe(1);
+        expect(toMeal(output.foods).coverage).toBe("partial");
+        expect(toMeal(output.foods).totals).toEqual(toMeal([oat("燕麥奶紙盒")]).totals);
+      });
+
+      it.each([
+        ["無糖燕麥奶兩盒", 3, 2],
+        ["兩盒燕麥奶", 2, 2],
+        ["三盒燕麥奶", 3, 3],
+        ["two oat milk cartons", 2, 2],
+        ["three oat milk cartons", 3, 3],
+      ] as const)("affirmative counts stay affirmative (%s)", (evidence, rows, confirmed) => {
+        const foods = Array.from({ length: rows }, () => oat("燕麥奶紙盒"));
+        const output = prepared(analysis(foods, { visibleEvidence: [evidence] }));
+        expect(output.foods.filter(food => food.suspectedDuplicateMilk !== true)).toHaveLength(confirmed);
+        expect(toMeal(output.foods).includedCount).toBe(confirmed);
+        expect(toMeal(output.foods).totals).toEqual(toMeal(foods.slice(0, confirmed)).totals);
+      });
+
+      it("keeps serving decisions stable under seeded permutation and polarity swaps", () => {
+        let seed = 128;
+        const random = () => {
+          seed = (seed * 1664525 + 1013904223) % 4294967296;
+          return seed / 4294967296;
+        };
+        const shuffle = <T,>(items: readonly T[]) => {
+          const copy = items.slice();
+          for (let index = copy.length - 1; index > 0; index -= 1) {
+            const swap = Math.floor(random() * (index + 1));
+            [copy[index], copy[swap]] = [copy[swap], copy[index]];
+          }
+          return copy;
+        };
+        const base = [generic("前方"), generic("後方"), oat("燕麥奶紙盒")];
+        const reference = prepared(analysis(base));
+        for (let trial = 0; trial < 8; trial += 1) {
+          const foods = shuffle([sandwich(), ...base]);
+          const output = prepared(analysis(foods));
+          expect(output.foods.find(food => food.normalizedName === "oat milk")?.suspectedDuplicateMilk, `trial ${trial}`).toBeUndefined();
+          expect(output.foods.filter(food => food.normalizedName === "milk" && food.suspectedDuplicateMilk === true)).toHaveLength(1);
+          expect(preparePhotoMilkAnalysis(output)).toEqual(output);
+        }
+        const affirmative = prepared(analysis(
+          [oat("燕麥奶紙盒"), oat("燕麥奶紙盒"), oat("燕麥奶紙盒")],
+          { visibleEvidence: ["三盒燕麥奶"] },
+        ));
+        for (const weaker of ["三盒燕麥奶？", "沒三盒燕麥奶", "看不到三盒燕麥奶", "是否三盒燕麥奶？"]) {
+          const next = prepared(analysis(
+            [oat("燕麥奶紙盒"), oat("燕麥奶紙盒"), oat("燕麥奶紙盒")],
+            { visibleEvidence: [weaker] },
+          ));
+          expect(next.foods.filter(food => food.suspectedDuplicateMilk !== true).length)
+            .toBeLessThan(affirmative.foods.filter(food => food.suspectedDuplicateMilk !== true).length);
+        }
+        expect(reference.foods.filter(food => food.normalizedName === "oat milk" && food.suspectedDuplicateMilk !== true)).toHaveLength(1);
+      });
+
+      it("bounds confirmed macros to supported servings", () => {
+        const oneGeneric = toMeal([generic("前方")]).totals;
+        expect(oneGeneric.calories.min).toBeCloseTo(157.075, 4);
+        expect(oneGeneric.protein.min).toBeCloseTo(8.24, 4);
+        expect(oneGeneric.carbs.min).toBeCloseTo(12.36, 4);
+        expect(oneGeneric.fat.min).toBeCloseTo(8.4975, 4);
+        const pendingPair = prepared(analysis([generic("前方"), generic("後方")]));
+        expect(toMeal(pendingPair.foods).totals).toEqual(oneGeneric);
+        expect(toMeal(pendingPair.foods).foods.filter(item => item.food.suspectedDuplicateMilk === true)
+          .every(item => item.includedInTotal === false && item.ranges === null)).toBe(true);
+        const released = pendingPair.foods.map(food => {
+          if (food.suspectedDuplicateMilk !== true) return food;
+          const next = { ...food };
+          delete next.suspectedDuplicateMilk;
+          return next;
+        });
+        expect(toMeal(released).totals.calories.min).toBeCloseTo(314.15, 4);
+        expect(toMeal(released).coverage).toBe("complete");
+        const glass = oat("玻璃杯全脂牛奶", {
+          displayName: "全脂牛奶", normalizedName: "whole milk", portionMin: 400, portionMax: 400,
+        });
+        expect(toMeal([glass]).totals.calories.min).toBeCloseTo(251.32, 4);
+        expect(toMeal([oat("燕麥奶紙盒")]).totals.calories.min).toBeCloseTo(116.0244, 3);
+      });
+
+      it("keeps two-row and multi-row decisions on the same evidence bound", () => {
+        const two = prepared(analysis([generic("前方"), generic("後方")]));
+        const three = prepared(analysis([generic("前方"), generic("後方"), generic("側邊")]));
+        expect(two.foods.filter(food => food.suspectedDuplicateMilk !== true)).toHaveLength(1);
+        expect(three.foods.filter(food => food.suspectedDuplicateMilk !== true)).toHaveLength(1);
+        expect(toMeal(two.foods).totals).toEqual(toMeal(three.foods).totals);
+        const distinctTwo = prepared(analysis([generic("左邊一杯牛奶"), generic("右邊另一杯牛奶")]));
+        for (const foods of permutations([
+          generic("左邊一杯牛奶"), generic("右邊另一杯牛奶"), generic("前方"),
+        ])) {
+          const output = prepared(analysis(foods));
+          expect(output.foods.filter(food => food.suspectedDuplicateMilk !== true)).toHaveLength(2);
+          expect(output.foods.filter(food => food.suspectedDuplicateMilk === true)).toHaveLength(1);
+          expect(toMeal(output.foods).totals).toEqual(toMeal(distinctTwo.foods).totals);
+        }
+      });
+
+      it("does not let removed vessel metadata or repeated observations raise the count", () => {
+        const distinct = prepared(analysis([generic("前方玻璃杯牛奶"), generic("後方紙盒牛奶")]));
+        expect(distinct.foods.filter(food => food.suspectedDuplicateMilk === true)).toHaveLength(0);
+        const stripped = prepared(analysis([generic("白色飲品"), generic("白色飲品")]));
+        expect(stripped.foods.filter(food => food.normalizedName === "milk" && food.suspectedDuplicateMilk !== true).length)
+          .toBeLessThan(2);
+        expect(toMeal(stripped.foods).totals).toEqual(toMeal([generic("白色飲品")]).totals);
+        const once = prepared(analysis(
+          [oat("燕麥奶紙盒"), oat("燕麥奶紙盒"), oat("燕麥奶紙盒")],
+          { visibleEvidence: ["三盒燕麥奶"] },
+        ));
+        const repeated = prepared(analysis(
+          [oat("燕麥奶紙盒"), oat("燕麥奶紙盒"), oat("燕麥奶紙盒")],
+          { visibleEvidence: ["三盒燕麥奶", "三盒燕麥奶", "three oat milk cartons"] },
+        ));
+        expect(repeated.foods.filter(food => food.suspectedDuplicateMilk !== true)).toHaveLength(3);
+        expect(toMeal(repeated.foods).totals).toEqual(toMeal(once.foods).totals);
+        for (const evidence of ["一盒燕麥奶", "一盒燕麥奶", "one oat milk carton"]) {
+          const single = prepared(analysis(
+            [oat("燕麥奶紙盒"), oat("燕麥奶紙盒"), oat("燕麥奶紙盒")],
+            { visibleEvidence: [evidence, evidence] },
+          ));
+          expect(single.foods.filter(food => food.suspectedDuplicateMilk === true), evidence).toHaveLength(2);
+          expect(toMeal(single.foods).totals).toEqual(toMeal([oat("燕麥奶紙盒")]).totals);
+        }
+      });
+
+      it("keeps an established serving when another real milk serving is added", () => {
+        const before = prepared(analysis([generic("前方"), generic("後方")]));
+        const glass = oat("玻璃杯全脂牛奶", {
+          displayName: "全脂牛奶", normalizedName: "whole milk", portionMin: 400, portionMax: 400,
+        });
+        const after = prepared(analysis([generic("前方"), generic("後方"), glass]));
+        expect(before.foods.filter(food => food.suspectedDuplicateMilk !== true)).toHaveLength(1);
+        expect(after.foods.find(food => food.portionMax === 400)?.suspectedDuplicateMilk).toBeUndefined();
+        expect(after.foods.filter(food => food.normalizedName === "milk" && food.suspectedDuplicateMilk !== true)).toHaveLength(1);
+        expect(toMeal(after.foods).totals.calories.min).toBeGreaterThan(toMeal(before.foods).totals.calories.min);
+        expect(toMeal(after.foods).totals).toEqual(toMeal([generic("前方"), glass]).totals);
+      });
+    });
   });
 
 });

@@ -2920,3 +2920,215 @@ test("P1 two explicitly positioned oat cartons count with no pending confirmatio
   await expectMealNutrition(page, preparedAnalysis.foods, false);
   expect(backend.mealReadUrls.length).toBeGreaterThan(0);
 });
+
+function syntheticGeneric(note: string, portion = 250): ObservedFood {
+  return {
+    displayName: "牛奶",
+    normalizedName: "milk",
+    identityLevel: "ingredient",
+    portionMin: portion,
+    portionMax: portion,
+    unit: "ml",
+    recognitionConfidence: 0.62,
+    portionConfidence: 0.5,
+    uncertaintyReasons: [],
+    notes: note,
+  };
+}
+
+function asWholeChoice(food: ObservedFood): ObservedFood {
+  const next = { ...food, displayName: "全脂牛奶", normalizedName: "whole milk", identityLevel: "ingredient" as const };
+  delete next.notes;
+  delete next.preparationMethod;
+  return next;
+}
+
+async function chooseLabeledMilk(page: Page, label: "全脂牛奶" | "燕麥奶", name: string) {
+  const cards = page.locator(".food-card");
+  const count = await cards.count();
+  for (let index = 0; index < count; index += 1) {
+    const card = cards.nth(index);
+    if (await card.getByRole("button", { name: "係重複，移除", exact: true }).count() > 0) continue;
+    if (await card.locator("input.food-name-input").inputValue() !== name) continue;
+    const choice = card.getByRole("button", { name: label, exact: true });
+    if (await choice.count() > 0) await choice.click();
+  }
+}
+
+type SavedMilk = {
+  displayName: string;
+  normalizedName: string;
+  portionMin: number;
+  portionMax: number;
+  suspectedDuplicateMilk?: boolean;
+  userMilkTypeChoice?: string;
+  nutritionMatch?: { includedInTotal?: boolean };
+};
+
+async function saveAndOpenHistory(page: Page, backend: { records: Map<string, TestRecord>; mealReadUrls: string[] }) {
+  await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+  await expect.poll(() => backend.records.size).toBe(1);
+  const saved = [...backend.records.values()][0].items as SavedMilk[];
+  await page.getByRole("button", { name: "歷史", exact: true }).click();
+  await page.getByRole("button", { name: "查看／修正", exact: true }).click();
+  await expect(page.locator(".food-card")).toHaveCount(saved.length);
+  expect(backend.mealReadUrls.length).toBeGreaterThan(0);
+  return saved;
+}
+
+test("P1 generic spatial duplicate stays pending through save and History", async ({ page, context }) => {
+  const { backend, preparedAnalysis } = await openSyntheticMilk(page, context, [
+    syntheticGeneric("前方"),
+    syntheticGeneric("後方"),
+  ]);
+  expect(preparedAnalysis.foods.filter(food => food.suspectedDuplicateMilk)).toHaveLength(1);
+  await expect(page.getByText(/有 1 項飲品可能重複，尚待你確認/)).toBeVisible();
+  await chooseLabeledMilk(page, "全脂牛奶", "牛奶");
+  const pending = preparedAnalysis.foods.filter(food => food.suspectedDuplicateMilk === true);
+  const confirmed = preparedAnalysis.foods.filter(food => food.suspectedDuplicateMilk !== true).map(asWholeChoice);
+  await expectMealNutrition(page, [...confirmed, ...pending], true);
+  const saved = await saveAndOpenHistory(page, backend);
+  expect(saved).toHaveLength(2);
+  expect(saved.filter(item => item.suspectedDuplicateMilk === true)).toHaveLength(1);
+  expect(saved.filter(item => item.userMilkTypeChoice === "whole" && item.suspectedDuplicateMilk !== true)).toHaveLength(1);
+  expect(saved.find(item => item.suspectedDuplicateMilk === true)?.nutritionMatch?.includedInTotal).toBe(false);
+  await expect(page.getByRole("button", { name: "係重複，移除", exact: true })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "係另一份，計入", exact: true })).toHaveCount(1);
+  await expectMealNutrition(page, [...confirmed, ...pending], true);
+});
+
+for (const decision of ["confirm", "remove"] as const) {
+  test(`P1 generic spatial duplicate: ${decision === "confirm" ? "係另一份，計入" : "係重複，移除"} persists after History`, async ({ page, context }) => {
+    const { backend, preparedAnalysis } = await openSyntheticMilk(page, context, [
+      syntheticGeneric("前方"),
+      syntheticGeneric("後方"),
+    ]);
+    expect(preparedAnalysis.foods.filter(food => food.suspectedDuplicateMilk)).toHaveLength(1);
+    await chooseLabeledMilk(page, "全脂牛奶", "牛奶");
+    if (decision === "remove") {
+      await page.getByRole("button", { name: "係重複，移除", exact: true }).click();
+      await expect(page.locator(".food-card")).toHaveCount(1);
+    } else {
+      await page.getByRole("button", { name: "係另一份，計入", exact: true }).click();
+      await chooseLabeledMilk(page, "全脂牛奶", "牛奶");
+      await expect(page.locator(".food-card")).toHaveCount(2);
+    }
+    await expect(page.getByText(/可能重複，尚待你確認/)).toHaveCount(0);
+    const kept = (decision === "remove"
+      ? preparedAnalysis.foods.filter(food => food.suspectedDuplicateMilk !== true)
+      : preparedAnalysis.foods
+    ).map(food => {
+      const next = asWholeChoice(food);
+      delete next.suspectedDuplicateMilk;
+      return next;
+    });
+    await expectMealNutrition(page, kept, false);
+    const saved = await saveAndOpenHistory(page, backend);
+    expect(saved).toHaveLength(decision === "remove" ? 1 : 2);
+    expect(saved.every(item => item.displayName === "全脂牛奶")).toBe(true);
+    expect(saved.every(item => item.normalizedName === "milk")).toBe(true);
+    expect(saved.every(item => item.userMilkTypeChoice === "whole")).toBe(true);
+    expect(saved.every(item => item.suspectedDuplicateMilk == null)).toBe(true);
+    expect(saved.every(item => item.nutritionMatch?.includedInTotal === true)).toBe(true);
+    await expect(page.getByRole("button", { name: "係重複，移除", exact: true })).toHaveCount(0);
+    await expectMealNutrition(page, kept, false);
+  });
+}
+
+test("P1 generic rows do not displace a 400 ml whole-milk glass through History", async ({ page, context }) => {
+  const glass = { ...syntheticWholeGlass(), portionMin: 400, portionMax: 400 };
+  const { backend, preparedAnalysis } = await openSyntheticMilk(page, context, [
+    syntheticGeneric("前方"),
+    syntheticGeneric("後方"),
+    glass,
+  ]);
+  expect(preparedAnalysis.foods.find(food => food.portionMax === 400)?.suspectedDuplicateMilk).toBeUndefined();
+  expect(preparedAnalysis.foods.filter(food => food.normalizedName === "milk" && food.suspectedDuplicateMilk)).toHaveLength(1);
+  await chooseLabeledMilk(page, "全脂牛奶", "牛奶");
+  const pending = preparedAnalysis.foods.filter(food => food.suspectedDuplicateMilk === true);
+  const counted = preparedAnalysis.foods
+    .filter(food => food.suspectedDuplicateMilk !== true)
+    .map(food => food.normalizedName === "milk" ? asWholeChoice(food) : food);
+  await expectMealNutrition(page, [...counted, ...pending], true);
+  await page.getByRole("button", { name: "係重複，移除", exact: true }).click();
+  await expect(page.locator(".food-card")).toHaveCount(2);
+  await expectMealNutrition(page, counted, false);
+  const saved = await saveAndOpenHistory(page, backend);
+  expect(saved.map(item => item.portionMax).sort((left, right) => left - right)).toEqual([250, 400]);
+  expect(saved.every(item => item.suspectedDuplicateMilk == null)).toBe(true);
+  expect(saved.every(item => item.nutritionMatch?.includedInTotal === true)).toBe(true);
+  expect(saved.filter(item => item.userMilkTypeChoice === "whole")).toHaveLength(1);
+  await expectMealNutrition(page, counted, false);
+});
+
+test("P1 generic rows do not consume a genuine oat carton through History", async ({ page, context }) => {
+  const { backend, preparedAnalysis } = await openSyntheticMilk(page, context, [
+    syntheticGeneric("前方"),
+    syntheticGeneric("後方"),
+    syntheticOat("燕麥奶紙盒"),
+  ]);
+  expect(preparedAnalysis.foods.find(food => food.normalizedName === "oat milk")?.suspectedDuplicateMilk).toBeUndefined();
+  expect(preparedAnalysis.foods.filter(food => food.normalizedName === "milk" && food.suspectedDuplicateMilk)).toHaveLength(1);
+  await chooseLabeledMilk(page, "燕麥奶", "燕麥奶");
+  await chooseLabeledMilk(page, "全脂牛奶", "牛奶");
+  const pending = preparedAnalysis.foods.filter(food => food.suspectedDuplicateMilk === true);
+  const counted = preparedAnalysis.foods
+    .filter(food => food.suspectedDuplicateMilk !== true)
+    .map(food => food.normalizedName === "milk" ? asWholeChoice(food) : food);
+  await expectMealNutrition(page, [...counted, ...pending], true);
+  await page.getByRole("button", { name: "係重複，移除", exact: true }).click();
+  await expectMealNutrition(page, counted, false);
+  const saved = await saveAndOpenHistory(page, backend);
+  expect(saved.map(item => item.normalizedName).sort()).toEqual(["milk", "oat-milk"]);
+  expect(saved.every(item => item.suspectedDuplicateMilk == null)).toBe(true);
+  expect(saved.find(item => item.normalizedName === "oat-milk")?.userMilkTypeChoice).toBe("oat");
+  expect(saved.find(item => item.normalizedName === "milk")?.userMilkTypeChoice).toBe("whole");
+  await expectMealNutrition(page, counted, false);
+});
+
+test("P1 Cantonese negated oat quantity stays one serving through History", async ({ page, context }) => {
+  const { backend, preparedAnalysis } = await openSyntheticMilk(page, context, [
+    syntheticOat("燕麥奶紙盒"),
+    syntheticOat("燕麥奶紙盒"),
+    syntheticOat("燕麥奶紙盒"),
+  ], ["冇三盒燕麥奶"]);
+  expect(preparedAnalysis.foods.filter(food => food.suspectedDuplicateMilk)).toHaveLength(2);
+  await expect(page.getByText(/有 2 項飲品可能重複，尚待你確認/)).toBeVisible();
+  await chooseLabeledMilk(page, "燕麥奶", "燕麥奶");
+  const kept = preparedAnalysis.foods.filter(food => food.suspectedDuplicateMilk !== true);
+  await expectMealNutrition(page, preparedAnalysis.foods, true);
+  await page.getByRole("button", { name: "係重複，移除", exact: true }).first().click();
+  await page.getByRole("button", { name: "係重複，移除", exact: true }).click();
+  await expect(page.locator(".food-card")).toHaveCount(1);
+  await expectMealNutrition(page, kept, false);
+  const saved = await saveAndOpenHistory(page, backend);
+  expect(saved).toHaveLength(1);
+  expect(saved[0].normalizedName).toBe("oat-milk");
+  expect(saved[0].userMilkTypeChoice).toBe("oat");
+  expect(saved[0].suspectedDuplicateMilk).toBeUndefined();
+  await expect(page.getByRole("button", { name: "係重複，移除", exact: true })).toHaveCount(0);
+  await expectMealNutrition(page, kept, false);
+});
+
+test("P1 C4 separate containers stay counted through save and History", async ({ page, context }) => {
+  const { backend, preparedAnalysis } = await openSyntheticMilk(
+    page,
+    context,
+    c4TwoMilkContainersAnalysis.foods,
+    [...c4TwoMilkContainersAnalysis.visibleEvidence],
+  );
+  expect(preparedAnalysis.foods).toHaveLength(2);
+  expect(preparedAnalysis.foods.filter(food => food.suspectedDuplicateMilk)).toHaveLength(0);
+  await expect(page.getByRole("button", { name: "係重複，移除", exact: true })).toHaveCount(0);
+  await expect(page.getByText("包裝顯示植物奶，請核對種類及份量。", { exact: true })).toHaveCount(0);
+  await chooseLabeledMilk(page, "全脂牛奶", "牛奶");
+  const counted = preparedAnalysis.foods.map(asWholeChoice);
+  await expectMealNutrition(page, counted, false);
+  const saved = await saveAndOpenHistory(page, backend);
+  expect(saved).toHaveLength(2);
+  expect(saved.every(item => item.displayName === "全脂牛奶" && item.normalizedName === "milk")).toBe(true);
+  expect(saved.every(item => item.userMilkTypeChoice === "whole" && item.suspectedDuplicateMilk == null)).toBe(true);
+  expect(saved.every(item => item.nutritionMatch?.includedInTotal === true)).toBe(true);
+  expect(saved.map(item => item.portionMax).sort((left, right) => left - right)).toEqual([350, 400]);
+  await expectMealNutrition(page, counted, false);
+});
