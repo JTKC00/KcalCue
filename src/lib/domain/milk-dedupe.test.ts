@@ -594,6 +594,95 @@ describe("issue 127 milk duplicate matrix", () => {
         });
       });
 
+      describe("P1 non-numeric vessel identity and spatial scope", () => {
+        const oatCarton = (note: string) => oat(note, { preparationMethod: "紙盒" });
+        const oneOatPlusGlass = () => toMeal([oatCarton("紙盒燕麥奶"), glass()]);
+        it.each([
+          ["another glass in oat row", "燕麥奶紙盒，旁邊另一杯", "一盒燕麥奶，獨立玻璃杯"],
+          ["different cup without identity", "紙盒燕麥奶；前方玻璃杯，後方另一杯", "燕麥奶紙盒與玻璃杯"],
+          ["unlabelled different carton", "燕麥奶紙盒，另一盒未標示身份", "獨立玻璃杯"],
+          ["another carton unknown", "一盒燕麥奶；另一盒飲品無品牌", "相片中有一盒燕麥奶與另一盒不同飲品"],
+          ["English other glass", "oat milk carton next to another glass", "one oat carton, one glass of whole milk"],
+          ["negative other oat carton", "燕麥奶紙盒，並沒有另一盒燕麥奶", "燕麥奶只有一盒"],
+          ["questioned other oat carton", "燕麥奶紙盒，另一盒燕麥奶？", "一盒燕麥奶可辨"],
+          ["two glasses only in duplicate notes", "燕麥奶紙盒，前方杯子後方另一杯", "實際只見一盒燕麥奶"],
+        ] as const)("does not count a different vessel as another oat carton: %s", (_name, note, evidence) => {
+          const output = prepared(analysis([oatCarton(note), oatCarton(note), glass()], { visibleEvidence: [evidence] }));
+          expect(output.foods).toHaveLength(3);
+          expect(output.foods.filter(x => x.suspectedDuplicateMilk)).toHaveLength(1);
+          expect(output.foods.find(x => x.normalizedName === "whole milk")?.suspectedDuplicateMilk).toBeUndefined();
+          const actual = toMeal(output.foods);
+          expect(actual.coverage).toBe("partial");
+          expect(actual.includedCount).toBe(2);
+          expect(actual.totalCount).toBe(3);
+          expect(actual.totals).toEqual(oneOatPlusGlass().totals);
+          expect(preparePhotoMilkAnalysis(output)).toEqual(output);
+        });
+
+        it.each([
+          ["explicit another same-family carton", "一盒燕麥奶，旁邊另一盒燕麥奶", "一杯全脂牛奶"],
+          ["explicit another oat carton English", "oat milk carton and another carton of oat milk", "a glass of milk"],
+          ["second oat carton", "紙盒燕麥奶，第二盒燕麥奶", "另一杯牛奶"],
+        ] as const)("counts two explicitly identified oat cartons: %s", (_name, note, evidence) => {
+          const output = prepared(analysis([oatCarton(note), oatCarton(note), glass()], { visibleEvidence: [evidence] }));
+          expect(output.foods).toHaveLength(3);
+          expect(output.foods.filter(x => x.suspectedDuplicateMilk)).toHaveLength(0);
+          expect(toMeal(output.foods).totals).toEqual(toMeal([oatCarton(note), oatCarton(note), glass()]).totals);
+        });
+
+        it.each([
+          ["left/right cartons", "左邊燕麥奶紙盒", "右邊燕麥奶紙盒"],
+          ["front/back cartons", "前方紙盒燕麥奶", "後方紙盒燕麥奶"],
+          ["left/right English", "left oat milk carton", "right oat milk carton"],
+        ] as const)("counts two distinctly located and identified oat cartons: %s", (_name, left, right) => {
+          const output = prepared(analysis([oatCarton(left), oatCarton(right), glass()]));
+          expect(output.foods.filter(x => x.suspectedDuplicateMilk)).toHaveLength(0);
+          expect(toMeal(output.foods).includedCount).toBe(3);
+        });
+
+        it("does not mistake duplicated notes describing both positioned cartons as independent model rows", () => {
+          const note = "左邊燕麥奶紙盒，右邊燕麥奶紙盒";
+          const output = prepared(analysis([oatCarton(note), oatCarton(note), glass()]));
+          expect(output.foods.filter(x => x.suspectedDuplicateMilk)).toHaveLength(1);
+          expect(toMeal(output.foods).totals).toEqual(oneOatPlusGlass().totals);
+        });
+
+        it("does not inflate milk count if non-numeric evidence belongs to another family", () => {
+          const output = prepared(analysis([
+            oatCarton("燕麥奶紙盒，另一盒豆漿"),
+            oatCarton("燕麥奶紙盒，另一盒豆漿"),
+            glass(),
+          ]));
+          expect(output.foods.filter(x => x.suspectedDuplicateMilk)).toHaveLength(1);
+          expect(toMeal(output.foods).totals).toEqual(oneOatPlusGlass().totals);
+        });
+
+        it.each([
+          ["glass only in duplicate oat-row notes", "燕麥奶紙盒，旁邊另一杯", 1],
+          ["unidentified carton only in duplicate row notes", "燕麥奶紙盒，另一盒未標示身份", 1],
+          ["duplicated both-sided note", "左邊燕麥奶紙盒，右邊燕麥奶紙盒", 1],
+          ["genuinely distinct another oat carton", "燕麥奶紙盒，另一盒燕麥奶", 2],
+        ] as const)("two AI milk rows apply the same vessel-scope safety: %s", (_label, note, count) => {
+          const out = prepared(analysis([oatCarton(note), oatCarton(note)]));
+          expect(out.foods.filter(x => !x.suspectedDuplicateMilk)).toHaveLength(count);
+          if (count === 1) {
+            expect(out.foods).toHaveLength(2);
+            expect(out.foods.filter(x => x.suspectedDuplicateMilk)).toHaveLength(1);
+            expect(toMeal(out.foods).coverage).toBe("partial");
+            expect(toMeal(out.foods).totals).toEqual(toMeal([oatCarton(note)]).totals);
+          }
+        });
+
+        it("respects interleaved row order and never holds the genuine glass pending", () => {
+          const notes = "燕麥奶紙盒，旁邊另一杯";
+          const all = [glass(), oatCarton(notes), oatCarton(notes)];
+          const output = prepared(analysis(all));
+          expect(output.foods[0].suspectedDuplicateMilk).toBeUndefined();
+          expect(output.foods.filter(x => x.suspectedDuplicateMilk)).toHaveLength(1);
+          expect(toMeal(output.foods).totals).toEqual(oneOatPlusGlass().totals);
+        });
+      });
+
       it("does not count a noted other soy carton as a second oat carton", () => {
         const first = oat("一盒燕麥奶，旁邊另一盒豆漿", { preparationMethod: "紙盒" });
         const soy = oat("另一盒豆漿", {

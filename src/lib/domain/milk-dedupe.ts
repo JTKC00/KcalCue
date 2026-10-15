@@ -298,7 +298,6 @@ function candidateMilkGroups(foods: readonly ObservedFood[], milkIndexes: readon
 function evidencedMilkCount(
   analysis: FoodAnalysis,
   group: readonly ObservedFood[],
-  otherMilkRows: readonly ObservedFood[],
 ): number {
   const family = group.map(milkFamily).find(value => value !== "generic") ?? "generic";
   const markers: Record<MilkFamily, RegExp> = {
@@ -318,9 +317,6 @@ function evidencedMilkCount(
     if (kinds.has("glass")) return "glass";
     return "unknown";
   })();
-  const hasAnotherSameVessel = otherMilkRows.some(row =>
-    vessel !== "unknown" && containerKinds(row).has(vessel));
-
   const number = (raw: string): number | null => {
     const value = normalizeFoodName(raw);
     if (/^[1-9]$/.test(value)) return Number(value);
@@ -353,41 +349,84 @@ function evidencedMilkCount(
       markers[candidate].test(text));
 
   const perRowRaw = group.map(milkRowText);
-  const perRow = perRowRaw.map(normalizeFoodName);
-  const leftRight = perRow.some(x => /左邊|左侧|left/.test(x))
-    && perRow.some(x => /右邊|右侧|right/.test(x));
-  const frontBack = perRow.some(x => /前方|前面|front/.test(x))
-    && perRow.some(x => /後方|後面|back/.test(x));
-  const maybeDistinct = evidenceStatements(analysis, group, true).some(text =>
-    NEGATED_SAME_SERVING.test(text) &&
-    /未能|未知|未確認|未确定|不確定|不确定|可能|是否|\b(?:maybe|might|unclear|whether|unknown|perhaps)\b/i.test(text));
-  const certainDistinct = negatedDistinctServing(analysis, group) && !maybeDistinct;
-  let minimumCount = leftRight || frontBack || certainDistinct ? 2 : 1;
-
   const statements = [
     ...analysis.visibleEvidence, ...analysis.estimatedInformation,
     ...analysis.uncertaintyReasons, ...analysis.unknownInformation,
   ];
-  // Model-row evidence is usable only when it unambiguously says another
-  // physical serving; repeating "一盒燕麥奶" in two rows proves nothing.
-  const otherFamilyMarkers = otherMilkRows.filter(other =>
-    vessel === "unknown" || containerKinds(other).has(vessel)).map(milkFamily)
-    .filter(otherFamily => otherFamily !== "generic" && otherFamily !== family);
-  const distinctRowMention = /另一盒|第二盒|另一杯|第二杯|另一瓶|第二瓶|another (?:carton|glass|cup|bottle)|second (?:carton|glass|cup|bottle)/g;
-  const groupStatements = perRowRaw.some(value => {
-    if (!affirmativeCountEvidence(value)) return false;
-    for (const match of value.matchAll(distinctRowMention)) {
-      const after = value.slice(match.index ?? 0, (match.index ?? 0) + 22);
-      // Even if the other milk family was omitted from model rows, the
-      // mention "another soy carton" never proves a second oat carton.
-      const refersToDifferentFamily = (Object.keys(markers) as MilkFamily[]).some(other =>
-        other !== family && other !== "generic" && markers[other].test(after));
-      if (refersToDifferentFamily || otherFamilyMarkers.some(other => markers[other].test(after))) continue;
-      if (!hasAnotherSameVessel || markers[family].test(after)) return true;
-    }
-    return false;
+
+  // A row can describe other containers in its notes. Only an explicit
+  // *same-family and same-vessel* referent may raise this group's count.
+  // "燕麥奶紙盒，另一杯" describes a cup, not a second oat carton.
+  const sameVessel = vessel === "carton" ? /紙盒|紙包|盒|包|carton|package/i
+    : vessel === "bottle" ? /瓶|樽|bottle/i
+      : vessel === "glass" ? /杯|glass|cup/i
+        : vessel === "unknown" ? /$^/ : /包|package/i;
+  const separateVessel = vessel === "carton"
+    ? /另一(?:個|个)?(?:紙盒|纸盒|盒|包)|第二(?:個|个)?(?:紙盒|纸盒|盒|包)|another\s+(?:carton|package)|second\s+(?:carton|package)/gi
+    : vessel === "bottle"
+      ? /另一(?:支|個|个)?(?:瓶|樽)|第二(?:支|個|个)?(?:瓶|樽)|another\s+bottle|second\s+bottle/gi
+      : vessel === "glass"
+        ? /另一(?:個|个|隻|只)?(?:玻璃杯|杯)|第二(?:個|个|隻|只)?(?:玻璃杯|杯)|another\s+(?:glass|cup)|second\s+(?:glass|cup)/gi
+        : /$^/g;
+  const clauses = (raw: string): string[] =>
+    raw.split(/[，,。；;!?？]/).map(item => item.trim()).filter(Boolean);
+  const sameFamilyOnly = (text: string): boolean => {
+    const found = specificFamilies(text);
+    return found.length === 1 && found[0] === family;
+  };
+
+  // An explicit "another carton of oat milk" is group-specific. Bare "another
+  // carton" is not: it could be soy or an unidentified drink. We intentionally
+  // cannot infer a second oat carton from the food row's *own* identity alone.
+  const namedSecondVessel = group.some(food => {
+    const note = food.notes ?? "";
+    if (!affirmativeCountEvidence(note)) return false;
+    return clauses(note).some(clause =>
+      [...clause.matchAll(separateVessel)].some(match => {
+        const following = clause.slice((match.index ?? 0) + match[0].length);
+        return sameFamilyOnly(following);
+      }));
   });
-  if (groupStatements) minimumCount = Math.max(minimumCount, 2);
+
+  // Location words must identify two *different food rows* as physical
+  // containers in this subgroup. A duplicated note containing both "left"
+  // and "right" does not prove two servings.
+  const positionedRows = group.map(food => {
+    const note = food.notes ?? "";
+    if (!affirmativeCountEvidence(note)) return new Set<string>();
+    const positions = new Set<string>();
+    for (const clause of clauses(note)) {
+      if (!sameFamilyOnly(clause) || !sameVessel.test(clause)) continue;
+      const left = /左邊|左边|左側|左侧|\bleft\b/i.test(clause);
+      const right = /右邊|右边|右側|右侧|\bright\b/i.test(clause);
+      const front = /前方|前面|\bfront\b/i.test(clause);
+      const back = /後方|后方|後面|后面|\bback\b/i.test(clause);
+      if (left && !right) positions.add("left");
+      if (right && !left) positions.add("right");
+      if (front && !back) positions.add("front");
+      if (back && !front) positions.add("back");
+    }
+    return positions;
+  });
+  const distinctPositionedRows = (a: string, b: string) =>
+    positionedRows.some((positions, i) => positions.has(a) && !positions.has(b) &&
+      positionedRows.some((other, j) => i !== j && other.has(b) && !other.has(a)));
+
+  // A negation of sameness asserts two containers only if it actually names
+  // this group's vessel type in a model-row note. "not the same glass" must
+  // never validate another oat carton.
+  const maybeDistinct = evidenceStatements(analysis, group, true).some(text =>
+    NEGATED_SAME_SERVING.test(text) &&
+    /未能|未知|未確認|未确定|不確定|不确定|可能|是否|\b(?:maybe|might|unclear|whether|unknown|perhaps)\b/i.test(text));
+  const scopedDistinct = !maybeDistinct && group.some(food =>
+    clauses(food.notes ?? "").some(clause =>
+      NEGATED_SAME_SERVING.test(normalizeFoodName(clause))
+      && sameVessel.test(clause)
+      && (specificFamilies(clause).length === 0 || sameFamilyOnly(clause))));
+  const minimumCount = namedSecondVessel
+    || distinctPositionedRows("left", "right")
+    || distinctPositionedRows("front", "back")
+    || scopedDistinct ? 2 : 1;
 
   // Rows may repeat "一盒" because the model duplicated a serving. However,
   // an explicit two/three-plus count on an individual row is useful evidence
@@ -450,10 +489,8 @@ function dedupeMultipleMilkGroups(analysis: FoodAnalysis, milkIndexes: readonly 
   const replacements = new Map<number, ObservedFood>();
   for (const indexes of groups) {
     const group = indexes.map(index => analysis.foods[index]);
-    const otherMilkRows = milkIndexes.filter(index => !indexes.includes(index))
-      .map(index => analysis.foods[index]);
     const confirmedLimit = Math.min(indexes.length, Math.max(1,
-      evidencedMilkCount(analysis, group, otherMilkRows)));
+      evidencedMilkCount(analysis, group)));
     // Preserve original order and separate vessel identities. Never silently
     // merge a group of 3+ rows: only confirmed rows contribute nutrients.
     for (const [ordinal, index] of indexes.entries()) {
@@ -487,8 +524,18 @@ export function dedupeIdenticalContainerMilk(analysis: FoodAnalysis): FoodAnalys
   // We do not invent missing rows when the photo has more than the AI found.
   if (milkIndexes.length === 2 && compatibleFamilies(milkFoods)
       && sameMilkContainer(milkFoods)
-      && evidencedMilkCount(analysis, milkFoods, []) >= 2) {
+      && evidencedMilkCount(analysis, milkFoods) >= 2) {
     return analysis;
+  }
+  if (milkIndexes.length === 2 && compatibleFamilies(milkFoods)
+      && sameMilkContainer(milkFoods) && sameCanonicalKey(milkFoods)
+      && milkFoods[0].notes != null && milkFoods[0].notes === milkFoods[1].notes
+      && rowsShowDistinctContainers(milkFoods)
+      && evidencedMilkCount(analysis, milkFoods) < 2) {
+    // Two identical AI rows repeating the *same* note about other vessels or
+    // both sides of the scene do not independently prove two milk servings.
+    // Keep the second row pending, rather than counting it or merging it away.
+    return markSuspectedDuplicates(analysis, milkIndexes);
   }
   if (milkIndexes.length >= 2 && compatibleFamilies(milkFoods)) {
     const rowsAreDistinct = rowsShowDistinctContainers(milkFoods);

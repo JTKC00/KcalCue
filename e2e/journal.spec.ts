@@ -2510,3 +2510,90 @@ for (const scenario of [
       expect(backend.mealReadUrls.length).toBeGreaterThan(0);
     });
 }
+
+
+// Separate cups / unidentified cartons / spatial directions in oat-row notes
+// must not make a duplicate oat carton count automatically. All three flows
+// exercise UI decisions and synthetic cloud History, never a live user.
+for (const scenario of [
+  {
+    name: "another glass does not count an extra oat carton",
+    note: "燕麥奶紙盒，旁邊另一杯",
+    decision: "remove",
+    pending: 1,
+  },
+  {
+    name: "other glass positions cannot authorize second oat carton",
+    note: "燕麥奶紙盒；前方玻璃杯，後方另一杯",
+    decision: "confirm",
+    pending: 1,
+  },
+  {
+    name: "explicit second oat carton is a real distinct serving",
+    note: "紙盒燕麥奶，另一盒燕麥奶",
+    decision: "none",
+    pending: 0,
+  },
+] as const) {
+  test(`P1 non-numeric vessel scope: ${scenario.name}, ${scenario.decision}, save + History`,
+    async ({ page, context }) => {
+      const backend = cloud();
+      await backend.install(context);
+      const oatCarton = { ...m6CartonAndGlassAnalysis.foods[0], notes: scenario.note };
+      const glass = {
+        ...m6CartonAndGlassAnalysis.foods[1],
+        displayName: "全脂牛奶", normalizedName: "whole milk",
+      };
+      const vision = {
+        ...m6CartonAndGlassAnalysis,
+        foods: [oatCarton, { ...oatCarton }, glass],
+        visibleEvidence: [],
+      };
+      const preparedAnalysis = preparePhotoMilkAnalysis(vision);
+      expect(preparedAnalysis.foods).toHaveLength(3);
+      expect(preparedAnalysis.foods.filter(x => x.suspectedDuplicateMilk)).toHaveLength(scenario.pending);
+      expect(preparedAnalysis.foods.find(x => x.normalizedName === "whole milk")?.suspectedDuplicateMilk).toBeUndefined();
+      await page.route("**/api/analyze", route => route.fulfill({
+        json: { mode: "live", analysis: preparedAnalysis, analysisProvenance: null },
+      }));
+      await page.route("**/api/nutrition/resolve", route => route.fulfill({
+        status: 500, json: { error: { code: "unexpected_nutrition" } },
+      }));
+      await page.goto("/");
+      await login(page);
+      await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
+      const png = await sharp({
+        create: { width: 80, height: 60, channels: 3, background: "white" },
+      }).png().toBuffer();
+      await page.locator('input[type="file"]').nth(1).setInputFiles({
+        name: "non-numeric-vessels.png", mimeType: "image/png", buffer: png,
+      });
+      await page.getByRole("button", { name: "開始分析", exact: true }).click();
+      await expect(page.locator(".food-card")).toHaveCount(3);
+      if (scenario.pending) {
+        await expect(page.getByText(/有 1 項飲品可能重複，尚待你確認/)).toBeVisible();
+        await page.getByRole("button", {
+          name: scenario.decision === "remove" ? "係重複，移除" : "係另一份，計入",
+          exact: true,
+        }).click();
+        await expect(page.getByText(/可能重複，尚待你確認/)).toHaveCount(0);
+      } else {
+        await expect(page.getByRole("button", { name: "係另一份，計入", exact: true })).toHaveCount(0);
+      }
+      const expected = scenario.decision === "remove" ? 2 : 3;
+      await expect(page.locator(".food-card")).toHaveCount(expected);
+      await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
+      await expect.poll(() => backend.records.size).toBe(1);
+      const saved = [...backend.records.values()][0].items as Array<{
+        normalizedName: string; suspectedDuplicateMilk?: true;
+      }>;
+      expect(saved).toHaveLength(expected);
+      expect(saved.filter(x => x.normalizedName === "oat milk")).toHaveLength(expected - 1);
+      expect(saved.every(x => !x.suspectedDuplicateMilk)).toBe(true);
+      expect(saved.some(x => x.normalizedName === "whole milk")).toBe(true);
+      await page.getByRole("button", { name: "歷史", exact: true }).click();
+      await page.getByRole("button", { name: "查看／修正", exact: true }).click();
+      await expect(page.locator(".food-card")).toHaveCount(expected);
+      expect(backend.mealReadUrls.length).toBeGreaterThan(0);
+    });
+}
