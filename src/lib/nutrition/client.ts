@@ -64,7 +64,9 @@ export async function enrichUnresolvedMatches(
 ): Promise<NutritionMatch[]> {
   const unresolvedIndexes = localMatches
     .map((match, index) => (
-      match.includedInTotal || photoGenericMilkNeedsConfirmation(foods[index] ?? { displayName: "", normalizedName: "" }, mealContext)
+      match.includedInTotal
+      || foods[index]?.suspectedDuplicateMilk === true
+      || photoGenericMilkNeedsConfirmation(foods[index] ?? { displayName: "", normalizedName: "" }, mealContext)
         ? -1
         : index
     ))

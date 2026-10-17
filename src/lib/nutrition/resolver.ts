@@ -4,6 +4,7 @@ export type ResolvableFood = FoodEstimate & {
   entrySource?: "photo" | "manual";
   userMilkTypeChoice?: UserMilkTypeChoice;
   otherMilkNotice?: string;
+  suspectedDuplicateMilk?: true;
 };
 import {
   canonicalizeFood,
@@ -25,6 +26,7 @@ import {
   PHOTO_MILK_OTHER_REASON,
   PLANT_MILK_CONTRADICTION_REASON,
 } from "./negative-rules";
+import { SUSPECTED_DUPLICATE_MILK_NOTICE } from "@/lib/domain/milk-dedupe";
 import { milkResolveSubject, type UserMilkTypeChoice } from "./photo-milk";
 import {
   COMPOSITE_GENERIC_FALLBACK_REASON,
@@ -265,6 +267,15 @@ export function resolveNutritionMatch(
   catalog: NutritionProfile[],
   mealContext?: MealPlantMilkContext,
 ): NutritionMatch {
+  if (food.suspectedDuplicateMilk === true) {
+    return unmatched({
+      profile: null,
+      confidence: "low",
+      matchType: "unresolved",
+      reasons: [SUSPECTED_DUPLICATE_MILK_NOTICE],
+      identity: canonicalizeFood(food),
+    }, "INSUFFICIENT_COVERAGE");
+  }
   if (
     food.userMilkTypeChoice === "other" ||
     food.otherMilkNotice === PHOTO_MILK_OTHER_REASON ||

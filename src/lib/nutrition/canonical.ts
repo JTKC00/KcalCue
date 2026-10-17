@@ -763,9 +763,11 @@ export function blocksUsdaLiveLookup(
     entrySource?: "photo" | "manual";
     userMilkTypeChoice?: string;
     otherMilkNotice?: string;
+    suspectedDuplicateMilk?: boolean;
   },
   context?: MealPlantMilkContext,
 ): boolean {
+  if (food.suspectedDuplicateMilk === true) return true;
   if (food.userMilkTypeChoice === "other" || food.otherMilkNotice === PHOTO_MILK_OTHER_REASON) return true;
   if (food.uncertaintyReasons?.includes(PHOTO_MILK_OTHER_REASON)) return true;
   return contradictoryDairyMilkLabel(food, context)

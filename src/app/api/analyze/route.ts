@@ -2,6 +2,12 @@ import { NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 import type { AnalysisProvenanceMetadata } from "@/lib/domain/analysis-provenance";
 import { preparePhotoMilkAnalysis } from "@/lib/domain/photo-milk-analysis";
+import {
+  QA_SUSPECTED_MILK_FIELD,
+  qaSuspectedMilkAnalysis,
+  qaSuspectedMilkFixtureEnabled,
+  qaSuspectedMilkRequested,
+} from "@/lib/domain/qa-suspected-milk";
 import { DemoFoodVisionProvider } from "@/lib/providers/food-vision/demo";
 import {
   extractOpenAIErrorDetails,
@@ -138,6 +144,16 @@ export async function POST(request: Request) {
 
     imageMimeType = detectedMimeType;
     imageByteSize = bytes.byteLength;
+    if (
+      qaSuspectedMilkFixtureEnabled() &&
+      qaSuspectedMilkRequested(formData.get(QA_SUSPECTED_MILK_FIELD))
+    ) {
+      return NextResponse.json({
+        analysis: preparePhotoMilkAnalysis(qaSuspectedMilkAnalysis),
+        analysisProvenance: null,
+        mode: "live" as const,
+      });
+    }
     const attemptId = formData.get("attemptId");
     if (attemptId !== null &&
       (typeof attemptId !== "string" ||

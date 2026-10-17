@@ -47,6 +47,9 @@ import { foodAnalysisSchema } from "@/lib/domain/food-analysis";
 import { oatMilkCartonPhotoAnalysis } from "@/lib/nutrition/oat-milk-photo.fixture";
 import { duplicateGenericMilkCartonAnalysis } from "@/lib/nutrition/duplicate-milk-carton.fixture";
 import { MERGED_DUPLICATE_MILK_NOTICE } from "@/lib/domain/milk-dedupe";
+import { c3Run1SingleOatCartonAnalysis } from "@/lib/nutrition/m7-milk-dedupe.fixture";
+import { qaSuspectedMilkAnalysis } from "@/lib/domain/qa-suspected-milk";
+import { preparePhotoMilkAnalysis } from "@/lib/domain/photo-milk-analysis";
 import { POST } from "./route";
 import { provenanceMetadata } from "@/test/provenance-fixture";
 
@@ -69,8 +72,14 @@ function imageRequest(
   });
 }
 
-function jpegRequest(name = "meal.jpg", type = "image/jpeg", headers?: HeadersInit, attemptId?: string) {
-  return imageRequest(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), name, type, headers, attemptId);
+function jpegRequest(name = "meal.jpg", type = "image/jpeg", headers?: HeadersInit, attemptId?: string, qaSuspectedMilk = false) {
+  const request = imageRequest(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), name, type, headers, attemptId);
+  if (!qaSuspectedMilk) return request;
+  const form = new FormData();
+  form.set("image", new File([Uint8Array.from([0xff, 0xd8, 0xff, 0xd9])], name, { type }));
+  if (attemptId !== undefined) form.set("attemptId", attemptId);
+  form.set("qaSuspectedMilk", "1");
+  return new Request("http://localhost/api/analyze", { method: "POST", headers, body: form });
 }
 
 function heifBytes(brand = "mif1"): Uint8Array {
@@ -202,14 +211,59 @@ describe("POST /api/analyze", () => {
     expect(foodAnalysisSchema.parse(body.analysis).foods[0].duplicateMilkNotice).toBe(MERGED_DUPLICATE_MILK_NOTICE);
   });
 
+  it.each(["", "true", "yes"] as const)("ignores the suspected-milk QA field when the server flag is %j", async (flag) => {
+    if (flag) vi.stubEnv("KCALCUE_QA_SUSPECTED_MILK", flag);
+    analyzeImage.mockResolvedValueOnce(demoFoodAnalysis);
+    const body = await (await POST(jpegRequest("meal.jpg", "image/jpeg", undefined, undefined, true))).json();
+    expect(analyzeImage).toHaveBeenCalledOnce();
+    expect(reserveDailyLiveAnalysis).toHaveBeenCalledOnce();
+    expect(body.analysis.foods).toEqual(demoFoodAnalysis.foods);
+    expect(JSON.stringify(body.analysis)).not.toContain("suspectedDuplicateMilk");
+  });
+
+  it("returns the suspected-milk fixture without calling the model only when the flag is exactly 1", async () => {
+    vi.stubEnv("KCALCUE_QA_SUSPECTED_MILK", "1");
+    analyzeImage.mockResolvedValueOnce(demoFoodAnalysis);
+    const withoutField = await (await POST(jpegRequest())).json();
+    expect(analyzeImage).toHaveBeenCalledOnce();
+    expect(withoutField.analysis).toEqual(expect.objectContaining({ foods: demoFoodAnalysis.foods }));
+
+    analyzeImage.mockClear();
+    vi.mocked(reserveDailyLiveAnalysis).mockClear();
+    const response = await POST(jpegRequest("meal.jpg", "image/jpeg", undefined, undefined, true));
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(analyzeImage).not.toHaveBeenCalled();
+    expect(reserveDailyLiveAnalysis).not.toHaveBeenCalled();
+    expect(body.mode).toBe("live");
+    expect(body.analysisProvenance).toBeNull();
+    expect(body.analysis.foods).toHaveLength(2);
+    expect(body.analysis.foods.filter((food: { suspectedDuplicateMilk?: boolean }) => food.suspectedDuplicateMilk === true)).toHaveLength(1);
+    expect(body.analysis.foods[0].displayName).toBe("全脂牛奶");
+    expect(foodAnalysisSchema.parse(body.analysis)).toEqual(body.analysis);
+    expect(preparePhotoMilkAnalysis(body.analysis)).toEqual(body.analysis);
+    expect(qaSuspectedMilkAnalysis.foods.every(food => !("suspectedDuplicateMilk" in food))).toBe(true);
+  });
+
+  it("merges C3-run1 identical oat-milk rows that only say the photo shows one carton", async () => {
+    analyzeImage.mockResolvedValueOnce(c3Run1SingleOatCartonAnalysis);
+    const body = await (await POST(jpegRequest())).json();
+    expect(body.analysis.foods).toHaveLength(1);
+    expect(body.analysis.foods[0].duplicateMilkNotice).toBe(MERGED_DUPLICATE_MILK_NOTICE);
+    expect(body.analysis.foods[0].suspectedDuplicateMilk).toBeUndefined();
+    expect(foodAnalysisSchema.parse(body.analysis).foods).toHaveLength(1);
+  });
+
   it.each([
     ["carton plus glass", ["180 ml 紙盒牛奶", "獨立玻璃杯牛奶"]],
     ["front and back glasses", ["前方玻璃杯牛奶", "後方玻璃杯牛奶"]],
-  ])("keeps %s separate even when both rows repeat the carton wording", async (_name, visibleEvidence) => {
+  ])("holds back one identical carton row when only the meal text says %s", async (_name, visibleEvidence) => {
     const row = { ...oatMilkCartonPhotoAnalysis.foods[0], portionMin: 180, portionMax: 180, preparationMethod: "紙盒飲品", notes: "牛奶包裝" };
     analyzeImage.mockResolvedValueOnce({ ...oatMilkCartonPhotoAnalysis, foods: [row, { ...row }], uncertaintyReasons: [], visibleEvidence, unknownInformation: [] });
     const body = await (await POST(jpegRequest())).json();
     expect(body.analysis.foods).toHaveLength(2);
+    expect(body.analysis.foods.filter((food: { suspectedDuplicateMilk?: boolean }) => food.suspectedDuplicateMilk === true)).toHaveLength(1);
+    expect(body.analysis.foods.every((food: { duplicateMilkNotice?: string }) => food.duplicateMilkNotice == null)).toBe(true);
   });
 
   it.each([["180 ml 紙盒牛奶", "旁邊一杯牛奶"], ["後方玻璃杯牛奶", "前方玻璃杯牛奶"]])("warns when one milk row has distinct visible containers %s %s", async (...visibleEvidence) => {
