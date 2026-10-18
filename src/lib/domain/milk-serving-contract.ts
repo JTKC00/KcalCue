@@ -58,9 +58,14 @@ export const claimUses = [
 export type ClaimUse = (typeof claimUses)[number];
 
 export const quantityPurposes = [
-  "row_personal_estimate", "user_amount", "aggregate_consumed", "package_capacity", "unknown",
+  "row_personal_estimate", "user_amount", "aggregate_consumed", "package_capacity",
+  "transferred_amount", "stock_amount", "unknown",
 ] as const;
 export type QuantityPurpose = (typeof quantityPurposes)[number];
+
+/** Visual marks that can identify a cup. A milk-family name is not a mark. */
+export const distinctiveMarks = ["blue-dot", "star-sticker", "round-handle"] as const;
+export type DistinctiveMark = (typeof distinctiveMarks)[number];
 
 export type Referent =
   | { kind: "entity"; entityId: Id }
@@ -113,7 +118,8 @@ export type ClaimBody =
     count: number;
   }
   | { predicate: "quantity"; proposal: QuantityProposal }
-  | { predicate: "stock_transfer"; from: Referent; into: Referent };
+  | { predicate: "stock_transfer"; from: Referent; into: Referent }
+  | { predicate: "anchor"; subject: Referent; mark: DistinctiveMark };
 
 export type ClaimPredicate = ClaimBody["predicate"];
 
@@ -431,6 +437,11 @@ const claimBodySchema = z.discriminatedUnion("predicate", [
   }),
   z.strictObject({ predicate: z.literal("quantity"), proposal: quantityProposalSchema }),
   z.strictObject({ predicate: z.literal("stock_transfer"), from: referentSchema, into: referentSchema }),
+  z.strictObject({
+    predicate: z.literal("anchor"),
+    subject: referentSchema,
+    mark: z.enum(distinctiveMarks),
+  }),
 ]);
 
 export const evidenceClaimSchema = z.strictObject({
@@ -651,6 +662,9 @@ export const servingReconciliationSchema = z.strictObject({
   }
 
   const claimIds = new Set(result.claims.map(claim => claim.claimId));
+  const requireClaims = (ids: readonly string[] | undefined, label: string) => {
+    for (const id of ids ?? []) if (!claimIds.has(id)) issue(`${label} references unknown claim ${id}`);
+  };
   const entityIds = new Set(rowIds.map(rowEntityId));
   const concreteEntityIds = (referent: { kind: string; entityId?: string; possibleEntityIds?: readonly string[] }) => {
     if (referent.kind === "entity" && referent.entityId) return [referent.entityId];
@@ -672,7 +686,9 @@ export const servingReconciliationSchema = z.strictObject({
       if (!claimIds.has(id)) issue(`claim ${claim.claimId} contradicts unknown claim ${id}`);
     }
     const body = claim.body;
-    if (body.predicate === "presence" || body.predicate === "family" || body.predicate === "vessel") checkReferent(body.subject, claim.claimId);
+    if (body.predicate === "presence" || body.predicate === "family" || body.predicate === "vessel" || body.predicate === "anchor") {
+      checkReferent(body.subject, claim.claimId);
+    }
     else if (body.predicate === "spatial") {
       checkReferent(body.subject, claim.claimId);
       if (body.relativeTo !== "scene") checkReferent(body.relativeTo, claim.claimId);
@@ -695,6 +711,13 @@ export const servingReconciliationSchema = z.strictObject({
   for (const candidate of result.candidates) {
     for (const rowId of candidate.rowIds) if (!rowSet.has(rowId)) issue(`candidate cites unknown row ${rowId}`);
     checkReferent(candidate.referent, candidate.candidateId);
+    for (const same of candidate.possibleSameAs) {
+      if (!candidateSet.has(same)) issue(`candidate ${candidate.candidateId} possibleSameAs references unknown candidate ${same}`);
+    }
+    for (const assessment of [candidate.existence, candidate.family, candidate.vessel]) {
+      if (assessment.state === "resolved") requireClaims(assessment.proofIds, candidate.candidateId);
+      else requireClaims(assessment.claimIds, candidate.candidateId);
+    }
     for (const proposal of candidate.quantityProposals) {
       checkReferent(proposal.target, candidate.candidateId);
       for (const id of proposal.claimIds) if (!claimIds.has(id)) issue(`candidate quantity cites unknown claim ${id}`);
@@ -708,6 +731,10 @@ export const servingReconciliationSchema = z.strictObject({
       if (!slot) issue(`confirmed unit references unknown slot ${slotId}`);
       else if (slot.status !== "confirmed") issue(`confirmed unit references ${slot.status} slot ${slotId}`);
       else {
+        if (slot.family.state === "conflict") issue(`confirmed slot ${slotId} still has a family conflict`);
+        if (slot.profile.state !== "resolved" || slot.profile.value !== unit.profileId) {
+          issue(`confirmed profile does not match slot ${slotId}`);
+        }
         if (slot.multiplicity !== unit.multiplicity) issue(`confirmed unit multiplicity does not match slot ${slotId}`);
         if (slot.portion.state !== "resolved") issue(`confirmed unit references unresolved portion on ${slotId}`);
         else if (slot.portion.value.min !== unit.portion.min || slot.portion.value.max !== unit.portion.max
@@ -715,6 +742,12 @@ export const servingReconciliationSchema = z.strictObject({
           issue(`confirmed unit portion does not match slot ${slotId}`);
         }
       }
+      if (unit.milkTypeChoice === "other") issue(`confirmed unit ${unit.unitId} cannot record milk type other`);
+      if (unit.milkTypeChoice && unit.milkTypeChoice !== "other" && unit.milkTypeChoice !== unit.profileId) {
+        issue(`confirmed unit ${unit.unitId} milk type does not match its profile`);
+      }
+      requireClaims(unit.proofIds, unit.unitId);
+      requireClaims(unit.portion.proofIds, unit.unitId);
       confirmedSlots.add(slotId);
     }
   }
@@ -722,6 +755,21 @@ export const servingReconciliationSchema = z.strictObject({
     if (slot.status === "confirmed" && !confirmedSlots.has(slot.slotId)) {
       issue(`confirmed slot ${slot.slotId} has no confirmed unit`);
     }
+    if (slot.status === "confirmed" && slot.family.state === "conflict") {
+      issue(`confirmed slot ${slot.slotId} still has a family conflict`);
+    }
+    requireClaims(slot.proofIds, slot.slotId);
+    if (slot.family.state === "resolved") requireClaims(slot.family.proofIds, slot.slotId);
+    else requireClaims(slot.family.claimIds, slot.slotId);
+    if (slot.portion.state === "resolved") {
+      requireClaims(slot.portion.proofIds, slot.slotId);
+      requireClaims(slot.portion.value.proofIds, slot.slotId);
+    } else if (slot.portion.state === "conflict") {
+      requireClaims(slot.portion.claimIds, slot.slotId);
+      for (const alternative of slot.portion.alternatives) requireClaims(alternative.proofIds, slot.slotId);
+    } else requireClaims(slot.portion.claimIds, slot.slotId);
+    if (slot.profile.state === "resolved") requireClaims(slot.profile.proofIds, slot.slotId);
+    else requireClaims(slot.profile.claimIds, slot.slotId);
     for (const id of slot.sourceCandidateIds) if (!candidateSet.has(id)) issue(`slot cites unknown candidate ${id}`);
   }
 
@@ -730,6 +778,11 @@ export const servingReconciliationSchema = z.strictObject({
       if (!slotSet.has(slotId)) issue(`group ${group.groupId} references unknown slot ${slotId}`);
     }
     for (const id of group.candidateIds) if (!candidateSet.has(id)) issue(`group cites unknown candidate ${id}`);
+    const proposalIds = new Set(group.amountAlternatives.map(item => item.proposalId));
+    for (const id of group.excludedProposalIds) {
+      if (!proposalIds.has(id)) issue(`group ${group.groupId} excludes unknown proposal ${id}`);
+    }
+    for (const alternative of group.amountAlternatives) requireClaims(alternative.claimIds, group.groupId);
     for (const slotId of group.slotIds) {
       const slot = result.supportedSlots.find(item => item.slotId === slotId);
       if (slot?.status === "confirmed") issue(`unresolved group ${group.groupId} contains confirmed slot ${slotId}`);
@@ -748,6 +801,7 @@ export const servingReconciliationSchema = z.strictObject({
   if (result.decisionRevision !== result.acceptedDecisions.length) issue("decision revision mismatch");
   result.acceptedDecisions.forEach((decision, index) => {
     if (decision.expectedDecisionRevision !== index) issue(`decision ${decision.decisionId} has a stale revision`);
+    if (decision.sourceDigest !== result.sourceDigest) issue(`decision ${decision.decisionId} has a stale source digest`);
     const command = decision.command;
     if (command.kind === "set_type" && !slotSet.has(command.targetId)) issue(`decision ${decision.decisionId} targets an unknown slot`);
     if (command.kind === "set_portion" && !slotSet.has(command.unitId)) issue(`decision ${decision.decisionId} targets an unknown slot`);

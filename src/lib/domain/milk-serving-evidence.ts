@@ -11,6 +11,7 @@ import {
   type ClaimField,
   type ClaimUse,
   type DairyQualifier,
+  type DistinctiveMark,
   type EvidenceClaim,
   type MilkFamily,
   type ObservedFoodRow,
@@ -211,9 +212,18 @@ const SIDE_RULES: Array<[SpatialRelation, RegExp]> = [
   ["left", /左邊|左边|左方|左側|左侧|左手邊|\bleft\b/],
   ["right", /右邊|右边|右方|右側|右侧|右手邊|\bright\b/],
 ];
-const STOCK_MARKER = /倒(?:了|入|進|进|到|出)|\bpour(?:ed|ing)?\b/;
+const STOCK_MARKER = /倒(?!影)(?:咗|了|左|入|進|进|到|出|落)?|\bpour(?:ed|ing)?\b/;
 const AGGREGATE_MARKER = /合共|合計|合计|總共|总共|一共|共飲|共饮|\bin total\b|\baltogether\b|\bcombined\b/;
-const CAPACITY_MARKER = /容量|容積|容积|\bcapacity\b|標示|标示|包裝|包装|\blabel(?:led)?\b/;
+const CAPACITY_MARKER = /容量|容積|容积|\bcapacity\b|標示|标示|包裝|包装|標籤|标签|\blabel(?:led|ed)?\b/;
+const CONSUMED_MARKER = /飲咗|飲了|飲用了|飲用|喝咗|喝了|喝|饮咗|饮了|饮用了|饮用|\b(?:consumed|drank|drunk)\b/;
+const STORAGE_MARKER = /儲存|储存|存放|備用|备用|雪櫃|雪柜|冰箱|\b(?:storage|store|stash)\b/;
+const DRINK_DESTINATION = /玻璃杯|飲杯|杯子|\b(?:glass|cup)\b/;
+const PACKAGE_NOUN = /^(?:的)?(?:紙盒|纸盒|利樂盒|利乐盒|carton|pack|package)/;
+const MARK_RULES: Array<[DistinctiveMark, RegExp]> = [
+  ["blue-dot", /藍色圓點|蓝色圆点|藍點杯|蓝点杯|blue[- ]dot/],
+  ["star-sticker", /星形貼紙|星形贴纸|星星貼紙|star sticker/],
+  ["round-handle", /圓柄|圆柄|round[- ]handl/],
+];
 const AMOUNT = /(?<![\d.])(\d{1,4}(?:\.\d+)?)\s*(ml|毫升|l|公升|升|litres?|liters?)(?![a-z])/;
 
 const NOT_SAME = /(?:不是|並非|并非|唔係|唔系|不係|不系|並不是|并不是)同一|\b(?:is |are )?not the same\b/;
@@ -610,20 +620,12 @@ function interpretOwnClause(sink: ClaimSink, row: ObservedFoodRow, state: RowSta
   const prepClasses = new Set([...state.ownVessels].map(vesselClass));
   const conflictingVessel = vessel !== null && prepClasses.size > 0 && !prepClasses.has(vesselClass(vessel));
 
-  // A pour names the stock container and, when present, the personal amount that left it.
+  // A pour names the stock container and, when present, the amount that left it.
+  // Destination decides whether that amount is intake, storage, or still pending.
   if (stock) {
     if (polarity === "affirmative") {
       sink.add(source("stock_transfer"), { predicate: "stock_transfer", from: own(rowId), into: UNBOUND }, polarity, ["separate_identity"]);
-      for (const amount of amountsIn(text)) {
-        if (amount.capacity) state.capacityAmounts.push(amount.ml);
-        sink.add(source(amount.capacity ? "stock_capacity" : "poured_personal_amount"), {
-          predicate: "quantity",
-          proposal: {
-            proposalId: "", target: own(rowId), min: amount.ml, max: amount.ml, unit: "ml",
-            purpose: amount.capacity ? "package_capacity" : "row_personal_estimate", claimIds: [],
-          },
-        }, polarity, amount.capacity ? [] : ["portion"], amount.capacity ? ["package_capacity_not_intake"] : []);
-      }
+      emitAttributedAmounts(sink, source, rowId, text, polarity, state, true);
     }
     return;
   }
@@ -680,18 +682,60 @@ function interpretOwnClause(sink: ClaimSink, row: ObservedFoodRow, state: RowSta
       }
     }
   }
-  const amount = AMOUNT.exec(text);
-  if (amount && !stock) {
-    const ml = toMillilitres(Number(amount[1]), amount[2]);
-    const capacity = CAPACITY_MARKER.test(text) || /^(?:l|公升|升|litres?|liters?)$/.test(amount[2]);
-    const purpose: QuantityPurpose = capacity ? "package_capacity" : AGGREGATE_MARKER.test(text) ? "aggregate_consumed" : "row_personal_estimate";
-    const usable = purpose === "row_personal_estimate" || purpose === "aggregate_consumed";
-    if (purpose === "package_capacity") state.capacityAmounts.push(ml);
-    if (purpose === "aggregate_consumed") state.aggregateSeen = true;
-    sink.add(source("note_amount"), {
+  emitAttributedAmounts(sink, source, rowId, text, polarity, state, false);
+}
+
+function amountRule(purpose: QuantityPurpose): string {
+  if (purpose === "package_capacity") return "package_capacity";
+  if (purpose === "transferred_amount") return "transferred_amount";
+  if (purpose === "stock_amount") return "stock_amount";
+  if (purpose === "unknown") return "uncertain_transfer";
+  if (purpose === "aggregate_consumed") return "aggregate_amount";
+  return "note_amount";
+}
+
+function amountRefusal(purpose: QuantityPurpose): string | null {
+  if (purpose === "package_capacity") return "package_capacity_not_intake";
+  if (purpose === "stock_amount") return "stock_not_intake";
+  if (purpose === "unknown") return "transfer_destination_uncertain";
+  return null;
+}
+
+function emitAttributedAmounts(
+  sink: ClaimSink,
+  source: (rule: string) => SourceSpec,
+  rowId: string,
+  text: string,
+  polarity: Polarity,
+  state: RowState,
+  pouring: boolean,
+) {
+  for (const amount of attributeAmounts(text, pouring)) {
+    const usable = amount.purpose === "row_personal_estimate" || amount.purpose === "aggregate_consumed" || amount.purpose === "transferred_amount";
+    const refusal = amountRefusal(amount.purpose);
+    if (amount.purpose === "package_capacity") state.capacityAmounts.push(amount.ml);
+    if (amount.purpose === "aggregate_consumed") state.aggregateSeen = true;
+    sink.add(source(amountRule(amount.purpose)), {
       predicate: "quantity",
-      proposal: { proposalId: "", target: own(rowId), min: ml, max: ml, unit: "ml", purpose, claimIds: [] },
-    }, polarity, usable ? ["portion"] : [], usable ? [] : ["package_capacity_not_intake"]);
+      proposal: {
+        proposalId: "", target: own(rowId), min: amount.ml, max: amount.ml, unit: "ml", purpose: amount.purpose, claimIds: [],
+      },
+    }, polarity, usable ? ["portion"] : [], refusal ? [refusal] : []);
+  }
+}
+
+function interpretAnchors(sink: ClaimSink, row: ObservedFoodRow) {
+  const fields = ["displayName", "normalizedName", "notes", "preparationMethod"] as const;
+  for (const field of fields) {
+    const raw = row.raw[field];
+    if (typeof raw !== "string" || raw.length === 0) continue;
+    const text = normalizeEvidenceText(raw);
+    for (const [mark, pattern] of MARK_RULES) {
+      if (!pattern.test(text)) continue;
+      sink.add({ rowId: row.rowId, field, span: [0, raw.length], rule: "distinctive_mark" }, {
+        predicate: "anchor", subject: own(row.rowId), mark,
+      }, "affirmative", ["same_identity"]);
+    }
   }
 }
 
@@ -712,15 +756,53 @@ function interpretUncertainField(sink: ClaimSink, text: string, field: ClaimFiel
   }
 }
 
-function amountsIn(text: string): Array<{ ml: number; capacity: boolean }> {
-  const flags = AMOUNT.flags.includes("g") ? AMOUNT.flags : `${AMOUNT.flags}g`;
-  const pattern = new RegExp(AMOUNT.source, flags);
-  const found: Array<{ ml: number; capacity: boolean }> = [];
+interface AttributedAmount {
+  ml: number;
+  purpose: QuantityPurpose;
+}
+
+function textScopes(text: string): string[] {
+  const scopes: string[] = [];
+  const pattern = /[（(]([^）)]*)[）)]/g;
+  let cursor = 0;
   for (const match of text.matchAll(pattern)) {
-    const unit = match[2] ?? "";
-    const ml = toMillilitres(Number(match[1]), unit);
-    const capacity = CAPACITY_MARKER.test(text) || /^(?:l|公升|升|litres?|liters?)$/.test(unit);
-    found.push({ ml, capacity });
+    scopes.push(text.slice(cursor, match.index ?? cursor));
+    scopes.push(match[1] ?? "");
+    cursor = (match.index ?? 0) + match[0].length;
+  }
+  scopes.push(text.slice(cursor));
+  return scopes.filter(scope => scope.trim() !== "");
+}
+
+/** Each amount is classified from the words that govern it, not from the whole clause. */
+function attributeAmounts(text: string, pouring: boolean): AttributedAmount[] {
+  const storage = STORAGE_MARKER.test(text);
+  const found: AttributedAmount[] = [];
+  for (const scope of textScopes(text)) {
+    const pattern = new RegExp(AMOUNT.source, "g");
+    const matches = [...scope.matchAll(pattern)];
+    matches.forEach((match, index) => {
+      const start = match.index ?? 0;
+      const previousEnd = index === 0 ? 0 : (matches[index - 1].index ?? 0) + matches[index - 1][0].length;
+      const nextStart = index + 1 < matches.length ? (matches[index + 1].index ?? scope.length) : scope.length;
+      const prefix = scope.slice(previousEnd, start);
+      const suffix = scope.slice(start + match[0].length, nextStart);
+      const unit = match[2] ?? "";
+      const ml = toMillilitres(Number(match[1]), unit);
+      const litre = /^(?:l|公升|升|litres?|liters?)$/.test(unit);
+      const consumedHere = CONSUMED_MARKER.test(prefix);
+      let purpose: QuantityPurpose;
+      if (CAPACITY_MARKER.test(prefix) || CAPACITY_MARKER.test(suffix.slice(0, 4))) purpose = "package_capacity";
+      else if (litre && !consumedHere) purpose = "package_capacity";
+      else if (pouring && PACKAGE_NOUN.test(suffix)) purpose = "package_capacity";
+      else if ((storage || STORAGE_MARKER.test(suffix)) && !consumedHere) purpose = "stock_amount";
+      else if (pouring && DRINK_DESTINATION.test(suffix)) purpose = "transferred_amount";
+      else if (pouring) purpose = "unknown";
+      else if (consumedHere || CONSUMED_MARKER.test(suffix.slice(0, 16))) purpose = "row_personal_estimate";
+      else if (AGGREGATE_MARKER.test(`${prefix}${suffix}`)) purpose = "aggregate_consumed";
+      else purpose = "row_personal_estimate";
+      found.push({ ml, purpose });
+    });
   }
   return found;
 }
@@ -734,6 +816,7 @@ function interpretRow(sink: ClaimSink, row: ObservedFoodRow) {
   if (row.raw.notes) {
     for (const clause of splitClauses(row.raw.notes)) interpretOwnClause(sink, row, state, clause, "notes");
   }
+  interpretAnchors(sink, row);
   for (const entry of row.raw.visibleIngredients ?? []) {
     const family = familyOf(normalizeEvidenceText(entry));
     if (family) {

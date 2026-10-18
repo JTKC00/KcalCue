@@ -14,6 +14,7 @@ import {
   validateServingReconciliation,
   type Assessment,
   type ConfirmedServing,
+  type DistinctiveMark,
   type EvidenceClaim,
   type FamilyValue,
   type MilkFamily,
@@ -78,6 +79,9 @@ interface EntityFacts {
   aggregate: QuantityProposal[];
   allProposals: QuantityProposal[];
   entityCount: { count: number; claimId: string } | null;
+  marks: Set<DistinctiveMark>;
+  /** A pour whose destination is neither a drinking vessel nor storage. */
+  uncertainTransfer: boolean;
 }
 
 const isEntity = (referent: Referent, entityId: string) => referent.kind === "entity" && referent.entityId === entityId;
@@ -105,6 +109,8 @@ function buildFacts(row: ObservedFoodRow, claims: readonly EvidenceClaim[]): Ent
     aggregate: [],
     allProposals: [],
     entityCount: null,
+    marks: new Set(),
+    uncertainTransfer: false,
   };
   for (const claim of claims) {
     const body = claim.body;
@@ -154,10 +160,13 @@ function buildFacts(row: ObservedFoodRow, claims: readonly EvidenceClaim[]): Ent
         if (!isEntity(proposal.target, entityId)) break;
         facts.allProposals.push(proposal);
         if (!admitted(claim, "portion") || proposal.min === null || proposal.max === null) break;
-        if (proposal.purpose === "row_personal_estimate") facts.personal.push(proposal);
+        if (proposal.purpose === "row_personal_estimate" || proposal.purpose === "transferred_amount") facts.personal.push(proposal);
         if (proposal.purpose === "aggregate_consumed") facts.aggregate.push(proposal);
         break;
       }
+      case "anchor":
+        if (isEntity(body.subject, entityId) && claim.polarity === "affirmative") facts.marks.add(body.mark);
+        break;
       case "cardinality":
         if (isEntity(body.population, entityId) && admitted(claim, "count")) {
           facts.entityCount = { count: body.count, claimId: claim.claimId };
@@ -168,6 +177,8 @@ function buildFacts(row: ObservedFoodRow, claims: readonly EvidenceClaim[]): Ent
     }
   }
   facts.allProposals.sort((a, b) => (a.proposalId < b.proposalId ? -1 : 1));
+  facts.uncertainTransfer = facts.stockSource && facts.personal.length === 0 && facts.aggregate.length === 0
+    && facts.allProposals.some(item => item.purpose === "unknown" && item.min !== null);
   return facts;
 }
 
@@ -214,7 +225,10 @@ function vesselAssessment(facts: EntityFacts): Assessment<VesselKind> {
   return { state: "conflict", alternatives: concrete, claimIds: proofs };
 }
 
-const amountKey = (proposal: QuantityProposal) => `${proposal.min}|${proposal.max}|${proposal.unit}|${proposal.purpose}`;
+/** Intake wordings of one amount are one portion. Capacity and stock stay distinct. */
+const portionBasis = (purpose: QuantityProposal["purpose"]) =>
+  purpose === "row_personal_estimate" || purpose === "transferred_amount" ? "intake" : purpose;
+const amountKey = (proposal: QuantityProposal) => `${proposal.min}|${proposal.max}|${proposal.unit}|${portionBasis(proposal.purpose)}`;
 
 function distinctByAmount(proposals: readonly QuantityProposal[]): QuantityProposal[] {
   const byKey = new Map<string, QuantityProposal>();
@@ -300,6 +314,8 @@ interface WorkSlot {
   userType?: UserTypeChoice;
   userPortion?: PortionInput;
   requiresUserPortion: boolean;
+  /** Set when the user has already declared this slot is one serving. */
+  identityResolved: boolean;
   dismissed: boolean;
   /** Blocks nutrition admission without deleting the witness or its portion. */
   nutritionHolds: string[];
@@ -467,7 +483,7 @@ function validateInput(input: TypedServingInput): { claims: EvidenceClaim[]; dec
     claims.set(claim.claimId, claim);
     const body = claim.body;
     switch (body.predicate) {
-      case "presence": case "family": case "vessel": case "spatial":
+      case "presence": case "family": case "vessel": case "spatial": case "anchor":
         checkReferent(body.subject, claim.claimId);
         if (body.predicate === "spatial" && body.relativeTo !== "scene") checkReferent(body.relativeTo, claim.claimId);
         break;
@@ -533,6 +549,7 @@ function buildModel(rows: readonly ObservedFoodRow[], claims: readonly EvidenceC
     if (conflictRows.includes(row.rowId)) return false;
     const facts = model.facts.get(row.rowId)!;
     // A pour keeps the personal amount on this row. Only a stock container with no intake is unrelated.
+    if (facts.uncertainTransfer) return false;
     return facts.stockSource && facts.personal.length === 0 && facts.aggregate.length === 0;
   }).map(row => row.rowId);
   for (const rowId of stockRows) model.rowOverrides.set(rowId, { disposition: "unrelated", slotIds: [], reason: "stock_source_not_intake" });
@@ -593,7 +610,7 @@ function buildModel(rows: readonly ObservedFoodRow[], claims: readonly EvidenceC
   const coreMask = cliques.reduce((acc, mask) => acc & mask, cliques.length ? -1 : 0);
   const unionMask = cliques.reduce((acc, mask) => acc | mask, 0);
   const core: string[] = [];
-  let anonymousGroups: Array<{ pool: string[]; count: number; basis: SlotBasis }> = [];
+  let anonymousGroups: Array<{ pool: string[]; count: number; basis: SlotBasis; competing?: boolean }> = [];
   const looseClassMembers: string[] = [];
   const preservedClasses: string[][] = [];
   classes.forEach((members, index) => {
@@ -610,7 +627,12 @@ function buildModel(rows: readonly ObservedFoodRow[], claims: readonly EvidenceC
   });
   const coreClassCount = popcount(coreMask >>> 0 & ((1 << classes.length) - 1));
   if (cliqueSize - coreClassCount > 0) {
-    anonymousGroups.push({ pool: looseClassMembers, count: cliqueSize - coreClassCount, basis: "interchangeable_witnesses" });
+    anonymousGroups.push({
+      pool: looseClassMembers,
+      count: cliqueSize - coreClassCount,
+      basis: "interchangeable_witnesses",
+      competing: cliques.length > 1,
+    });
   }
 
   // Cardinality: admitted counts, conflicts and polarity barriers.
@@ -675,7 +697,7 @@ function buildModel(rows: readonly ObservedFoodRow[], claims: readonly EvidenceC
       slotId, scopeId: "scene", basis: "direct_witness", sourceRowIds: [rowId],
       proofIds: sortedUnique([...facts.presenceProofs, ...[...facts.vessels.values()].flat()]),
       multiplicity: namedMultiplicity(rowId), family: family.assessment, refined: family.refined,
-      portion: reading.assessment, portionReason: reading.reason, requiresUserPortion: false, dismissed: false,
+      portion: reading.assessment, portionReason: reading.reason, requiresUserPortion: false, identityResolved: false, dismissed: false,
       nutritionHolds: [],
     });
     if (reading.assessment.state === "conflict") {
@@ -694,18 +716,32 @@ function buildModel(rows: readonly ObservedFoodRow[], claims: readonly EvidenceC
     }
   }
 
-  const identifiedRow = (rowId: string) => {
-    const assessment = model.familyOf.get(rowId)?.assessment;
-    if (!assessment || assessment.state === "unknown") return false;
-    if (assessment.state === "conflict") {
-      return assessment.alternatives.some(value => value.family !== "generic_milk" && value.family !== "unknown");
-    }
-    return assessment.value.family !== "generic_milk" && assessment.value.family !== "unknown";
+  const concreteRow = (rowId: string) => {
+    const kind = resolvedVessel(rowId);
+    return kind !== "unknown" && vesselClass(kind) !== "container";
   };
-  // Generic observations must not donate their amounts onto an identified serving.
+  // A side on a vague container, or a milk-family name, is not an identity anchor.
+  const physicallyAnchored = (rowId: string) => {
+    const facts = model.facts.get(rowId)!;
+    if (facts.marks.size > 0) return true;
+    return facts.sides.size > 0 && concreteRow(rowId);
+  };
+  // Unanchored rows keep their own evidence and must not donate amount or family
+  // onto a physically anchored serving. A vague container likewise does not
+  // replace a concrete glass, carton or bottle in the same pool.
   const portionSourceRows = (pool: readonly string[]) => {
-    const identified = pool.filter(identifiedRow);
-    return identified.length > 0 && identified.length < pool.length ? identified : [...pool];
+    const anchored = pool.filter(physicallyAnchored);
+    if (anchored.length > 0 && anchored.length < pool.length) return anchored;
+    const concrete = pool.filter(concreteRow);
+    if (concrete.length > 0 && concrete.length < pool.length) return concrete;
+    return [...pool];
+  };
+  const sameReferent = (pool: readonly string[]) => {
+    if (pool.length < 2 || !pool.some(rowId => model.facts.get(rowId)!.sameMarked)) return false;
+    const [first, ...rest] = pool.map(rowId => model.facts.get(rowId)!.marks);
+    if (first.size === 0) return false;
+    for (const mark of first) if (rest.every(set => set.has(mark))) return true;
+    return false;
   };
 
   // Anonymous slot groups: a projection exists only when every candidate agrees.
@@ -722,15 +758,24 @@ function buildModel(rows: readonly ObservedFoodRow[], claims: readonly EvidenceC
     const portionKeys = new Set(readings.map(item => item.assessment.state === "resolved"
       ? canonicalJson({ ...item.assessment.value, proofIds: [] }) : item.assessment.state === "unknown" ? "unknown" : "conflict"));
     const commonPortion = portionKeys.size === 1 && multiplicities.size <= 1;
-    const familyAssessmentValue: Assessment<FamilyValue> = commonFamily && families.length > 0
+    let familyAssessmentValue: Assessment<FamilyValue> = commonFamily && families.length > 0
       ? families[0].assessment
       : (() => {
         const values = [...new Map(families.flatMap(item => item.assessment.state === "resolved" ? [item.assessment.value]
           : item.assessment.state === "conflict" ? item.assessment.alternatives : []).map(value => [familyKey(value), value])).values()].sort(compareCanonical);
         const claimIds = sortedUnique(portionIds.flatMap(rowId => model.facts.get(rowId)!.families.map(item => item.claimId)));
-        return values.length >= 2 ? { state: "conflict", alternatives: values, claimIds } : { state: "unknown", claimIds };
+        return values.length >= 2 ? { state: "conflict" as const, alternatives: values, claimIds } : { state: "unknown" as const, claimIds };
       })();
-    const refined = families.some(item => item.refined);
+    let refined = families.some(item => item.refined);
+    let familiesAgree = commonFamily;
+    if (sameReferent(portionIds)) {
+      const merged = familyAssessment({ families: portionIds.flatMap(rowId => model.facts.get(rowId)!.families) } as EntityFacts);
+      familyAssessmentValue = merged.assessment;
+      refined = merged.refined;
+      familiesAgree = merged.assessment.state !== "conflict";
+    }
+    if (group.competing) model.reasonCodes.add("competing_maximum_cliques");
+    const competingReasons = group.competing ? ["competing_maximum_cliques"] : [];
     const allAlternatives = distinctByAmount(portionIds.flatMap(rowId => {
       const facts = model.facts.get(rowId)!;
       return facts.aggregate.length > 0 ? [...facts.aggregate, ...facts.personal] : facts.personal;
@@ -765,18 +810,19 @@ function buildModel(rows: readonly ObservedFoodRow[], claims: readonly EvidenceC
         slotId, scopeId: `pool:${key}`, basis: group.basis, sourceRowIds: portionIds,
         proofIds: sortedUnique(portionIds.flatMap(rowId => model.facts.get(rowId)!.presenceProofs)),
         multiplicity: multiplicities.size === 1 && portionIds.length === 1 ? namedMultiplicity(portionIds[0]) : 1,
-        family: familyAssessmentValue, refined, portion, portionReason, requiresUserPortion: false, dismissed: false,
+        family: familyAssessmentValue, refined, portion, portionReason, requiresUserPortion: false, identityResolved: false, dismissed: false,
         nutritionHolds: [],
       });
     }
     const exclusiveId = groupId(commonPortion ? "family_conflict" : "exclusive_candidates", slotIds);
-    if (!commonPortion || !commonFamily) {
+    if (!commonPortion || !familiesAgree || group.competing) {
       addGroup({
         groupId: exclusiveId, kind: commonPortion ? "family_conflict" : "exclusive_candidates", rowIds: portionIds, extraCandidateIds: [], slotIds,
         possibleTargetSlotIds: [], amountAlternatives: commonPortion ? [] : allAlternatives, excludedProposalIds: [],
         supportedCount: group.count, possibleExtraSlots: Math.max(0, portionIds.length - group.count),
         reasonCodes: [...(!commonPortion ? (group.count > 1 ? ["quantity_assignment_unresolved"] : ["portion_identity_conflict"]) : []),
-          ...(!commonFamily ? ["family_ambiguity"] : [])],
+          ...(!familiesAgree ? ["family_ambiguity"] : []),
+          ...competingReasons],
       });
     }
     if (portionIds.length > group.count) {
@@ -789,41 +835,27 @@ function buildModel(rows: readonly ObservedFoodRow[], claims: readonly EvidenceC
     }
   }
 
-  // Witnesses omitted from the maximum clique keep their own portion allocation.
-  const allocated = new Set([...model.slots.values()].flatMap(slot => slot.sourceRowIds));
-  for (const ids of preservedClasses) {
-    for (const rowId of portionSourceRows(ids)) {
-      if (allocated.has(rowId) || model.slots.has(`slot:${rowId}`)) continue;
-      const facts = model.facts.get(rowId)!;
-      const family = model.familyOf.get(rowId)!;
-      const reading = portionReading(facts);
-      const slotId = `slot:${rowId}`;
-      model.slots.set(slotId, {
-        slotId, scopeId: "scene", basis: "direct_witness", sourceRowIds: [rowId],
-        proofIds: sortedUnique([...facts.presenceProofs, ...[...facts.vessels.values()].flat()]),
-        multiplicity: 1, family: family.assessment, refined: family.refined,
-        portion: reading.assessment, portionReason: reading.reason, requiresUserPortion: false, dismissed: false,
-        nutritionHolds: ["distinctness_unresolved"],
-      });
-      allocated.add(rowId);
-    }
-  }
+  // A witness outside every maximum clique keeps its evidence, but it is not a supported serving.
+  const outsideClique = new Set(preservedClasses.flat());
 
   // Rows without any slot: possible excess against compatible slots or a new serving.
   const inSlots = new Set([...model.slots.values()].flatMap(slot => slot.sourceRowIds));
   for (const rowId of active.filter(id => !inSlots.has(id))) {
+    const facts = model.facts.get(rowId)!;
     const family = model.familyOf.get(rowId)!.assessment;
     const vessel = resolvedVessel(rowId);
+    const outside = outsideClique.has(rowId);
     const targets = [...model.slots.values()].filter(slot => {
       const slotFamily = slot.family;
       const familyOk = slotFamily.state !== "resolved" || familyCompatibleWith(slotFamily.value.family, family);
       const vesselOk = slot.sourceRowIds.some(source => vesselsCompatible(resolvedVessel(source), vessel));
       return familyOk && vesselOk;
     }).map(slot => slot.slotId).sort();
+    const ownAmounts = distinctByAmount(facts.aggregate.length > 0 ? [...facts.aggregate, ...facts.personal] : facts.personal);
     addGroup({
       groupId: groupId("possible_excess", [rowId]), kind: "possible_excess", rowIds: [rowId], extraCandidateIds: [], slotIds: [],
-      possibleTargetSlotIds: targets, amountAlternatives: [], excludedProposalIds: [], supportedCount: 0, possibleExtraSlots: 1,
-      reasonCodes: [witnesses.includes(rowId) ? "unknown_possible_reference" : "no_independent_serving_proof"],
+      possibleTargetSlotIds: targets, amountAlternatives: outside ? ownAmounts : [], excludedProposalIds: [], supportedCount: 0, possibleExtraSlots: 1,
+      reasonCodes: [outside ? "distinctness_unresolved" : witnesses.includes(rowId) ? "unknown_possible_reference" : "no_independent_serving_proof"],
     });
   }
 
@@ -892,7 +924,7 @@ function userSlotFromRow(model: Model, groupKey: string, rowId: string, useOwnPo
     proofIds: sortedUnique(facts.presenceProofs), multiplicity: 1, family: family.assessment, refined: family.refined,
     portion: own ? reading.assessment : { state: "unknown", claimIds: [] },
     portionReason: own ? null : useOwnPortion ? (reading.reason ?? "portion_required") : "user_portion_confirmation_required",
-    requiresUserPortion: !own, dismissed: false, nutritionHolds: [],
+    requiresUserPortion: !own, identityResolved: false, dismissed: false, nutritionHolds: [],
   };
 }
 
@@ -904,8 +936,12 @@ function applyDecision(model: Model, decision: UserServingDecision): string | nu
     case "set_type": {
       const slot = liveSlot(model, command.targetId);
       if (!slot) return "unknown_target";
-      if (slot.family.state === "conflict") return "family_conflict_unresolved";
+      if (slot.family.state === "conflict" && !slot.identityResolved) return "family_conflict_unresolved";
       slot.userType = command.choice;
+      const resolved = familyFromChoice(command.choice);
+      if (slot.identityResolved && slot.family.state === "conflict" && resolved) {
+        slot.family = { state: "resolved", value: resolved, proofIds: [] };
+      }
       return null;
     }
     case "set_portion": {
@@ -926,6 +962,7 @@ function applyDecision(model: Model, decision: UserServingDecision): string | nu
       if (!slot) return "unknown_target";
       slot.userPortion = command.portion;
       slot.basis = "user_declared";
+      slot.identityResolved = true;
       for (const other of rest) { const extra = model.slots.get(other); if (extra) extra.dismissed = true; }
       group.closed = "resolved";
       closeOverflow(model, group);
@@ -939,13 +976,15 @@ function applyDecision(model: Model, decision: UserServingDecision): string | nu
       const expected = sortedUnique(group.rowIds.map(rowId => `cand:${rowId}`));
       if (canonicalJson(sortedUnique(command.unitIds)) !== canonicalJson(expected)) return "target_mismatch";
       const anonymous = group.overflowOf ? model.groups.get(group.overflowOf) : undefined;
+      const sharesDecisionBoundary = group.kind === "possible_excess" && !!anonymous
+        && (anonymous.kind === "exclusive_candidates" || anonymous.kind === "family_conflict");
       const replaced = group.kind === "possible_excess" && group.overflowOf
         ? [...model.slots.values()].filter(slot => slot.sourceRowIds.length > 1 && canonicalJson(slot.sourceRowIds) === canonicalJson(sortedUnique(group.rowIds))).map(slot => slot.slotId)
         : group.slotIds;
       for (const slotId of replaced) { const slot = model.slots.get(slotId); if (slot) slot.dismissed = true; }
       // An exclusive group needs an explicit amount per serving; a single
       // possible-excess row with its own explicit amount may keep it.
-      const useOwnPortion = group.kind === "possible_excess";
+      const useOwnPortion = group.kind === "possible_excess" && !sharesDecisionBoundary;
       for (const rowId of group.rowIds) {
         const slot = userSlotFromRow(model, group.groupId, rowId, useOwnPortion);
         model.slots.set(slot.slotId, slot);
@@ -1002,14 +1041,22 @@ function applyDecisions(model: Model, decisions: readonly UserServingDecision[],
 // Projection
 // ---------------------------------------------------------------------------
 
+function familyFromChoice(choice: UserTypeChoice): FamilyValue | null {
+  if (choice === "whole") return { family: "dairy", qualifier: "whole" };
+  if (choice === "low-fat") return { family: "dairy", qualifier: "low_fat" };
+  if (choice === "oat") return { family: "oat", qualifier: null };
+  if (choice === "soy") return { family: "soy", qualifier: null };
+  return null;
+}
+
 function profileFor(slot: WorkSlot): { assessment: Assessment<ServingProfileId>; reason: string | null } {
-  // A family conflict stays unresolved. A type command must not present it as solved.
-  if (slot.family.state === "conflict") return { assessment: { state: "unknown", claimIds: slot.family.claimIds }, reason: "family_conflict" };
   if (slot.userType) {
     if (slot.userType === "other") return { assessment: { state: "unknown", claimIds: [] }, reason: "user_type_other" };
     if (slot.userType === "low-fat") return { assessment: { state: "unknown", claimIds: [] }, reason: "profile_unavailable" };
     return { assessment: { state: "resolved", value: slot.userType, proofIds: [] }, reason: null };
   }
+  // A family conflict stays unresolved until one_serving has authorised set_type.
+  if (slot.family.state === "conflict") return { assessment: { state: "unknown", claimIds: slot.family.claimIds }, reason: "family_conflict" };
   if (slot.family.state === "unknown") return { assessment: { state: "unknown", claimIds: slot.family.claimIds }, reason: "type_confirmation_required" };
   const value = slot.family.value;
   if (value.qualifier === "low_fat" || value.qualifier === "skim" || value.family === "almond" || value.family === "coconut" || value.family === "blend") {
@@ -1217,7 +1264,9 @@ export function reconcileServingEvidence(input: TypedServingInput): ServingRecon
       body: claim.body,
       polarity: claim.polarity,
       scopeId: claim.scopeId,
-      usableFor: claim.usableFor,
+      usableFor: [...claim.usableFor].sort(),
+      refusalReasons: [...claim.refusalReasons].sort(),
+      contradictsClaimIds: [...claim.contradictsClaimIds].sort(),
       source: {
         rowId: claim.source.rowId,
         field: claim.source.field,

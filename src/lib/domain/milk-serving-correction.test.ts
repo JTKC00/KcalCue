@@ -56,18 +56,19 @@ describe("A1 direct witnesses survive maximum-clique selection", () => {
   const right = milkRow("右邊玻璃杯裝牛奶", 250, { preparationMethod: "玻璃杯" });
   const blue = wholeRow("藍色圓點玻璃杯裝全脂牛奶", 400);
 
-  it("keeps the 400 ml blue-dot allocation and does not rewrite it as 250 ml", () => {
+  it("keeps the 400 ml blue-dot witness without turning it into a supported serving", () => {
     for (const order of permutations([left, right, blue])) {
       const result = scene("a1", order);
-      const allocation = slotsFor(result, blue.notes!);
-      expect(allocation).toHaveLength(1);
-      expect(allocation[0].portion).toMatchObject({ state: "resolved", value: { min: 400, max: 400, unit: "ml", purpose: "personal" } });
-      expect(allocation[0].pendingReasons).toContain("distinctness_unresolved");
-      expect(allocation[0].status).toBe("pending");
-      expect(dispositionOf(result, rowIdByNotes(result, blue.notes!)).disposition).toBe("used_as_evidence");
+      const blueId = rowIdByNotes(result, blue.notes!);
+      expect(slotsFor(result, blue.notes!)).toEqual([]);
+      expect(result.summary.supportedServingCount).toBe(2);
+      const blueDisposition = dispositionOf(result, blueId);
+      expect(blueDisposition.disposition).toBe("possible_excess");
+      expect(blueDisposition.reasonCodes).toContain("distinctness_unresolved");
+      const group = result.unresolved.find(item => item.candidateIds.includes(`cand:${blueId}`))!;
+      expect(group.amountAlternatives.some(item => item.max === 400)).toBe(true);
       expect(proposalsFor(result, blue.notes!).some(item => item.purpose === "row_personal_estimate" && item.max === 400)).toBe(true);
       expect(proposalsFor(result, blue.notes!).some(item => item.max === 250)).toBe(false);
-      expect(result.confirmed.some(unit => unit.portion.max === 250 && unit.slotIds.includes(allocation[0].slotId))).toBe(false);
       expect(result.confirmed).toHaveLength(0);
       expect(slotsFor(result, left.notes!)[0].portion).toMatchObject({ state: "resolved", value: { min: 250, max: 250 } });
       expect(slotsFor(result, right.notes!)[0].portion).toMatchObject({ state: "resolved", value: { min: 250, max: 250 } });
