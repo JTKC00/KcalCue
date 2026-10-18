@@ -650,15 +650,55 @@ export const servingReconciliationSchema = z.strictObject({
     for (const groupId of disposition.groupIds) if (!groupSet.has(groupId)) issue(`disposition references unknown group ${groupId}`);
   }
 
+  const claimIds = new Set(result.claims.map(claim => claim.claimId));
+  const entityIds = new Set(rowIds.map(rowEntityId));
+  const concreteEntityIds = (referent: { kind: string; entityId?: string; possibleEntityIds?: readonly string[] }) => {
+    if (referent.kind === "entity" && referent.entityId) return [referent.entityId];
+    if (referent.kind === "unbound") return [...(referent.possibleEntityIds ?? [])];
+    return [];
+  };
+  const checkReferent = (referent: { kind: string; entityId?: string; possibleEntityIds?: readonly string[] } | "scene", label: string) => {
+    if (referent === "scene" || referent.kind === "population") return;
+    for (const id of concreteEntityIds(referent)) {
+      if (!entityIds.has(id)) issue(`${label} references unknown entity ${id}`);
+    }
+  };
   for (const claim of result.claims) {
     if (claim.source.sceneId !== result.sceneId) issue(`claim ${claim.claimId} belongs to another scene`);
     if (claim.source.rowId !== undefined && !rowSet.has(claim.source.rowId)) {
       issue(`claim ${claim.claimId} cites unknown row`);
     }
+    for (const id of claim.contradictsClaimIds) {
+      if (!claimIds.has(id)) issue(`claim ${claim.claimId} contradicts unknown claim ${id}`);
+    }
+    const body = claim.body;
+    if (body.predicate === "presence" || body.predicate === "family" || body.predicate === "vessel") checkReferent(body.subject, claim.claimId);
+    else if (body.predicate === "spatial") {
+      checkReferent(body.subject, claim.claimId);
+      if (body.relativeTo !== "scene") checkReferent(body.relativeTo, claim.claimId);
+    } else if (body.predicate === "contains") {
+      checkReferent(body.vessel, claim.claimId);
+      checkReferent(body.contentEntity, claim.claimId);
+    } else if (body.predicate === "same_vessel" || body.predicate === "different_vessel") {
+      checkReferent(body.left, claim.claimId);
+      checkReferent(body.right, claim.claimId);
+    } else if (body.predicate === "cardinality") checkReferent(body.population, claim.claimId);
+    else if (body.predicate === "quantity") {
+      checkReferent(body.proposal.target, claim.claimId);
+      for (const id of body.proposal.claimIds) if (!claimIds.has(id)) issue(`quantity cites unknown claim ${id}`);
+    } else if (body.predicate === "stock_transfer") {
+      checkReferent(body.from, claim.claimId);
+      checkReferent(body.into, claim.claimId);
+    }
   }
 
   for (const candidate of result.candidates) {
     for (const rowId of candidate.rowIds) if (!rowSet.has(rowId)) issue(`candidate cites unknown row ${rowId}`);
+    checkReferent(candidate.referent, candidate.candidateId);
+    for (const proposal of candidate.quantityProposals) {
+      checkReferent(proposal.target, candidate.candidateId);
+      for (const id of proposal.claimIds) if (!claimIds.has(id)) issue(`candidate quantity cites unknown claim ${id}`);
+    }
   }
 
   const confirmedSlots = new Set<string>();
@@ -667,6 +707,14 @@ export const servingReconciliationSchema = z.strictObject({
       const slot = result.supportedSlots.find(item => item.slotId === slotId);
       if (!slot) issue(`confirmed unit references unknown slot ${slotId}`);
       else if (slot.status !== "confirmed") issue(`confirmed unit references ${slot.status} slot ${slotId}`);
+      else {
+        if (slot.multiplicity !== unit.multiplicity) issue(`confirmed unit multiplicity does not match slot ${slotId}`);
+        if (slot.portion.state !== "resolved") issue(`confirmed unit references unresolved portion on ${slotId}`);
+        else if (slot.portion.value.min !== unit.portion.min || slot.portion.value.max !== unit.portion.max
+          || slot.portion.value.unit !== unit.portion.unit || slot.portion.value.purpose !== unit.portion.purpose) {
+          issue(`confirmed unit portion does not match slot ${slotId}`);
+        }
+      }
       confirmedSlots.add(slotId);
     }
   }
@@ -698,6 +746,21 @@ export const servingReconciliationSchema = z.strictObject({
     issue("summary pending count mismatch");
   }
   if (result.decisionRevision !== result.acceptedDecisions.length) issue("decision revision mismatch");
+  result.acceptedDecisions.forEach((decision, index) => {
+    if (decision.expectedDecisionRevision !== index) issue(`decision ${decision.decisionId} has a stale revision`);
+    const command = decision.command;
+    if (command.kind === "set_type" && !slotSet.has(command.targetId)) issue(`decision ${decision.decisionId} targets an unknown slot`);
+    if (command.kind === "set_portion" && !slotSet.has(command.unitId)) issue(`decision ${decision.decisionId} targets an unknown slot`);
+    // one_serving, dismiss and separate consume their group, so it leaves `unresolved`.
+    // exclude_option keeps the group open and must still name it.
+    if (command.kind === "exclude_option" && !groupSet.has(command.groupId)) {
+      issue(`decision ${decision.decisionId} targets an unknown group`);
+    }
+    if (command.kind === "separate_servings") {
+      for (const unitId of command.unitIds) if (!candidateSet.has(unitId)) issue(`decision ${decision.decisionId} targets an unknown candidate`);
+    }
+    if (command.kind === "undo") issue(`decision ${decision.decisionId} cannot store an undo as an accepted resolution`);
+  });
 });
 
 export function validateServingReconciliation(value: unknown): ServingReconciliation {

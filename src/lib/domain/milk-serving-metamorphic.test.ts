@@ -128,11 +128,15 @@ function rowsOf(truth: TruthCase, english = false): ObservedFood[] {
   return shuffle(rng, rows);
 }
 
-/** Oracle from the typed truth only. */
+/**
+ * Oracle from the typed truth only.
+ * Explicit whole milk can enter the confirmed plan. Oat and soy stay pending
+ * until a user type choice; the plan must not infer those profiles from the model name.
+ */
 function expectedPlan(truth: TruthCase) {
-  const profile = (family: Family) => family;
   return truth.anchors
-    .map(anchor => ({ profileId: profile(anchor.family), min: anchor.ml, max: anchor.ml, unit: "ml" as const, purpose: "personal" as const, multiplicity: 1 }))
+    .filter(anchor => anchor.family === "whole")
+    .map(anchor => ({ profileId: "whole" as const, min: anchor.ml, max: anchor.ml, unit: "ml" as const, purpose: "personal" as const, multiplicity: 1 }))
     .sort((a, b) => (canonicalJson(a) < canonicalJson(b) ? -1 : 1));
 }
 
@@ -216,9 +220,9 @@ describe("recorded minimal counterexamples", { timeout: 60_000 }, () => {
     const result = solve("cx-12703863", [x, { ...x }, y, { ...y }]);
     expect(result.summary.supportedServingCount).toBe(2);
     expect(confirmedPortionPlan(result)).toEqual([
-      { profileId: "oat", min: 200, max: 200, unit: "ml", purpose: "personal", multiplicity: 1 },
       { profileId: "whole", min: 300, max: 300, unit: "ml", purpose: "personal", multiplicity: 1 },
     ]);
+    expect(result.supportedSlots.find(slot => slot.family.state === "resolved" && slot.family.value.family === "oat")?.pendingReasons).toContain("type_confirmation_required");
     expect(permutations([x, { ...x }, y, { ...y }]).every(order =>
       canonicalJson(semanticDecisionView(solve("cx-12703863", order))) === canonicalJson(semanticDecisionView(result)))).toBe(true);
   });
@@ -246,10 +250,17 @@ describe("independent review fixture shapes under the new contract", { timeout: 
   });
 
   for (const text of ["沒三盒燕麥奶", "看不到三盒燕麥奶", "沒有三盒燕麥奶", "唔係三盒燕麥奶", "no three oat milk cartons", "cannot see three oat milk cartons", "未确认三盒燕麦奶"]) {
-    it(`negated count ${text} keeps one oat slot (116.0243653957 kcal)`, () => {
-      const result = solve("rv-g3", [oatRow(), oatRow(), oatRow()], [text]);
+    it(`negated count ${text} keeps one oat slot pending type choice`, () => {
+      const rows = [oatRow(), oatRow(), oatRow()];
+      const result = solve("rv-g3", rows, [text]);
       expect(result.summary.supportedServingCount).toBe(1);
-      expect(kcalMax(result)).toBeCloseTo(116.0243653957, 8);
+      expect(result.confirmed).toHaveLength(0);
+      const slot = result.supportedSlots.find(item => item.status === "pending")!;
+      const chosen = validateServingReconciliation(reconcileMilkServingScene({
+        sceneId: "rv-g3", analysis: analysis(rows, [text]),
+        decisions: decisions(result, [{ kind: "set_type", targetId: slot.slotId, choice: "oat" }]),
+      }));
+      expect(kcalMax(chosen)).toBeCloseTo(116.0243653957, 8);
     });
   }
 
@@ -263,14 +274,16 @@ describe("independent review fixture shapes under the new contract", { timeout: 
   it("review thread 2: carton 'not the same glass' does not bind; oat + whole glass = 273.0993653957 kcal", () => {
     const result = solve("rv-t2", [oatRow("紙盒燕麥奶 not the same glass"), oatRow("紙盒燕麥奶"), wholeRow("獨立全脂牛奶玻璃杯", 250)]);
     expect(result.summary.supportedServingCount).toBe(2);
-    expect(kcalMax(result)).toBeCloseTo(273.0993653957, 8);
+    expect(result.confirmed).toHaveLength(1);
+    expect(kcalMax(result)).toBeCloseTo(157.075, 8);
   });
 
   it("physical glass evidence outranks an ambiguous same-family row: whole400 + oat250 = 367.3443653957 kcal", () => {
     const rows = [wholeRow("白色飲品", 250, { preparationMethod: undefined }), wholeRow("玻璃杯邊緣有藍色圓點，確認400ml", 400), oatRow()];
     for (const order of permutations(rows)) {
       const result = solve("rv-c2", order);
-      expect(kcalMax(result)).toBeCloseTo(367.3443653957, 8);
+      expect(kcalMax(result)).toBeCloseTo(251.32, 8);
+      expect(result.supportedSlots.some(slot => slot.family.state === "resolved" && slot.family.value.family === "oat" && slot.pendingReasons.includes("type_confirmation_required"))).toBe(true);
       expect(dispositionOf(result, rowIdByNotes(result, "白色飲品")).disposition).toBe("possible_excess");
     }
   });
@@ -286,7 +299,9 @@ describe("independent review fixture shapes under the new contract", { timeout: 
     const result = solve("rv-c4-oat", [glass, back, oatRow()]);
     expect(dispositionOf(result, rowIdByNotes(result, glass.notes!)).disposition).toBe("used_as_evidence");
     expect(result.summary.supportedServingCount).toBe(2);
-    expect(dispositionOf(result, rowIdByNotes(result, back.notes!)).disposition).toBe("alternative");
+    const backDisposition = dispositionOf(result, rowIdByNotes(result, back.notes!));
+    expect(backDisposition.disposition).toBe("possible_excess");
+    expect(backDisposition.reasonCodes).toContain("unknown_possible_reference");
   });
 
   it("exhaustive 7-row permutation invariance on a mixed scene (5040 orders)", () => {
@@ -590,7 +605,10 @@ describe("design challenge cases", { timeout: 60_000 }, () => {
   it("#18 carton250 + glass250 + unbound 900 ml row: two units, 900 pending", () => {
     const rows = [oatRow("燕麥奶紙盒"), oatRow("獨立玻璃杯燕麥奶", 250, { preparationMethod: "玻璃杯" }), oatRow("白色飲品", 900, { preparationMethod: undefined })];
     const result = stable("ch18", rows);
-    expect(confirmedPortionPlan(result).map(line => line.max)).toEqual([250, 250]);
+    expect(result.confirmed).toHaveLength(0);
+    expect(result.supportedSlots.filter(slot => slot.status !== "dismissed").map(slot =>
+      slot.portion.state === "resolved" ? slot.portion.value.max : null).sort()).toEqual([250, 250]);
+    expect(result.supportedSlots.filter(slot => slot.status !== "dismissed").every(slot => slot.pendingReasons.includes("type_confirmation_required"))).toBe(true);
     expect(dispositionOf(result, rowIdByNotes(result, "白色飲品")).disposition).toBe("possible_excess");
   });
 
@@ -627,7 +645,11 @@ describe("design challenge cases", { timeout: 60_000 }, () => {
 
   it("#24 1 L stock poured into a glass: only the glass portion counts", () => {
     const result = stable("ch24", [oatRow("1L燕麥奶紙盒，倒了180ml到玻璃杯", null), oatRow("玻璃杯燕麥奶", 180, { preparationMethod: "玻璃杯" })]);
-    expect(confirmedPortionPlan(result)).toEqual([{ profileId: "oat", min: 180, max: 180, unit: "ml", purpose: "personal", multiplicity: 1 }]);
+    expect(result.confirmed).toHaveLength(0);
+    expect(result.summary.supportedServingCount).toBe(1);
+    const glass = result.supportedSlots.find(slot => slot.status !== "dismissed")!;
+    expect(glass.portion).toMatchObject({ state: "resolved", value: { min: 180, max: 180, purpose: "personal" } });
+    expect(glass.pendingReasons).toContain("type_confirmation_required");
   });
 
   it("#25 an empty milk carton is not another serving witness", () => {

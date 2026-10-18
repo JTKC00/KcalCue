@@ -257,7 +257,10 @@ describe("typed reconciliation: contents, family, stock", () => {
     ]);
     expect(result.summary.supportedServingCount).toBe(1);
     expect(disposition(result, "glass").disposition).toBe("used_as_evidence");
-    expect(confirmedPortionPlan(result)).toEqual([{ profileId: "oat", min: 180, max: 180, unit: "ml", purpose: "personal", multiplicity: 1 }]);
+    expect(result.confirmed).toHaveLength(0);
+    const glassSlot = result.supportedSlots.find(slot => slot.sourceCandidateIds.includes("cand:glass") && slot.status !== "dismissed")!;
+    expect(glassSlot.portion).toMatchObject({ state: "resolved", value: { min: 180, max: 180, purpose: "personal" } });
+    expect(glassSlot.pendingReasons).toContain("type_confirmation_required");
   });
 });
 
@@ -338,7 +341,8 @@ describe("typed reconciliation: cardinality polarity and barriers", () => {
     const result = run(threeOat(), [...oatWitnesses(),
       claim({ predicate: "cardinality", population: pop("oat", "carton"), relation: "exact", count: 3 }, ["count"])]);
     expect(result.summary.supportedServingCount).toBe(3);
-    expect(confirmedPortionPlan(result)).toHaveLength(3);
+    expect(result.confirmed).toHaveLength(0);
+    expect(result.supportedSlots.filter(slot => slot.status !== "dismissed").every(slot => slot.pendingReasons.includes("type_confirmation_required"))).toBe(true);
   });
 
   for (const polarity of ["negative", "questioned", "uncertain", "contradictory"] as const) {
@@ -626,8 +630,12 @@ describe("P1-D unknown subgroup: a genuine oat glass does not release an ambiguo
   it("before: one supported carton serving, unknown row possible excess (116.0243653957 kcal)", () => {
     const result = scene("p1-d-before", [carton, unknown]);
     expect(result.summary.supportedServingCount).toBe(1);
+    expect(result.confirmed).toHaveLength(0);
     expect(dispositionOf(result, rowIdByNotes(result, unknown.notes!)).disposition).toBe("possible_excess");
-    expectTotals(result, { kcal: 116.0243653957 });
+    const typed = decide("p1-d-before", [carton, unknown], result, [
+      { kind: "set_type", targetId: slotForRow(result, carton.notes!), choice: "oat" },
+    ]);
+    expectTotals(typed, { kcal: 116.0243653957 });
   });
 
   for (const [index, order] of permutations([carton, unknown, glass]).entries()) {
@@ -666,9 +674,13 @@ describe("P1-E unmarked questions and negation never confirm three servings", ()
     it(`one anonymous slot and two possible excess: ${phrase}`, () => {
       const result = scene("p1-e", rows, [phrase]);
       expect(result.summary.supportedServingCount).toBe(1);
+      expect(result.confirmed).toHaveLength(0);
       for (const row of result.rows) expect(dispositionOf(result, row.rowId).disposition).toBe("alternative");
       expect(result.unresolved.find(group => group.kind === "possible_excess")?.possibleExtraSlots).toBe(2);
-      expectTotals(result, { kcal: 116.0243653957, protein: 1.7016906925, carbs: 13.8455742706, fat: 6.0074838083 });
+      const typed = decide("p1-e", rows, result, [
+        { kind: "set_type", targetId: result.supportedSlots.find(slot => slot.status === "pending")!.slotId, choice: "oat" },
+      ], [phrase]);
+      expectTotals(typed, { kcal: 116.0243653957, protein: 1.7016906925, carbs: 13.8455742706, fat: 6.0074838083 });
     });
   }
 
@@ -678,7 +690,8 @@ describe("P1-E unmarked questions and negation never confirm three servings", ()
     it(`preserves the positive count ${phrase} -> ${count}`, () => {
       const result = scene("p1-e-pos", rows, [phrase]);
       expect(result.summary.supportedServingCount).toBe(count);
-      expect(result.confirmed).toHaveLength(count);
+      expect(result.confirmed).toHaveLength(0);
+      expect(result.supportedSlots.filter(slot => slot.status !== "dismissed")).toHaveLength(count);
     });
   }
 
@@ -769,6 +782,13 @@ describe("decision commands: binding, staleness and idempotence", () => {
       { kind: "separate_servings", groupId: excess.groupId, unitIds: excess.candidateIds },
     ]);
     expect(result.summary.supportedServingCount).toBe(2);
-    expectTotals(result, { kcal: 232.0487307914 });
+    expect(result.confirmed).toHaveLength(0);
+    const typed = decide("cmd-d", [carton, unknown], current, [
+      { kind: "separate_servings", groupId: excess.groupId, unitIds: excess.candidateIds },
+      ...result.supportedSlots.filter(slot => slot.status !== "dismissed").map(slot => (
+        { kind: "set_type" as const, targetId: slot.slotId, choice: "oat" as const }
+      )),
+    ]);
+    expectTotals(typed, { kcal: 232.0487307914 });
   });
 });

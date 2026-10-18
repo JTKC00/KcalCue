@@ -483,6 +483,8 @@ interface RowState {
   countSeen: boolean;
   aggregateSeen: boolean;
   hasDrinkWitnessText: boolean;
+  /** Millilitres the notes semantically classified as package capacity. */
+  capacityAmounts: number[];
 }
 
 function interpretLabel(sink: ClaimSink, row: ObservedFoodRow, state: RowState) {
@@ -554,8 +556,20 @@ function interpretOwnClause(sink: ClaimSink, row: ObservedFoodRow, state: RowSta
   const drink = contentFamily !== null || DRINK_WORD.test(text);
   const stock = STOCK_MARKER.test(text);
 
+  // Nearby clauses never rewrite this row's count or portion basis.
+  if (relative) {
+    if (drink && vessel && polarity === "affirmative") {
+      sink.add(source("nearby_drink_object"), { predicate: "presence", subject: UNBOUND, content: contentFamily ? "milk" : "white_drink" },
+        polarity, [], ["unbound_referent"]);
+      if (contentFamily) {
+        sink.add(source("nearby_drink_family"), { predicate: "family", subject: UNBOUND, ...contentFamily }, polarity, [], ["unbound_referent"]);
+      }
+    }
+    return;
+  }
+
   // Counts first: a count clause never also describes the row's own vessel.
-  const count = findCount(text, !relative && !nonDrink);
+  const count = findCount(text, !nonDrink);
   if (count && count.count >= 2 && !quoted) {
     const remainder = remainderAfter(text, count);
     const aggregate = AGGREGATE_MARKER.test(text);
@@ -563,8 +577,8 @@ function interpretOwnClause(sink: ClaimSink, row: ObservedFoodRow, state: RowSta
     const aggregateProduction = aggregate && amount !== null &&
       remainder.replace(AGGREGATE_MARKER, "").replace(AMOUNT, "").replace(/飲用了|飲了|喝了|饮用了|饮了|飲用|喝|\b(?:drank|consumed)\b/g, "").replace(/[\s。.]+/g, "") === "";
     const full = remainder === "" || aggregateProduction;
-    const admitted = polarity === "affirmative" && !doubleNegation && full && !relative && !nonDrink;
-    state.countSeen = true;
+    const admitted = polarity === "affirmative" && !doubleNegation && full && !nonDrink;
+    if (admitted) state.countSeen = true;
     if (aggregateProduction && admitted) {
       state.aggregateSeen = true;
       sink.add(source("row_aggregate_count"), { predicate: "cardinality", population: own(rowId), relation: "exact", count: count.count },
@@ -593,25 +607,23 @@ function interpretOwnClause(sink: ClaimSink, row: ObservedFoodRow, state: RowSta
     return;
   }
 
-  // Nearby objects never bind to the row's own subject.
-  if (relative) {
-    if (drink && vessel && polarity === "affirmative") {
-      sink.add(source("nearby_drink_object"), { predicate: "presence", subject: UNBOUND, content: contentFamily ? "milk" : "white_drink" },
-        polarity, [], ["unbound_referent"]);
-      if (contentFamily) {
-        sink.add(source("nearby_drink_family"), { predicate: "family", subject: UNBOUND, ...contentFamily }, polarity, [], ["unbound_referent"]);
-      }
-    }
-    return;
-  }
-
   const prepClasses = new Set([...state.ownVessels].map(vesselClass));
   const conflictingVessel = vessel !== null && prepClasses.size > 0 && !prepClasses.has(vesselClass(vessel));
 
-  // A pour from this row's package describes stock, never the row's own serving.
+  // A pour names the stock container and, when present, the personal amount that left it.
   if (stock) {
     if (polarity === "affirmative") {
       sink.add(source("stock_transfer"), { predicate: "stock_transfer", from: own(rowId), into: UNBOUND }, polarity, ["separate_identity"]);
+      for (const amount of amountsIn(text)) {
+        if (amount.capacity) state.capacityAmounts.push(amount.ml);
+        sink.add(source(amount.capacity ? "stock_capacity" : "poured_personal_amount"), {
+          predicate: "quantity",
+          proposal: {
+            proposalId: "", target: own(rowId), min: amount.ml, max: amount.ml, unit: "ml",
+            purpose: amount.capacity ? "package_capacity" : "row_personal_estimate", claimIds: [],
+          },
+        }, polarity, amount.capacity ? [] : ["portion"], amount.capacity ? ["package_capacity_not_intake"] : []);
+      }
     }
     return;
   }
@@ -674,6 +686,7 @@ function interpretOwnClause(sink: ClaimSink, row: ObservedFoodRow, state: RowSta
     const capacity = CAPACITY_MARKER.test(text) || /^(?:l|公升|升|litres?|liters?)$/.test(amount[2]);
     const purpose: QuantityPurpose = capacity ? "package_capacity" : AGGREGATE_MARKER.test(text) ? "aggregate_consumed" : "row_personal_estimate";
     const usable = purpose === "row_personal_estimate" || purpose === "aggregate_consumed";
+    if (purpose === "package_capacity") state.capacityAmounts.push(ml);
     if (purpose === "aggregate_consumed") state.aggregateSeen = true;
     sink.add(source("note_amount"), {
       predicate: "quantity",
@@ -699,8 +712,23 @@ function interpretUncertainField(sink: ClaimSink, text: string, field: ClaimFiel
   }
 }
 
+function amountsIn(text: string): Array<{ ml: number; capacity: boolean }> {
+  const flags = AMOUNT.flags.includes("g") ? AMOUNT.flags : `${AMOUNT.flags}g`;
+  const pattern = new RegExp(AMOUNT.source, flags);
+  const found: Array<{ ml: number; capacity: boolean }> = [];
+  for (const match of text.matchAll(pattern)) {
+    const unit = match[2] ?? "";
+    const ml = toMillilitres(Number(match[1]), unit);
+    const capacity = CAPACITY_MARKER.test(text) || /^(?:l|公升|升|litres?|liters?)$/.test(unit);
+    found.push({ ml, capacity });
+  }
+  return found;
+}
+
 function interpretRow(sink: ClaimSink, row: ObservedFoodRow) {
-  const state: RowState = { ownVessels: new Set(), countSeen: false, aggregateSeen: false, hasDrinkWitnessText: false };
+  const state: RowState = {
+    ownVessels: new Set(), countSeen: false, aggregateSeen: false, hasDrinkWitnessText: false, capacityAmounts: [],
+  };
   interpretLabel(sink, row, state);
   interpretPreparation(sink, row, state);
   if (row.raw.notes) {
@@ -716,7 +744,11 @@ function interpretRow(sink: ClaimSink, row: ObservedFoodRow) {
   for (const reason of row.raw.uncertaintyReasons) interpretUncertainField(sink, reason, "uncertaintyReasons", row.rowId);
 
   const { portionMin, portionMax, unit } = row.raw;
-  const purpose: QuantityPurpose = state.countSeen ? (state.aggregateSeen ? "aggregate_consumed" : "unknown") : "row_personal_estimate";
+  const matchesCapacity = portionMin !== null && portionMax !== null && portionMin === portionMax
+    && unit === "ml" && state.capacityAmounts.some(ml => ml === portionMin);
+  const purpose: QuantityPurpose = matchesCapacity
+    ? "package_capacity"
+    : state.countSeen ? (state.aggregateSeen ? "aggregate_consumed" : "unknown") : "row_personal_estimate";
   const known = portionMin !== null && portionMax !== null;
   const usable = known && (purpose === "row_personal_estimate" || purpose === "aggregate_consumed");
   sink.add({ rowId: row.rowId, field: "portion", span: [0, 0], rule: "structured_portion" }, {
