@@ -204,6 +204,7 @@ export interface SupportedServingSlot {
 
 export interface ConfirmedServing {
   unitId: Id;
+  /** Exactly one owned slot in V1. Aggregate servings use that slot's multiplicity. */
   slotIds: readonly Id[];
   profileId: ServingProfileId;
   milkTypeChoice?: UserTypeChoice;
@@ -275,7 +276,9 @@ export interface RejectedDecision {
 }
 
 export interface ServingSummary {
+  /** Physical servings supported by all non-dismissed slots, including pending. */
   supportedServingCount: number;
+  /** V1 compatibility name: accounting units, NOT sum of their multiplicities. */
   confirmedServingCount: number;
   pendingSlotCount: number;
   unresolvedGroupCount: number;
@@ -534,7 +537,9 @@ const slotSchema = z.strictObject({
 
 const confirmedSchema = z.strictObject({
   unitId: idSchema,
-  slotIds: z.array(idSchema).min(1),
+  // The engine emits one accounting unit per slot. Multiple physical servings
+  // with an aggregate consumed amount belong to one slot with multiplicity.
+  slotIds: z.array(idSchema).length(1),
   profileId: z.enum(servingProfileIds),
   milkTypeChoice: z.enum(userTypeChoices).optional(),
   portion: resolvedPortionSchema,
@@ -637,6 +642,7 @@ export const servingReconciliationSchema = z.strictObject({
   for (const [label, ids] of [
     ["row", rowIds], ["claim", result.claims.map(claim => claim.claimId)], ["candidate", candidateIds],
     ["slot", slotIds], ["group", groupIds], ["unit", result.confirmed.map(unit => unit.unitId)],
+    ["accepted decision", result.acceptedDecisions.map(decision => decision.decisionId)],
   ] as const) {
     for (const repeated of duplicates(ids)) issue(`duplicate ${label} id ${repeated}`);
   }
@@ -727,6 +733,8 @@ export const servingReconciliationSchema = z.strictObject({
   const confirmedSlots = new Set<string>();
   for (const unit of result.confirmed) {
     for (const slotId of unit.slotIds) {
+      if (confirmedSlots.has(slotId)) issue(`confirmed slot ${slotId} is consumed more than once`);
+      confirmedSlots.add(slotId);
       const slot = result.supportedSlots.find(item => item.slotId === slotId);
       if (!slot) issue(`confirmed unit references unknown slot ${slotId}`);
       else if (slot.status !== "confirmed") issue(`confirmed unit references ${slot.status} slot ${slotId}`);
@@ -748,7 +756,6 @@ export const servingReconciliationSchema = z.strictObject({
       }
       requireClaims(unit.proofIds, unit.unitId);
       requireClaims(unit.portion.proofIds, unit.unitId);
-      confirmedSlots.add(slotId);
     }
   }
   for (const slot of result.supportedSlots) {
@@ -847,10 +854,12 @@ export interface ConfirmedPortionLine {
 
 /**
  * Sorted list of eligible confirmed portions. This is the only input a later
- * nutrition integration may read; pending slots never appear here.
+ * nutrition integration may read; pending slots never appear here. Revalidate
+ * at this boundary: a TypeScript type cannot guarantee ownership at runtime.
+ * Invalid results throw, rather than being repaired or silently deduplicated.
  */
 export function confirmedPortionPlan(result: ServingReconciliation): ConfirmedPortionLine[] {
-  return result.confirmed
+  return validateServingReconciliation(result).confirmed
     .map(unit => ({
       profileId: unit.profileId,
       min: unit.portion.min,
