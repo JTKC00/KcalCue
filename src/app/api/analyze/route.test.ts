@@ -729,13 +729,18 @@ describe("POST /api/analyze", () => {
       },
     );
 
-    it("executes shadow comparison on raw provider output when KCALCUE_QA_SERVING_SHADOW=1 without changing legacy response, provider calls, or quota", async () => {
+    it("executes shadow comparison on raw provider output when KCALCUE_QA_SERVING_SHADOW=1 and QA allowlist matches, without changing legacy response, provider calls, or quota", async () => {
       const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       analyzeImage.mockResolvedValueOnce(c3Run1SingleOatCartonAnalysis);
       const disabledResponse = await POST(jpegRequest());
       const disabledBody = await disabledResponse.json();
 
       vi.stubEnv(QA_SERVING_SHADOW_ENV, "1");
+      vi.stubEnv(QA_SHADOW_ALLOWED_EMAILS_ENV, "qa-tester@example.com");
+      authorize.mockResolvedValueOnce({
+        db: { fixture: true },
+        user: { id: "test-user", email: "qa-tester@example.com" },
+      });
       analyzeImage.mockClear();
       vi.mocked(reserveDailyLiveAnalysis).mockClear();
       errorSpy.mockClear();
@@ -765,10 +770,47 @@ describe("POST /api/analyze", () => {
       const serialized = JSON.stringify(shadowLogCalls);
       expect(serialized).not.toContain("OATLY");
       expect(serialized).not.toContain("test-user");
+      expect(serialized).not.toContain("qa-tester@example.com");
     });
 
-    it("never runs shadow comparison in demo mode, on unauthorized requests, or for non-QA users", async () => {
+    it("fails closed when KCALCUE_QA_SHADOW_ALLOWED_EMAILS is missing, empty, malformed, or not a subset of KCALCUE_ALLOWED_EMAILS, while keeping normal analysis 200 OK", async () => {
       vi.stubEnv(QA_SERVING_SHADOW_ENV, "1");
+      const compareSpy = vi.spyOn(shadowComparatorModule, "compareMilkServingShadow");
+
+      for (const badAllowlist of [undefined, "", "   ", "not-an-email", "qa-only@example.com,bad"]) {
+        if (badAllowlist === undefined) {
+          delete process.env[QA_SHADOW_ALLOWED_EMAILS_ENV];
+        } else {
+          vi.stubEnv(QA_SHADOW_ALLOWED_EMAILS_ENV, badAllowlist);
+        }
+        authorize.mockResolvedValueOnce({
+          db: { fixture: true },
+          user: { id: "qa-user", email: "qa-only@example.com" },
+        });
+        analyzeImage.mockResolvedValueOnce(c3Run1SingleOatCartonAnalysis);
+        const res = await POST(jpegRequest());
+        expect(res.status).toBe(200);
+        expect(compareSpy).not.toHaveBeenCalled();
+      }
+
+      // Subset violation against KCALCUE_ALLOWED_EMAILS fails closed
+      clearRateLimitStore();
+      vi.mocked(acquireLiveAnalysis).mockReset().mockImplementation(createLiveAnalysisAdmission());
+      vi.stubEnv("KCALCUE_ALLOWED_EMAILS", "trial-user@example.com");
+      vi.stubEnv(QA_SHADOW_ALLOWED_EMAILS_ENV, "qa-only@example.com");
+      authorize.mockResolvedValueOnce({
+        db: { fixture: true },
+        user: { id: "qa-user", email: "qa-only@example.com" },
+      });
+      analyzeImage.mockResolvedValueOnce(c3Run1SingleOatCartonAnalysis);
+      const subsetFailRes = await POST(jpegRequest());
+      expect(subsetFailRes.status).toBe(200);
+      expect(compareSpy).not.toHaveBeenCalled();
+    });
+
+    it("never runs shadow comparison in demo mode, on unauthorized requests, for non-QA users, or on forged client headers/form fields", async () => {
+      vi.stubEnv(QA_SERVING_SHADOW_ENV, "1");
+      vi.stubEnv(QA_SHADOW_ALLOWED_EMAILS_ENV, "qa-only@example.com");
       const compareSpy = vi.spyOn(shadowComparatorModule, "compareMilkServingShadow");
 
       // 1. Demo mode
@@ -785,18 +827,31 @@ describe("POST /api/analyze", () => {
       expect(unauthRes.status).toBe(401);
       expect(compareSpy).not.toHaveBeenCalled();
 
-      // 3. Non-QA authenticated user when KCALCUE_QA_SHADOW_ALLOWED_EMAILS is set
-      vi.stubEnv(QA_SHADOW_ALLOWED_EMAILS_ENV, "qa-only@example.com");
+      // 3. Non-QA authenticated user + forged client identity headers & form fields
       authorize.mockResolvedValueOnce({
         db: { fixture: true },
         user: { id: "regular-trial-user", email: "regular@example.com" },
       });
       analyzeImage.mockResolvedValueOnce(demoFoodAnalysis);
-      const nonQaRes = await POST(jpegRequest());
+      const forgedForm = new FormData();
+      forgedForm.set("image", new File([Uint8Array.from([0xff, 0xd8, 0xff, 0xd9])], "meal.jpg", { type: "image/jpeg" }));
+      forgedForm.set("userEmail", "qa-only@example.com");
+      forgedForm.set("email", "qa-only@example.com");
+      const nonQaRes = await POST(
+        new Request("http://localhost/api/analyze", {
+          method: "POST",
+          headers: {
+            "x-user-email": "qa-only@example.com",
+            "x-qa-email": "qa-only@example.com",
+            "x-forwarded-user": "qa-only@example.com",
+          },
+          body: forgedForm,
+        }),
+      );
       expect(nonQaRes.status).toBe(200);
       expect(compareSpy).not.toHaveBeenCalled();
 
-      // 4. Authorized QA user when KCALCUE_QA_SHADOW_ALLOWED_EMAILS matches
+      // 4. Authorized QA user when KCALCUE_QA_SHADOW_ALLOWED_EMAILS matches (case-insensitive)
       authorize.mockResolvedValueOnce({
         db: { fixture: true },
         user: { id: "qa-user", email: "QA-Only@example.com" },
@@ -809,6 +864,11 @@ describe("POST /api/analyze", () => {
 
     it("preserves 200 OK live analysis response and redacts errors when the shadow engine throws", async () => {
       vi.stubEnv(QA_SERVING_SHADOW_ENV, "1");
+      vi.stubEnv(QA_SHADOW_ALLOWED_EMAILS_ENV, "qa-only@example.com");
+      authorize.mockResolvedValueOnce({
+        db: { fixture: true },
+        user: { id: "qa-user", email: "qa-only@example.com" },
+      });
       const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       vi.spyOn(shadowComparatorModule, "compareMilkServingShadow").mockImplementationOnce(() => {
         throw new Error("PRIVATE_CANARY_SHADOW_THROW_MESSAGE");

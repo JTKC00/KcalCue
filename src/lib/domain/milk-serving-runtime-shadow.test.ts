@@ -18,7 +18,9 @@ import {
 import {
   evaluateRuntimeShadowEligibility,
   getRuntimeShadowMemoryCounters,
+  isQaShadowPrincipalEligible,
   MAX_RUNTIME_SHADOW_ENCODED_BYTES,
+  parseAllowedQaEmails,
   QA_SERVING_SHADOW_ENV,
   QA_SHADOW_ALLOWED_EMAILS_ENV,
   qaServingShadowEnabled,
@@ -26,6 +28,7 @@ import {
   RUNTIME_SHADOW_LOG_TAG,
   RUNTIME_SHADOW_SCENE_ID,
   runMilkServingRuntimeShadow,
+  TRIAL_ALLOWED_EMAILS_ENV,
 } from "@/lib/domain/milk-serving-runtime-shadow";
 import {
   analysis,
@@ -105,34 +108,128 @@ describe("milk-serving-runtime-shadow adapter (Gate C)", () => {
       expect(getRuntimeShadowMemoryCounters().attempted).toBe(0);
     });
 
-    it("enables only when KCALCUE_QA_SERVING_SHADOW is exact '1', mode is 'live', and principal is authenticated", () => {
+    it("fails closed when KCALCUE_QA_SHADOW_ALLOWED_EMAILS is missing, empty, malformed, or not a subset of KCALCUE_ALLOWED_EMAILS", () => {
+      for (const invalidAllowlist of [
+        undefined,
+        "",
+        "   ",
+        ",",
+        "not-an-email",
+        "qa@example.com, invalid-email",
+        "qa@example.com,",
+        ",qa@example.com",
+        Array.from({ length: 11 }, (_, idx) => `qa-${idx}@example.com`).join(","),
+      ]) {
+        const env: NodeJS.ProcessEnv = {
+          NODE_ENV: "test",
+          [QA_SERVING_SHADOW_ENV]: "1",
+        };
+        if (invalidAllowlist !== undefined) {
+          env[QA_SHADOW_ALLOWED_EMAILS_ENV] = invalidAllowlist;
+        }
+
+        expect(parseAllowedQaEmails(env)).toBeNull();
+        expect(
+          isQaShadowPrincipalEligible(
+            { userId: "qa-user-1", userEmail: "qa@example.com" },
+            env,
+          ),
+        ).toBe(false);
+        expect(
+          evaluateRuntimeShadowEligibility(
+            { mode: "live", userId: "qa-user-1", userEmail: "qa@example.com" },
+            env,
+          ),
+        ).toEqual({ eligible: false, reason: "ineligible" });
+
+        const result = runMilkServingRuntimeShadow({
+          rawAnalysis: c3Run1SingleOatCartonAnalysis,
+          mode: "live",
+          userId: "qa-user-1",
+          userEmail: "qa@example.com",
+          env,
+        });
+        expect(result).toEqual({
+          executed: false,
+          skippedReason: "ineligible",
+          diagnostic: null,
+          durationMs: 0,
+        });
+      }
+
+      // Subset violation: QA email not present in KCALCUE_ALLOWED_EMAILS fails closed
+      const subsetViolationEnv: NodeJS.ProcessEnv = {
+        NODE_ENV: "test",
+        [QA_SERVING_SHADOW_ENV]: "1",
+        [TRIAL_ALLOWED_EMAILS_ENV]: "trial-1@example.com,trial-2@example.com",
+        [QA_SHADOW_ALLOWED_EMAILS_ENV]: "trial-1@example.com,outside-trial@example.com",
+      };
+      expect(parseAllowedQaEmails(subsetViolationEnv)).toBeNull();
+      expect(
+        evaluateRuntimeShadowEligibility(
+          { mode: "live", userId: "qa-user-1", userEmail: "trial-1@example.com" },
+          subsetViolationEnv,
+        ),
+      ).toEqual({ eligible: false, reason: "ineligible" });
+    });
+
+    it("enables only when KCALCUE_QA_SERVING_SHADOW is exact '1', mode is 'live', QA allowlist is valid, and verified principal email matches (case-insensitive)", () => {
       const env: NodeJS.ProcessEnv = {
         NODE_ENV: "test",
         [QA_SERVING_SHADOW_ENV]: "1",
+        [TRIAL_ALLOWED_EMAILS_ENV]: "qa-lead@example.com,qa-engineer@example.com,ordinary-trial@example.com",
+        [QA_SHADOW_ALLOWED_EMAILS_ENV]: "qa-lead@example.com, QA-Engineer@example.com",
       };
 
       expect(qaServingShadowEnabled(env)).toBe(true);
       expect(
-        evaluateRuntimeShadowEligibility({ mode: "live", userId: "qa-user-1" }, env),
+        evaluateRuntimeShadowEligibility(
+          { mode: "live", userId: "qa-user-1", userEmail: "  QA-ENGINEER@EXAMPLE.COM " },
+          env,
+        ),
       ).toEqual({ eligible: true });
 
       expect(
-        evaluateRuntimeShadowEligibility({ mode: "demo", userId: "qa-user-1" }, env),
+        evaluateRuntimeShadowEligibility(
+          { mode: "demo", userId: "qa-user-1", userEmail: "qa-engineer@example.com" },
+          env,
+        ),
       ).toEqual({ eligible: false, reason: "ineligible" });
 
       expect(
-        evaluateRuntimeShadowEligibility({ mode: "live", userId: "" }, env),
+        evaluateRuntimeShadowEligibility(
+          { mode: "live", userId: "", userEmail: "qa-engineer@example.com" },
+          env,
+        ),
       ).toEqual({ eligible: false, reason: "ineligible" });
 
       expect(
-        evaluateRuntimeShadowEligibility({ mode: "live", userId: undefined }, env),
+        evaluateRuntimeShadowEligibility(
+          { mode: "live", userId: undefined, userEmail: "qa-engineer@example.com" },
+          env,
+        ),
+      ).toEqual({ eligible: false, reason: "ineligible" });
+
+      expect(
+        evaluateRuntimeShadowEligibility(
+          { mode: "live", userId: "qa-user-1", userEmail: "" },
+          env,
+        ),
+      ).toEqual({ eligible: false, reason: "ineligible" });
+
+      expect(
+        evaluateRuntimeShadowEligibility(
+          { mode: "live", userId: "qa-user-1", userEmail: "not-an-email" },
+          env,
+        ),
       ).toEqual({ eligible: false, reason: "ineligible" });
     });
 
-    it("rejects non-QA authenticated users when KCALCUE_QA_SHADOW_ALLOWED_EMAILS is configured", () => {
+    it("rejects non-QA authenticated users, missing-email users, and accepts normalized QA users", () => {
       const env: NodeJS.ProcessEnv = {
         NODE_ENV: "test",
         [QA_SERVING_SHADOW_ENV]: "1",
+        [TRIAL_ALLOWED_EMAILS_ENV]: "qa-lead@example.com,qa-engineer@example.com,ordinary-trial@example.com",
         [QA_SHADOW_ALLOWED_EMAILS_ENV]: "qa-lead@example.com, QA-Engineer@example.com",
       };
 
@@ -167,7 +264,7 @@ describe("milk-serving-runtime-shadow adapter (Gate C)", () => {
         rawAnalysis: c3Run1SingleOatCartonAnalysis,
         mode: "live",
         userId: "qa-user-1",
-        userEmail: "qa-engineer@example.com",
+        userEmail: "  Qa-Engineer@Example.COM ",
         env,
       });
       expect(authorizedQaUser.executed).toBe(true);
@@ -179,6 +276,7 @@ describe("milk-serving-runtime-shadow adapter (Gate C)", () => {
     const enabledEnv: NodeJS.ProcessEnv = {
       NODE_ENV: "test",
       [QA_SERVING_SHADOW_ENV]: "1",
+      [QA_SHADOW_ALLOWED_EMAILS_ENV]: "qa@example.com",
     };
 
     it("1. one oat-milk carton listed as two rows (C3-run1 unknown portion & explicit 250 ml oat/whole duplicate rows)", () => {
@@ -187,6 +285,7 @@ describe("milk-serving-runtime-shadow adapter (Gate C)", () => {
         rawAnalysis: c3Run1SingleOatCartonAnalysis,
         mode: "live",
         userId: "qa-user",
+        userEmail: "qa@example.com",
         env: enabledEnv,
       });
       expect(c3Result.executed).toBe(true);
@@ -211,6 +310,7 @@ describe("milk-serving-runtime-shadow adapter (Gate C)", () => {
         rawAnalysis: twoOatCartonRows,
         mode: "live",
         userId: "qa-user",
+        userEmail: "qa@example.com",
         env: enabledEnv,
       });
       expect(oatResult.executed).toBe(true);
@@ -227,6 +327,7 @@ describe("milk-serving-runtime-shadow adapter (Gate C)", () => {
         rawAnalysis: twoWholeCartonRows,
         mode: "live",
         userId: "qa-user",
+        userEmail: "qa@example.com",
         env: enabledEnv,
       });
       expect(wholeResult.executed).toBe(true);
@@ -243,6 +344,7 @@ describe("milk-serving-runtime-shadow adapter (Gate C)", () => {
         rawAnalysis: m6CartonAndGlassAnalysis,
         mode: "live",
         userId: "qa-user",
+        userEmail: "qa@example.com",
         env: enabledEnv,
       });
       expect(m6Result.executed).toBe(true);
@@ -259,6 +361,7 @@ describe("milk-serving-runtime-shadow adapter (Gate C)", () => {
         rawAnalysis: cleanCartonAndGlass,
         mode: "live",
         userId: "qa-user",
+        userEmail: "qa@example.com",
         env: enabledEnv,
       });
       expect(eqResult.executed).toBe(true);
@@ -288,6 +391,7 @@ describe("milk-serving-runtime-shadow adapter (Gate C)", () => {
         rawAnalysis: twoOatCartons,
         mode: "live",
         userId: "qa-user",
+        userEmail: "qa@example.com",
         env: enabledEnv,
       });
       expect(oatResult.executed).toBe(true);
@@ -306,6 +410,7 @@ describe("milk-serving-runtime-shadow adapter (Gate C)", () => {
         rawAnalysis: twoWholeCartons,
         mode: "live",
         userId: "qa-user",
+        userEmail: "qa@example.com",
         env: enabledEnv,
       });
       expect(wholeResult.executed).toBe(true);
@@ -333,6 +438,7 @@ describe("milk-serving-runtime-shadow adapter (Gate C)", () => {
         rawAnalysis: sameCartonThreeTimes,
         mode: "live",
         userId: "qa-user",
+        userEmail: "qa@example.com",
         env: enabledEnv,
       });
 
@@ -357,6 +463,7 @@ describe("milk-serving-runtime-shadow adapter (Gate C)", () => {
         rawAnalysis: ambiguousThreeRows,
         mode: "live",
         userId: "qa-user",
+        userEmail: "qa@example.com",
         env: enabledEnv,
       });
 
@@ -378,6 +485,7 @@ describe("milk-serving-runtime-shadow adapter (Gate C)", () => {
         rawAnalysis: p1aScene,
         mode: "live",
         userId: "qa-user",
+        userEmail: "qa@example.com",
         env: enabledEnv,
       });
       expect(p1aResult.executed).toBe(true);
@@ -398,6 +506,7 @@ describe("milk-serving-runtime-shadow adapter (Gate C)", () => {
         rawAnalysis: unsupportedLowFat,
         mode: "live",
         userId: "qa-user",
+        userEmail: "qa@example.com",
         env: enabledEnv,
       });
       expect(unsupportedResult.executed).toBe(true);
@@ -421,6 +530,7 @@ describe("milk-serving-runtime-shadow adapter (Gate C)", () => {
         rawAnalysis: negatedAndQuestionedCount,
         mode: "live",
         userId: "qa-user",
+        userEmail: "qa@example.com",
         env: enabledEnv,
       });
 
@@ -438,6 +548,7 @@ describe("milk-serving-runtime-shadow adapter (Gate C)", () => {
         rawAnalysis: unknownPortionScene,
         mode: "live",
         userId: "qa-user",
+        userEmail: "qa@example.com",
         env: enabledEnv,
       });
       expect(portionResult.diagnostic?.outcomeKind).toBe("uncomparable_without_user_decision");
@@ -450,6 +561,7 @@ describe("milk-serving-runtime-shadow adapter (Gate C)", () => {
         rawAnalysis: unknownProfileScene,
         mode: "live",
         userId: "qa-user",
+        userEmail: "qa@example.com",
         env: enabledEnv,
       });
       expect(profileResult.diagnostic?.outcomeKind).toBe("uncomparable_without_user_decision");
@@ -465,6 +577,7 @@ describe("milk-serving-runtime-shadow adapter (Gate C)", () => {
         rawAnalysis: conflictingPortionsSingleRow,
         mode: "live",
         userId: "qa-user",
+        userEmail: "qa@example.com",
         env: enabledEnv,
       });
       expect(pendingResult.diagnostic?.outcomeKind).toBe("uncomparable_without_user_decision");
@@ -481,6 +594,7 @@ describe("milk-serving-runtime-shadow adapter (Gate C)", () => {
         rawAnalysis: sh08Scene,
         mode: "live",
         userId: "qa-user",
+        userEmail: "qa@example.com",
         env: enabledEnv,
       });
       expect(sh08Result.diagnostic?.outcomeKind).toBe("investigation_required");
@@ -502,6 +616,7 @@ describe("milk-serving-runtime-shadow adapter (Gate C)", () => {
         rawAnalysis: c3Run1SingleOatCartonAnalysis,
         mode: "live",
         userId: "qa-user",
+        userEmail: "qa@example.com",
         env: enabledEnv,
         comparator: () => {
           throw new Error("SECRET_CANARY_ENGINE_CRASH_NOTE_999");
@@ -529,6 +644,7 @@ describe("milk-serving-runtime-shadow adapter (Gate C)", () => {
         rawAnalysis: c3Run1SingleOatCartonAnalysis,
         mode: "live",
         userId: "qa-user",
+        userEmail: "qa@example.com",
         env: enabledEnv,
         comparator: () => {
           throw new ServingContractError("forged slot ownership");
@@ -557,6 +673,7 @@ describe("milk-serving-runtime-shadow adapter (Gate C)", () => {
           rawAnalysis: badInput,
           mode: "live",
           userId: "qa-user",
+          userEmail: "qa@example.com",
           env: enabledEnv,
         });
         expect(badResult.executed).toBe(true);
@@ -574,6 +691,7 @@ describe("milk-serving-runtime-shadow adapter (Gate C)", () => {
         rawAnalysis: alreadyPrepared,
         mode: "live",
         userId: "qa-user",
+        userEmail: "qa@example.com",
         env: enabledEnv,
       });
       expect(doubleDedupeAttempt.executed).toBe(true);
@@ -591,6 +709,7 @@ describe("milk-serving-runtime-shadow adapter (Gate C)", () => {
         rawAnalysis: callerRawAnalysis,
         mode: "live",
         userId: "qa-user",
+        userEmail: "qa@example.com",
         env: enabledEnv,
       });
 
@@ -707,6 +826,7 @@ describe("milk-serving-runtime-shadow adapter (Gate C)", () => {
       const enabledEnv: NodeJS.ProcessEnv = {
         NODE_ENV: "test",
         [QA_SERVING_SHADOW_ENV]: "1",
+        [QA_SHADOW_ALLOWED_EMAILS_ENV]: "qa@example.com",
       };
 
       // Warm up JIT before timing
@@ -715,6 +835,7 @@ describe("milk-serving-runtime-shadow adapter (Gate C)", () => {
         rawAnalysis: c3Run1SingleOatCartonAnalysis,
         mode: "live",
         userId: "perf-user",
+        userEmail: "qa@example.com",
         env: enabledEnv,
       });
 
@@ -724,6 +845,7 @@ describe("milk-serving-runtime-shadow adapter (Gate C)", () => {
           rawAnalysis: c3Run1SingleOatCartonAnalysis,
           mode: "live",
           userId: "perf-user",
+          userEmail: "qa@example.com",
           env: disabledEnv,
         });
         expect(res.durationMs).toBe(0);
@@ -737,6 +859,7 @@ describe("milk-serving-runtime-shadow adapter (Gate C)", () => {
           rawAnalysis: c3Run1SingleOatCartonAnalysis,
           mode: "live",
           userId: "perf-user",
+          userEmail: "qa@example.com",
           env: disabledEnv,
         });
       }
@@ -749,6 +872,7 @@ describe("milk-serving-runtime-shadow adapter (Gate C)", () => {
           rawAnalysis: c3Run1SingleOatCartonAnalysis,
           mode: "live",
           userId: "perf-user",
+          userEmail: "qa@example.com",
           env: enabledEnv,
         });
       }

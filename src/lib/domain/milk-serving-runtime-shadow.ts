@@ -39,9 +39,13 @@ import {
 
 export const QA_SERVING_SHADOW_ENV = "KCALCUE_QA_SERVING_SHADOW" as const;
 export const QA_SHADOW_ALLOWED_EMAILS_ENV = "KCALCUE_QA_SHADOW_ALLOWED_EMAILS" as const;
+export const TRIAL_ALLOWED_EMAILS_ENV = "KCALCUE_ALLOWED_EMAILS" as const;
+export const MAX_QA_SHADOW_ALLOWED_EMAILS = 10;
 export const RUNTIME_SHADOW_SCENE_ID = "runtime-shadow-scene" as const;
 export const MAX_RUNTIME_SHADOW_ENCODED_BYTES = 256 * 1024;
 export const RUNTIME_SHADOW_LOG_TAG = "[kcalcue:milk-serving-shadow]" as const;
+
+const emailEntrySchema = z.email();
 
 export interface RuntimeShadowEligibilityContext {
   mode?: string;
@@ -126,18 +130,43 @@ export function qaServingShadowEnabled(env: NodeJS.ProcessEnv = process.env): bo
   return env[QA_SERVING_SHADOW_ENV] === "1";
 }
 
-function parseAllowedQaEmails(env: NodeJS.ProcessEnv): string[] | null {
-  const raw = env[QA_SHADOW_ALLOWED_EMAILS_ENV];
+function parseValidatedEmailAllowlist(raw: unknown): string[] | null {
   if (typeof raw !== "string" || raw.trim().length === 0) {
     return null;
   }
-  const emails = raw
-    .split(",")
-    .map(entry => entry.trim().toLowerCase())
-    .filter(Boolean);
-  return emails.length > 0 ? emails : null;
+  const parts = raw.split(",").map(entry => entry.trim());
+  if (
+    parts.length === 0 ||
+    parts.length > MAX_QA_SHADOW_ALLOWED_EMAILS ||
+    parts.some(part => part.length === 0 || !emailEntrySchema.safeParse(part).success)
+  ) {
+    return null;
+  }
+  return Array.from(new Set(parts.map(part => part.toLowerCase()))).sort();
 }
 
+export function parseAllowedQaEmails(env: NodeJS.ProcessEnv = process.env): string[] | null {
+  const qaEmails = parseValidatedEmailAllowlist(env[QA_SHADOW_ALLOWED_EMAILS_ENV]);
+  if (qaEmails === null || qaEmails.length === 0) {
+    return null;
+  }
+  if (env[TRIAL_ALLOWED_EMAILS_ENV] !== undefined) {
+    const trialEmails = parseValidatedEmailAllowlist(env[TRIAL_ALLOWED_EMAILS_ENV]);
+    if (trialEmails === null || !qaEmails.every(email => trialEmails.includes(email))) {
+      return null;
+    }
+  }
+  return qaEmails;
+}
+
+/**
+ * Fail-closed QA Shadow principal eligibility check:
+ * - Requires a non-empty verified server-side `userId`.
+ * - Requires a non-empty valid `userEmail` from the verified auth principal.
+ * - Requires a non-empty valid `KCALCUE_QA_SHADOW_ALLOWED_EMAILS` allowlist
+ *   (which, when `KCALCUE_ALLOWED_EMAILS` is present, must be a subset of it).
+ * - Requires the verified `userEmail` (normalized to lowercase) to be in the QA allowlist.
+ */
 export function isQaShadowPrincipalEligible(
   context: { userId?: unknown; userEmail?: unknown },
   env: NodeJS.ProcessEnv = process.env,
@@ -145,16 +174,18 @@ export function isQaShadowPrincipalEligible(
   if (typeof context.userId !== "string" || context.userId.trim().length === 0) {
     return false;
   }
-  const qaAllowedEmails = parseAllowedQaEmails(env);
-  if (qaAllowedEmails !== null) {
-    if (typeof context.userEmail !== "string" || context.userEmail.trim().length === 0) {
-      return false;
-    }
-    if (!qaAllowedEmails.includes(context.userEmail.trim().toLowerCase())) {
-      return false;
-    }
+  if (typeof context.userEmail !== "string" || context.userEmail.trim().length === 0) {
+    return false;
   }
-  return true;
+  const trimmedEmail = context.userEmail.trim();
+  if (!emailEntrySchema.safeParse(trimmedEmail).success) {
+    return false;
+  }
+  const qaAllowedEmails = parseAllowedQaEmails(env);
+  if (qaAllowedEmails === null) {
+    return false;
+  }
+  return qaAllowedEmails.includes(trimmedEmail.toLowerCase());
 }
 
 export function evaluateRuntimeShadowEligibility(

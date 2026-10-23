@@ -15,7 +15,7 @@ const image = `asia-east1-docker.pkg.dev/demo-kcalcue/kcalcue/web@${digest}`;
 // The fake service template is contaminated with Gemini. A revision describe
 // returns the deployed env/secret replacement, unless a failure mode forces
 // the candidate to stay contaminated or to carry the wrong digest.
-function run(action: "pause" | "resume" | "deploy" | "rollback" | "stage" | "promote" | "preflight" | "untag" | "access-stage" | "access-promote", failure = "", options: { nutritionSecretVersion?: string; smokeTag?: string; omitSmokeTag?: boolean; existingSmokeTag?: boolean; allowedEmails?: string[]; revision?: string; qaSuspectedMilk?: boolean; qaServingShadow?: boolean } = {}) {
+function run(action: "pause" | "resume" | "deploy" | "rollback" | "stage" | "promote" | "preflight" | "untag" | "access-stage" | "access-promote", failure = "", options: { nutritionSecretVersion?: string; smokeTag?: string; omitSmokeTag?: boolean; existingSmokeTag?: boolean; allowedEmails?: string[]; qaShadowAllowedEmails?: string[]; revision?: string; qaSuspectedMilk?: boolean; qaServingShadow?: boolean } = {}) {
   const directory = mkdtempSync(path.join(tmpdir(), "kcalcue-cloud-routing-test-"));
   temporary.push(directory);
   const executable = path.join(directory, "gcloud.mjs");
@@ -28,7 +28,9 @@ function run(action: "pause" | "resume" | "deploy" | "rollback" | "stage" | "pro
   writeFileSync(config, JSON.stringify({
     projectId: "demo-kcalcue", region: "asia-east1", firebaseApiKey: "test-firebase-public-key",
     firebaseAuthDomain: "demo-kcalcue.firebaseapp.com", firebaseAppId: "1:123:web:abc",
-    allowedEmails: options.allowedEmails ?? ["tester@example.com"], openaiSecretVersion: "1",
+    allowedEmails: options.allowedEmails ?? ["tester@example.com"],
+    ...(options.qaShadowAllowedEmails ? { qaShadowAllowedEmails: options.qaShadowAllowedEmails } : {}),
+    openaiSecretVersion: "1",
     ...(options.nutritionSecretVersion ? { nutritionSecretVersion: options.nutritionSecretVersion } : {}),
   }));
   writeFileSync(executable, `#!/usr/bin/env node
@@ -172,6 +174,10 @@ else if (matches('run', 'services', 'update') || matches('run', 'deploy')) {
   if (!isCurrent && failure === 'qa-suspected-milk') env.push({ name: 'KCALCUE_QA_SUSPECTED_MILK', value: '1' });
   if (!isCurrent && failure === 'qa-serving-shadow') env.push({ name: 'KCALCUE_QA_SERVING_SHADOW', value: '1' });
   if (!isCurrent && failure === 'qa-serving-shadow-off') env.push({ name: 'KCALCUE_QA_SERVING_SHADOW', value: 'off' });
+  if (!isCurrent && failure === 'qa-shadow-allowlist-only') env.push({ name: 'KCALCUE_QA_SHADOW_ALLOWED_EMAILS', value: 'tester@example.com' });
+  if (!isCurrent && failure === 'qa-shadow-allowlist-mismatch') {
+    env = env.map(entry => entry.name === 'KCALCUE_QA_SHADOW_ALLOWED_EMAILS' ? { name: entry.name, value: 'wrong-qa@example.com' } : entry);
+  }
   if (!isCurrent && (failure === 'wrong-nutrition-name' || failure === 'wrong-nutrition-version')) {
     env = env.map(entry => {
       if (entry.name !== 'NUTRITION_API_KEY' || !entry.valueFrom) return entry;
@@ -377,25 +383,77 @@ describe("Cloud Run stage and promote", () => {
     expect(finalState.routedRevision).toBe("kcalcue-00001-old");
   });
 
-  it("sets the serving-shadow QA flag only on a zero-traffic stage", () => {
-    const staged = run("stage", "", { qaServingShadow: true });
+  it("sets the serving-shadow QA flag and normalized QA allowlist only on a zero-traffic stage, verifies readback, and never propagates them on normal stage, pause, or resume", () => {
+    const staged = run("stage", "", {
+      qaServingShadow: true,
+      qaShadowAllowedEmails: ["  TESTER@Example.com "],
+    });
     expect(staged.result.status, staged.result.stderr).toBe(0);
     expect(trafficChanged(staged.calls)).toBe(false);
     expect(staged.finalState.candidateEnv?.KCALCUE_QA_SERVING_SHADOW).toBe("1");
+    expect(staged.finalState.candidateEnv?.KCALCUE_QA_SHADOW_ALLOWED_EMAILS).toBe("tester@example.com");
+    expect(staged.result.stdout).not.toContain("tester@example.com");
     expect(staged.finalState.routedRevision).toBe("kcalcue-00001-old");
 
-    const promoted = run("promote", "", { qaServingShadow: true });
+    // Normal stage with qaShadowAllowedEmails present in config must NOT propagate QA shadow env vars
+    const normalStaged = run("stage", "", {
+      qaShadowAllowedEmails: ["tester@example.com"],
+    });
+    expect(normalStaged.result.status, normalStaged.result.stderr).toBe(0);
+    expect(normalStaged.finalState.candidateEnv).not.toHaveProperty("KCALCUE_QA_SERVING_SHADOW");
+    expect(normalStaged.finalState.candidateEnv).not.toHaveProperty("KCALCUE_QA_SHADOW_ALLOWED_EMAILS");
+
+    // Pause and resume with qaShadowAllowedEmails present in config must NOT propagate QA shadow env vars
+    for (const action of ["pause", "resume"] as const) {
+      const res = run(action, "", { qaShadowAllowedEmails: ["tester@example.com"] });
+      expect(res.result.status, res.result.stderr).toBe(0);
+      expect(res.finalState.candidateEnv).not.toHaveProperty("KCALCUE_QA_SERVING_SHADOW");
+      expect(res.finalState.candidateEnv).not.toHaveProperty("KCALCUE_QA_SHADOW_ALLOWED_EMAILS");
+    }
+
+    const promoted = run("promote", "", {
+      qaServingShadow: true,
+      qaShadowAllowedEmails: ["tester@example.com"],
+    });
     expect(promoted.result.status).toBe(1);
     expect(promoted.result.stderr).toContain("KCALCUE_QA_SERVING_SHADOW can only be set on a zero-traffic stage");
     expect(promoted.calls).toEqual([]);
   });
 
+  it("refuses stage --qa-serving-shadow when qaShadowAllowedEmails is missing or not a subset of allowedEmails before contacting Cloud Run", () => {
+    const missingAllowlist = run("stage", "", { qaServingShadow: true });
+    expect(missingAllowlist.result.status).toBe(1);
+    expect(missingAllowlist.result.stderr).toContain("KCALCUE_QA_SERVING_SHADOW requires qaShadowAllowedEmails");
+    expect(missingAllowlist.calls).toEqual([]);
+
+    const subsetViolation = run("stage", "", {
+      qaServingShadow: true,
+      qaShadowAllowedEmails: ["outsider@example.com"],
+    });
+    expect(subsetViolation.result.status).toBe(1);
+    expect(subsetViolation.result.stderr).toContain("QA shadow allowlist must be a non-empty subset of allowedEmails");
+    expect(subsetViolation.calls).toEqual([]);
+  });
+
+  it("refuses stage --qa-serving-shadow when candidate readback QA allowlist does not match config", () => {
+    const mismatch = run("stage", "qa-shadow-allowlist-mismatch", {
+      qaServingShadow: true,
+      qaShadowAllowedEmails: ["tester@example.com"],
+    });
+    expect(mismatch.result.status).toBe(1);
+    expect(mismatch.result.stderr).toContain("QA shadow allowlist does not match config");
+    expect(mismatch.result.stderr).toContain("traffic was not changed");
+    expect(trafficChanged(mismatch.calls)).toBe(false);
+  });
+
   it.each([
     ["promote", "qa-serving-shadow"],
     ["promote", "qa-serving-shadow-off"],
+    ["promote", "qa-shadow-allowlist-only"],
     ["rollback", "qa-serving-shadow"],
     ["rollback", "qa-serving-shadow-off"],
-  ] as const)("refuses production traffic for a revision that has the serving-shadow QA flag (%s / %s)", (action, failure) => {
+    ["rollback", "qa-shadow-allowlist-only"],
+  ] as const)("refuses production traffic for a revision that has the serving-shadow QA flag or allowlist (%s / %s)", (action, failure) => {
     const { result, calls, finalState } = run(action, failure);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("QA serving-shadow mode cannot receive production traffic");

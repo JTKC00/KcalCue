@@ -18,7 +18,7 @@ const help = `Cloud Run private trial (explicit commands; staging never promotes
   node scripts/cloud-run.mjs resume --config /private/trial-config.json
 stage creates a zero-traffic candidate, assigns --smoke-tag for a tagged preview URL, and does not call update-traffic.
 --qa-suspected-milk is stage-only. It sets KCALCUE_QA_SUSPECTED_MILK=1 on that candidate. promote, rollback, and access-promote refuse any revision that has the variable.
---qa-serving-shadow is stage-only. It sets KCALCUE_QA_SERVING_SHADOW=1 on that candidate. promote, rollback, and access-promote refuse any revision that has the variable.
+--qa-serving-shadow is stage-only. It sets KCALCUE_QA_SERVING_SHADOW=1 and KCALCUE_QA_SHADOW_ALLOWED_EMAILS (from qaShadowAllowedEmails in config) on that candidate. promote, rollback, and access-promote refuse any revision that has either variable.
 promote is separate and requires the exact candidate revision after inspection and approval. A smoke tag is not promotion authority.
 untag --tag removes only that smoke tag and preserves the current production traffic allocation.
 access-stage reuses the current production image and changes only the account allowlist, at zero traffic.
@@ -33,7 +33,8 @@ const schema = z.object({
   firebaseApiKey: z.string().min(15).regex(/^[a-zA-Z0-9_-]+$/),
   firebaseAuthDomain: z.string().regex(/^(?:[a-z0-9-]+\.firebaseapp\.com|kcalcue\.snugzap\.com)$/),
   firebaseAppId: z.string().regex(/^1:\d+:web:[a-zA-Z0-9]+$/),
-  allowedEmails: z.array(z.email()).min(1).max(10),
+  allowedEmails: z.array(z.string().trim().pipe(z.email())).min(1).max(10),
+  qaShadowAllowedEmails: z.array(z.string().trim().pipe(z.email())).min(1).max(10).optional(),
   openaiSecretVersion: z.string().regex(/^[1-9]\d*$/),
   nutritionSecretVersion: z.string().regex(/^[1-9]\d*$/).optional(),
 }).strict();
@@ -71,11 +72,27 @@ function main() {
     if (values.tag === undefined) throw new Error("Provide the smoke --tag to remove.");
     assertSmokeTag(values.tag);
   }
+  const normalizeEmailList = list => Array.from(new Set(list.map(email => email.trim().toLowerCase()).filter(Boolean))).sort();
+  const normalizeEmails = value => normalizeEmailList(value.split(",")).join(",");
+  const expectedEmails = () => normalizeEmailList(config.allowedEmails).join(",");
+  const expectedQaShadowEmails = () => normalizeEmailList(config.qaShadowAllowedEmails ?? []).join(",");
+  if (config.qaShadowAllowedEmails !== undefined) {
+    const allowedSet = new Set(normalizeEmailList(config.allowedEmails));
+    const qaList = normalizeEmailList(config.qaShadowAllowedEmails);
+    if (qaList.length === 0 || qaList.some(email => !allowedSet.has(email))) {
+      throw new Error("QA shadow allowlist must be a non-empty subset of allowedEmails in the private configuration.");
+    }
+  }
   if (values["qa-suspected-milk"] === true && action !== "stage") {
     throw new Error("KCALCUE_QA_SUSPECTED_MILK can only be set on a zero-traffic stage.");
   }
-  if (values["qa-serving-shadow"] === true && action !== "stage") {
-    throw new Error("KCALCUE_QA_SERVING_SHADOW can only be set on a zero-traffic stage.");
+  if (values["qa-serving-shadow"] === true) {
+    if (action !== "stage") {
+      throw new Error("KCALCUE_QA_SERVING_SHADOW can only be set on a zero-traffic stage.");
+    }
+    if (!Array.isArray(config.qaShadowAllowedEmails) || config.qaShadowAllowedEmails.length === 0) {
+      throw new Error("KCALCUE_QA_SERVING_SHADOW requires qaShadowAllowedEmails in the private configuration.");
+    }
   }
   if ((action === "promote" || action === "access-promote") && !isRevision(values.revision)) throw new Error("Provide the verified candidate --revision.");
   if (action === "rollback" && !isRevision(values.revision)) throw new Error("Provide the previously verified --revision.");
@@ -87,8 +104,6 @@ function main() {
     if (result.error || result.status !== 0) throw new Error("gcloud failed; inspect the command result and authenticate/configure the dedicated project before retrying.");
     return capture ? result.stdout.trim() : "";
   }
-  const normalizeEmails = value => value.split(",").map(email => email.trim().toLowerCase()).filter(Boolean).sort().join(",");
-  const expectedEmails = () => normalizeEmails(config.allowedEmails.join(","));
   const imagePrefix = `${config.region}-docker.pkg.dev/${config.projectId}/kcalcue/web@`;
   const declaredSecrets = [
     { envName: "OPENAI_API_KEY", secretName: "kcalcue-openai", secretVersion: config.openaiSecretVersion },
@@ -176,7 +191,7 @@ function main() {
     assertProductionSecrets(described, container);
     assertPinnedImage(container, described, expectedImage);
   }
-  function assertCandidate(revision, analysisEnabled, expectedImage) {
+  function assertCandidate(revision, analysisEnabled, expectedImage, qaOptions = { qaSuspectedMilk: false, qaServingShadow: false }) {
     const { described, container } = describeRevision(revision);
     requireEnv(container);
     const ready = Array.isArray(described?.status?.conditions)
@@ -187,6 +202,24 @@ function main() {
     const emails = envValue(container, "KCALCUE_ALLOWED_EMAILS");
     if (typeof emails !== "string" || normalizeEmails(emails) !== expectedEmails()) throw new Error("Account allowlist does not match config; traffic was not changed.");
     if (envValue(container, "KCALCUE_ANALYSIS_ENABLED") !== String(analysisEnabled)) throw new Error("Analysis switch does not match the approved production state; traffic was not changed.");
+    if (qaOptions.qaSuspectedMilk) {
+      if (envValue(container, "KCALCUE_QA_SUSPECTED_MILK") !== "1") {
+        throw new Error("QA suspected-milk fixture does not match the staged configuration; traffic was not changed.");
+      }
+    } else if (container.env.some(entry => entry?.name === "KCALCUE_QA_SUSPECTED_MILK")) {
+      throw new Error("QA suspected-milk fixture cannot receive production traffic; traffic was not changed.");
+    }
+    if (qaOptions.qaServingShadow) {
+      if (envValue(container, "KCALCUE_QA_SERVING_SHADOW") !== "1") {
+        throw new Error("QA serving-shadow flag does not match the staged configuration; traffic was not changed.");
+      }
+      const qaEmails = envValue(container, "KCALCUE_QA_SHADOW_ALLOWED_EMAILS");
+      if (typeof qaEmails !== "string" || qaEmails.trim() === "" || normalizeEmails(qaEmails) !== expectedQaShadowEmails()) {
+        throw new Error("QA shadow allowlist does not match config; traffic was not changed.");
+      }
+    } else if (container.env.some(entry => entry?.name === "KCALCUE_QA_SERVING_SHADOW" || entry?.name === "KCALCUE_QA_SHADOW_ALLOWED_EMAILS")) {
+      throw new Error("QA serving-shadow mode cannot receive production traffic; traffic was not changed.");
+    }
     assertProductionProvider(described, container, { requireProvider: true, expectedImage });
   }
   function productionTraffic() {
@@ -480,7 +513,12 @@ function main() {
     const analysisEnabled = serving ? serving.analysisEnabled : false;
     const qaExtras = {
       ...(values["qa-suspected-milk"] === true ? { KCALCUE_QA_SUSPECTED_MILK: "1" } : {}),
-      ...(values["qa-serving-shadow"] === true ? { KCALCUE_QA_SERVING_SHADOW: "1" } : {}),
+      ...(values["qa-serving-shadow"] === true
+        ? {
+          KCALCUE_QA_SERVING_SHADOW: "1",
+          KCALCUE_QA_SHADOW_ALLOWED_EMAILS: expectedQaShadowEmails(),
+        }
+        : {}),
     };
     const revision = withRuntimeFile(analysisEnabled, envFile => gcloud(["run", "deploy", "kcalcue", `--image=${pinnedImage}`,
       `--region=${config.region}`, `--service-account=kcalcue-runtime@${config.projectId}.iam.gserviceaccount.com`,
@@ -489,7 +527,10 @@ function main() {
       `--env-vars-file=${envFile}`, secretFlag, `--tag=${values["smoke-tag"]}`, "--format=value(status.latestCreatedRevisionName)"], true), qaExtras);
     let previewUrl;
     try {
-      assertCandidate(revision, analysisEnabled, pinnedImage);
+      assertCandidate(revision, analysisEnabled, pinnedImage, {
+        qaSuspectedMilk: values["qa-suspected-milk"] === true,
+        qaServingShadow: values["qa-serving-shadow"] === true,
+      });
       previewUrl = assertStagedTraffic(revision, serving?.revision ?? null, values["smoke-tag"]);
     } catch (error) {
       const message = error instanceof Error && error.name === "Error" ? error.message : "Candidate verification failed; traffic was not changed.";
