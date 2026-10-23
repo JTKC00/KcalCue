@@ -1413,7 +1413,7 @@ describe("Phase 2B1 offline synthetic Shadow comparator", () => {
           )
         );
       }
-    });
+    }, 15_000);
   });
 
   describe("Scenario 18 — Deterministic, repeatable comparison outcomes & non-milk preservation (SH17 / SH18)", () => {

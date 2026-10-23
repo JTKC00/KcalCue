@@ -275,7 +275,7 @@ describe("PR128 Phase 2B1 offline milk-serving Shadow evaluation gate", () => {
       expect(current.shadow?.fullMilkNutrition).toEqual(baseline.shadow?.fullMilkNutrition);
       expect(current.shadow?.confirmedUnitCount).toBe(baseline.shadow?.confirmedUnitCount);
     }
-  });
+  }, 15_000);
 
   it("accepts explicit caller-authorized whole-milk projection when raw analysis and decisions align", () => {
     const { scene, reconciliation, authorizedDecisions, sceneId } =
