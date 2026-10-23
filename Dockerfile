@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 FROM node:24-bookworm-slim@sha256:2fe369e969550cde8e867afc3fe370b260140cab4a23d467074295b42163d553 AS codecs
-ARG VIPS_VERSION=8.18.6
-ARG VIPS_SHA256=3c41e1d5458081bfa4a5bc54e116c46259c75c6760a18027764555632b9dda3e
+ARG VIPS_VERSION=8.18.7
+ARG VIPS_SHA256=5baaead3b0bb20ffdb9e9ff09aa9fda08620923df77b63b436654cb5e0b3bf94
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl xz-utils build-essential python3 meson ninja-build pkg-config \
     libglib2.0-dev libexpat1-dev libjpeg62-turbo-dev libpng-dev libwebp-dev \

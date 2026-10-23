@@ -10,6 +10,15 @@ This slice packages the existing Next.js app for a secret-free, synthetic Cloud 
 
 ## Validation
 
+The codec stage pins libvips **8.18.7** and verifies the official release archive's
+SHA256 (`5baaead3b0bb20ffdb9e9ff09aa9fda08620923df77b63b436654cb5e0b3bf94`).
+Sharp 0.35.5 requires libvips >=8.18.7; the previous 8.18.6 pin cannot build that
+native binding. `container-codecs.test.ts` checks the Docker pin against the
+installed Sharp manifest so a dependency update cannot silently raise that floor.
+The custom libvips build still enables libheif with libde265/x265, and Sharp still
+builds against this global library. Keep both the builder and non-root runtime
+HEVC encode/decode checks; prebuilt Sharp's codec set is not a substitute.
+
 Run `npm ci`, `npm run lint`, `npm run typecheck`, and `npm run build` with a supported Node version. For the container, build with the four synthetic `NEXT_PUBLIC_FIREBASE_*` values shown in `.github/workflows/container.yml`; `docker build` checks actual HEVC encode/decode in the builder and in the non-root runtime. The workflow then verifies status, CSP, static assets, PWA files, anonymous meal rejection, and demo analysis without live API calls.
 
 The CI trigger covers application source and public assets as well as Docker, dependency, and Next configuration. A green container check proves only that exact PR head and synthetic configuration. Real login, upload, AI analysis, persistence, and device HEIC acceptance require separate QA.
