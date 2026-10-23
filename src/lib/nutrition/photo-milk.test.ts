@@ -75,10 +75,26 @@ describe("photo generic milk", () => {
     expect(provider.resolve(saved.items[0] as typeof chosen).includedInTotal).toBe(true);
   });
 
-  it.each(["紙盒", "未能確認是否同一紙盒", "not the same carton"])("keeps two carton rows without affirmative same-serving evidence: %s", (evidence) => {
+  it("does not merge identical carton rows on uncertain or negated wording alone", () => {
     const row = food("牛奶", "milk", { preparationMethod: "紙盒" });
-    const analysis = { ...duplicateGenericMilkCartonAnalysis, foods: [row, { ...row }], uncertaintyReasons: [], visibleEvidence: [evidence], unknownInformation: [] };
-    expect(dedupeIdenticalContainerMilk(analysis).foods).toHaveLength(2);
+    const uncertain = dedupeIdenticalContainerMilk({
+      ...duplicateGenericMilkCartonAnalysis,
+      foods: [row, { ...row }],
+      uncertaintyReasons: [],
+      visibleEvidence: ["未能確認是否同一紙盒"],
+      unknownInformation: [],
+    });
+    expect(uncertain.foods).toHaveLength(2);
+    expect(uncertain.foods.some((item) => item.suspectedDuplicateMilk === true)).toBe(true);
+    const negated = dedupeIdenticalContainerMilk({
+      ...duplicateGenericMilkCartonAnalysis,
+      foods: [row, { ...row }],
+      uncertaintyReasons: [],
+      visibleEvidence: ["not the same carton"],
+      unknownInformation: [],
+    });
+    expect(negated.foods).toHaveLength(2);
+    expect(negated.foods.every((item) => item.suspectedDuplicateMilk == null)).toBe(true);
   });
 
   it("keeps typed 牛奶 and 鮮奶 on whole milk", () => {

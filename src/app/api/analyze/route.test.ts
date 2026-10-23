@@ -47,6 +47,18 @@ import { foodAnalysisSchema } from "@/lib/domain/food-analysis";
 import { oatMilkCartonPhotoAnalysis } from "@/lib/nutrition/oat-milk-photo.fixture";
 import { duplicateGenericMilkCartonAnalysis } from "@/lib/nutrition/duplicate-milk-carton.fixture";
 import { MERGED_DUPLICATE_MILK_NOTICE } from "@/lib/domain/milk-dedupe";
+import { c3Run1SingleOatCartonAnalysis } from "@/lib/nutrition/m7-milk-dedupe.fixture";
+import { qaSuspectedMilkAnalysis } from "@/lib/domain/qa-suspected-milk";
+import { preparePhotoMilkAnalysis } from "@/lib/domain/photo-milk-analysis";
+import { publicShadowComparisonDiagnosticSchema } from "@/lib/domain/milk-serving-shadow-comparator";
+import * as shadowComparatorModule from "@/lib/domain/milk-serving-shadow-comparator";
+import {
+  getRuntimeShadowMemoryCounters,
+  QA_SERVING_SHADOW_ENV,
+  QA_SHADOW_ALLOWED_EMAILS_ENV,
+  resetRuntimeShadowMemoryCounters,
+  RUNTIME_SHADOW_LOG_TAG,
+} from "@/lib/domain/milk-serving-runtime-shadow";
 import { POST } from "./route";
 import { provenanceMetadata } from "@/test/provenance-fixture";
 
@@ -69,8 +81,14 @@ function imageRequest(
   });
 }
 
-function jpegRequest(name = "meal.jpg", type = "image/jpeg", headers?: HeadersInit, attemptId?: string) {
-  return imageRequest(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), name, type, headers, attemptId);
+function jpegRequest(name = "meal.jpg", type = "image/jpeg", headers?: HeadersInit, attemptId?: string, qaSuspectedMilk = false) {
+  const request = imageRequest(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), name, type, headers, attemptId);
+  if (!qaSuspectedMilk) return request;
+  const form = new FormData();
+  form.set("image", new File([Uint8Array.from([0xff, 0xd8, 0xff, 0xd9])], name, { type }));
+  if (attemptId !== undefined) form.set("attemptId", attemptId);
+  form.set("qaSuspectedMilk", "1");
+  return new Request("http://localhost/api/analyze", { method: "POST", headers, body: form });
 }
 
 function heifBytes(brand = "mif1"): Uint8Array {
@@ -107,11 +125,13 @@ describe("POST /api/analyze", () => {
     vi.mocked(acquirePublicBody).mockReset().mockImplementation(createPublicBodyAdmission());
     vi.mocked(reserveDailyLiveAnalysis).mockReset().mockResolvedValue({ allowed: true, retryAfterSeconds: 0 });
     clearRateLimitStore();
+    resetRuntimeShadowMemoryCounters();
     vi.spyOn(Date, "now").mockReturnValue(1_000_000);
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
   afterEach(() => {
+    resetRuntimeShadowMemoryCounters();
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
   });
@@ -202,14 +222,59 @@ describe("POST /api/analyze", () => {
     expect(foodAnalysisSchema.parse(body.analysis).foods[0].duplicateMilkNotice).toBe(MERGED_DUPLICATE_MILK_NOTICE);
   });
 
+  it.each(["", "true", "yes"] as const)("ignores the suspected-milk QA field when the server flag is %j", async (flag) => {
+    if (flag) vi.stubEnv("KCALCUE_QA_SUSPECTED_MILK", flag);
+    analyzeImage.mockResolvedValueOnce(demoFoodAnalysis);
+    const body = await (await POST(jpegRequest("meal.jpg", "image/jpeg", undefined, undefined, true))).json();
+    expect(analyzeImage).toHaveBeenCalledOnce();
+    expect(reserveDailyLiveAnalysis).toHaveBeenCalledOnce();
+    expect(body.analysis.foods).toEqual(demoFoodAnalysis.foods);
+    expect(JSON.stringify(body.analysis)).not.toContain("suspectedDuplicateMilk");
+  });
+
+  it("returns the suspected-milk fixture without calling the model only when the flag is exactly 1", async () => {
+    vi.stubEnv("KCALCUE_QA_SUSPECTED_MILK", "1");
+    analyzeImage.mockResolvedValueOnce(demoFoodAnalysis);
+    const withoutField = await (await POST(jpegRequest())).json();
+    expect(analyzeImage).toHaveBeenCalledOnce();
+    expect(withoutField.analysis).toEqual(expect.objectContaining({ foods: demoFoodAnalysis.foods }));
+
+    analyzeImage.mockClear();
+    vi.mocked(reserveDailyLiveAnalysis).mockClear();
+    const response = await POST(jpegRequest("meal.jpg", "image/jpeg", undefined, undefined, true));
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(analyzeImage).not.toHaveBeenCalled();
+    expect(reserveDailyLiveAnalysis).not.toHaveBeenCalled();
+    expect(body.mode).toBe("live");
+    expect(body.analysisProvenance).toBeNull();
+    expect(body.analysis.foods).toHaveLength(2);
+    expect(body.analysis.foods.filter((food: { suspectedDuplicateMilk?: boolean }) => food.suspectedDuplicateMilk === true)).toHaveLength(1);
+    expect(body.analysis.foods[0].displayName).toBe("全脂牛奶");
+    expect(foodAnalysisSchema.parse(body.analysis)).toEqual(body.analysis);
+    expect(preparePhotoMilkAnalysis(body.analysis)).toEqual(body.analysis);
+    expect(qaSuspectedMilkAnalysis.foods.every(food => !("suspectedDuplicateMilk" in food))).toBe(true);
+  });
+
+  it("merges C3-run1 identical oat-milk rows that only say the photo shows one carton", async () => {
+    analyzeImage.mockResolvedValueOnce(c3Run1SingleOatCartonAnalysis);
+    const body = await (await POST(jpegRequest())).json();
+    expect(body.analysis.foods).toHaveLength(1);
+    expect(body.analysis.foods[0].duplicateMilkNotice).toBe(MERGED_DUPLICATE_MILK_NOTICE);
+    expect(body.analysis.foods[0].suspectedDuplicateMilk).toBeUndefined();
+    expect(foodAnalysisSchema.parse(body.analysis).foods).toHaveLength(1);
+  });
+
   it.each([
     ["carton plus glass", ["180 ml 紙盒牛奶", "獨立玻璃杯牛奶"]],
     ["front and back glasses", ["前方玻璃杯牛奶", "後方玻璃杯牛奶"]],
-  ])("keeps %s separate even when both rows repeat the carton wording", async (_name, visibleEvidence) => {
+  ])("holds back one identical carton row when only the meal text says %s", async (_name, visibleEvidence) => {
     const row = { ...oatMilkCartonPhotoAnalysis.foods[0], portionMin: 180, portionMax: 180, preparationMethod: "紙盒飲品", notes: "牛奶包裝" };
     analyzeImage.mockResolvedValueOnce({ ...oatMilkCartonPhotoAnalysis, foods: [row, { ...row }], uncertaintyReasons: [], visibleEvidence, unknownInformation: [] });
     const body = await (await POST(jpegRequest())).json();
     expect(body.analysis.foods).toHaveLength(2);
+    expect(body.analysis.foods.filter((food: { suspectedDuplicateMilk?: boolean }) => food.suspectedDuplicateMilk === true)).toHaveLength(1);
+    expect(body.analysis.foods.every((food: { duplicateMilkNotice?: string }) => food.duplicateMilkNotice == null)).toBe(true);
   });
 
   it.each([["180 ml 紙盒牛奶", "旁邊一杯牛奶"], ["後方玻璃杯牛奶", "前方玻璃杯牛奶"]])("warns when one milk row has distinct visible containers %s %s", async (...visibleEvidence) => {
@@ -641,5 +706,191 @@ describe("POST /api/analyze", () => {
     expect(await response.json()).toEqual({ error: { code: "invalid_file" } });
     expect(authorize).not.toHaveBeenCalled();
     expect(analyzeImage).not.toHaveBeenCalled();
+  });
+
+  describe("runtime milk-serving Shadow integration (Gate C)", () => {
+    it.each([undefined, "", "0", "false", "true", "yes", "qa_shadow"] as const)(
+      "does not run shadow comparison when KCALCUE_QA_SERVING_SHADOW is %j",
+      async flag => {
+        if (flag !== undefined) {
+          vi.stubEnv(QA_SERVING_SHADOW_ENV, flag);
+        }
+        const compareSpy = vi.spyOn(shadowComparatorModule, "compareMilkServingShadow");
+        analyzeImage.mockResolvedValueOnce(c3Run1SingleOatCartonAnalysis);
+
+        const response = await POST(jpegRequest());
+        const body = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(body.analysis.foods).toHaveLength(1);
+        expect(body.analysis.foods[0].duplicateMilkNotice).toBe(MERGED_DUPLICATE_MILK_NOTICE);
+        expect(compareSpy).not.toHaveBeenCalled();
+        expect(getRuntimeShadowMemoryCounters().attempted).toBe(0);
+      },
+    );
+
+    it("executes shadow comparison on raw provider output when KCALCUE_QA_SERVING_SHADOW=1 and QA allowlist matches, without changing legacy response, provider calls, or quota", async () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      analyzeImage.mockResolvedValueOnce(c3Run1SingleOatCartonAnalysis);
+      const disabledResponse = await POST(jpegRequest());
+      const disabledBody = await disabledResponse.json();
+
+      vi.stubEnv(QA_SERVING_SHADOW_ENV, "1");
+      vi.stubEnv(QA_SHADOW_ALLOWED_EMAILS_ENV, "qa-tester@example.com");
+      authorize.mockResolvedValueOnce({
+        db: { fixture: true },
+        user: { id: "test-user", email: "qa-tester@example.com" },
+      });
+      analyzeImage.mockClear();
+      vi.mocked(reserveDailyLiveAnalysis).mockClear();
+      errorSpy.mockClear();
+
+      const rawInput = structuredClone(c3Run1SingleOatCartonAnalysis);
+      analyzeImage.mockResolvedValueOnce(rawInput);
+
+      const enabledResponse = await POST(jpegRequest());
+      const enabledBody = await enabledResponse.json();
+
+      expect(enabledResponse.status).toBe(200);
+      expect(enabledBody).toEqual(disabledBody);
+      expect(analyzeImage).toHaveBeenCalledOnce();
+      expect(reserveDailyLiveAnalysis).toHaveBeenCalledOnce();
+      // Raw input returned by provider was not mutated or pre-deduplicated before shadow comparison
+      expect(rawInput).toEqual(c3Run1SingleOatCartonAnalysis);
+
+      const shadowLogCalls = errorSpy.mock.calls.filter(call => call[0] === RUNTIME_SHADOW_LOG_TAG);
+      expect(shadowLogCalls).toHaveLength(1);
+      const diagnostic = publicShadowComparisonDiagnosticSchema.parse(shadowLogCalls[0][1]);
+      expect(diagnostic.outcomeKind).toBe("uncomparable_without_user_decision");
+      expect(diagnostic.outcomeReason).toBe("unknown_portion");
+      expect(diagnostic.counters?.observedMilkRows).toBe(2);
+      expect(diagnostic.counters?.legacyPendingSlots).toBe(1);
+      expect(diagnostic.counters?.shadowPendingSlots).toBe(1);
+
+      const serialized = JSON.stringify(shadowLogCalls);
+      expect(serialized).not.toContain("OATLY");
+      expect(serialized).not.toContain("test-user");
+      expect(serialized).not.toContain("qa-tester@example.com");
+    });
+
+    it("fails closed when KCALCUE_QA_SHADOW_ALLOWED_EMAILS is missing, empty, malformed, or not a subset of KCALCUE_ALLOWED_EMAILS, while keeping normal analysis 200 OK", async () => {
+      vi.stubEnv(QA_SERVING_SHADOW_ENV, "1");
+      const compareSpy = vi.spyOn(shadowComparatorModule, "compareMilkServingShadow");
+
+      for (const badAllowlist of [undefined, "", "   ", "not-an-email", "qa-only@example.com,bad"]) {
+        if (badAllowlist === undefined) {
+          delete process.env[QA_SHADOW_ALLOWED_EMAILS_ENV];
+        } else {
+          vi.stubEnv(QA_SHADOW_ALLOWED_EMAILS_ENV, badAllowlist);
+        }
+        authorize.mockResolvedValueOnce({
+          db: { fixture: true },
+          user: { id: "qa-user", email: "qa-only@example.com" },
+        });
+        analyzeImage.mockResolvedValueOnce(c3Run1SingleOatCartonAnalysis);
+        const res = await POST(jpegRequest());
+        expect(res.status).toBe(200);
+        expect(compareSpy).not.toHaveBeenCalled();
+      }
+
+      // Subset violation against KCALCUE_ALLOWED_EMAILS fails closed
+      clearRateLimitStore();
+      vi.mocked(acquireLiveAnalysis).mockReset().mockImplementation(createLiveAnalysisAdmission());
+      vi.stubEnv("KCALCUE_ALLOWED_EMAILS", "trial-user@example.com");
+      vi.stubEnv(QA_SHADOW_ALLOWED_EMAILS_ENV, "qa-only@example.com");
+      authorize.mockResolvedValueOnce({
+        db: { fixture: true },
+        user: { id: "qa-user", email: "qa-only@example.com" },
+      });
+      analyzeImage.mockResolvedValueOnce(c3Run1SingleOatCartonAnalysis);
+      const subsetFailRes = await POST(jpegRequest());
+      expect(subsetFailRes.status).toBe(200);
+      expect(compareSpy).not.toHaveBeenCalled();
+    });
+
+    it("never runs shadow comparison in demo mode, on unauthorized requests, for non-QA users, or on forged client headers/form fields", async () => {
+      vi.stubEnv(QA_SERVING_SHADOW_ENV, "1");
+      vi.stubEnv(QA_SHADOW_ALLOWED_EMAILS_ENV, "qa-only@example.com");
+      const compareSpy = vi.spyOn(shadowComparatorModule, "compareMilkServingShadow");
+
+      // 1. Demo mode
+      const demoForm = new FormData();
+      demoForm.set("mode", "demo");
+      const demoRes = await POST(new Request("http://localhost/api/analyze", { method: "POST", body: demoForm }));
+      expect(demoRes.status).toBe(200);
+      expect(compareSpy).not.toHaveBeenCalled();
+
+      // 2. Unauthorized request (401)
+      const { HttpError } = await import("@/lib/server/auth");
+      authorize.mockRejectedValueOnce(new HttpError(401, "login_required"));
+      const unauthRes = await POST(jpegRequest());
+      expect(unauthRes.status).toBe(401);
+      expect(compareSpy).not.toHaveBeenCalled();
+
+      // 3. Non-QA authenticated user + forged client identity headers & form fields
+      authorize.mockResolvedValueOnce({
+        db: { fixture: true },
+        user: { id: "regular-trial-user", email: "regular@example.com" },
+      });
+      analyzeImage.mockResolvedValueOnce(demoFoodAnalysis);
+      const forgedForm = new FormData();
+      forgedForm.set("image", new File([Uint8Array.from([0xff, 0xd8, 0xff, 0xd9])], "meal.jpg", { type: "image/jpeg" }));
+      forgedForm.set("userEmail", "qa-only@example.com");
+      forgedForm.set("email", "qa-only@example.com");
+      const nonQaRes = await POST(
+        new Request("http://localhost/api/analyze", {
+          method: "POST",
+          headers: {
+            "x-user-email": "qa-only@example.com",
+            "x-qa-email": "qa-only@example.com",
+            "x-forwarded-user": "qa-only@example.com",
+          },
+          body: forgedForm,
+        }),
+      );
+      expect(nonQaRes.status).toBe(200);
+      expect(compareSpy).not.toHaveBeenCalled();
+
+      // 4. Authorized QA user when KCALCUE_QA_SHADOW_ALLOWED_EMAILS matches (case-insensitive)
+      authorize.mockResolvedValueOnce({
+        db: { fixture: true },
+        user: { id: "qa-user", email: "QA-Only@example.com" },
+      });
+      analyzeImage.mockResolvedValueOnce(demoFoodAnalysis);
+      const qaRes = await POST(jpegRequest());
+      expect(qaRes.status).toBe(200);
+      expect(compareSpy).toHaveBeenCalledOnce();
+    });
+
+    it("preserves 200 OK live analysis response and redacts errors when the shadow engine throws", async () => {
+      vi.stubEnv(QA_SERVING_SHADOW_ENV, "1");
+      vi.stubEnv(QA_SHADOW_ALLOWED_EMAILS_ENV, "qa-only@example.com");
+      authorize.mockResolvedValueOnce({
+        db: { fixture: true },
+        user: { id: "qa-user", email: "qa-only@example.com" },
+      });
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      vi.spyOn(shadowComparatorModule, "compareMilkServingShadow").mockImplementationOnce(() => {
+        throw new Error("PRIVATE_CANARY_SHADOW_THROW_MESSAGE");
+      });
+      analyzeImage.mockResolvedValueOnce(c3Run1SingleOatCartonAnalysis);
+
+      const response = await POST(jpegRequest());
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.mode).toBe("live");
+      expect(body.analysis.foods).toHaveLength(1);
+      expect(body.analysis.foods[0].duplicateMilkNotice).toBe(MERGED_DUPLICATE_MILK_NOTICE);
+
+      const shadowLogCalls = errorSpy.mock.calls.filter(call => call[0] === RUNTIME_SHADOW_LOG_TAG);
+      expect(shadowLogCalls).toHaveLength(1);
+      const diagnostic = publicShadowComparisonDiagnosticSchema.parse(shadowLogCalls[0][1]);
+      expect(diagnostic.outcomeKind).toBe("investigation_required");
+      expect(diagnostic.outcomeReason).toBe("execution_failure");
+      expect(diagnostic.failureStage).toBe("engine");
+      expect(diagnostic.counters).toBeNull();
+      expect(JSON.stringify(shadowLogCalls)).not.toContain("PRIVATE_CANARY_SHADOW_THROW_MESSAGE");
+    });
   });
 });
