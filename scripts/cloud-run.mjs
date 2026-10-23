@@ -8,7 +8,7 @@ import { z } from "zod";
 const help = `Cloud Run private trial (explicit commands; staging never promotes)
   node scripts/cloud-run.mjs preflight --config /private/trial-config.json
   node scripts/cloud-run.mjs build --config /private/trial-config.json --tag <immutable-tag>
-  node scripts/cloud-run.mjs stage --config /private/trial-config.json --tag <verified-tag> --smoke-tag <cloud-run-tag> [--qa-suspected-milk]
+  node scripts/cloud-run.mjs stage --config /private/trial-config.json --tag <verified-tag> --smoke-tag <cloud-run-tag> [--qa-suspected-milk] [--qa-serving-shadow]
   node scripts/cloud-run.mjs promote --config /private/trial-config.json --revision <candidate-revision>
   node scripts/cloud-run.mjs untag --config /private/trial-config.json --tag <smoke-tag>
   node scripts/cloud-run.mjs access-stage --config /private/trial-config.json --smoke-tag <cloud-run-tag>
@@ -18,6 +18,7 @@ const help = `Cloud Run private trial (explicit commands; staging never promotes
   node scripts/cloud-run.mjs resume --config /private/trial-config.json
 stage creates a zero-traffic candidate, assigns --smoke-tag for a tagged preview URL, and does not call update-traffic.
 --qa-suspected-milk is stage-only. It sets KCALCUE_QA_SUSPECTED_MILK=1 on that candidate. promote, rollback, and access-promote refuse any revision that has the variable.
+--qa-serving-shadow is stage-only. It sets KCALCUE_QA_SERVING_SHADOW=1 on that candidate. promote, rollback, and access-promote refuse any revision that has the variable.
 promote is separate and requires the exact candidate revision after inspection and approval. A smoke tag is not promotion authority.
 untag --tag removes only that smoke tag and preserves the current production traffic allocation.
 access-stage reuses the current production image and changes only the account allowlist, at zero traffic.
@@ -43,7 +44,7 @@ const deployRetired = "deploy was split for safety and no longer stages and prom
 function main() {
   const { values, positionals } = parseArgs({ allowPositionals: true, options: {
     config: { type: "string" }, tag: { type: "string" }, "smoke-tag": { type: "string" }, revision: { type: "string" }, help: { type: "boolean" },
-    "qa-suspected-milk": { type: "boolean" },
+    "qa-suspected-milk": { type: "boolean" }, "qa-serving-shadow": { type: "boolean" },
   } });
   if (values.help || !positionals.length) { console.log(help); return; }
   const action = positionals[0];
@@ -72,6 +73,9 @@ function main() {
   }
   if (values["qa-suspected-milk"] === true && action !== "stage") {
     throw new Error("KCALCUE_QA_SUSPECTED_MILK can only be set on a zero-traffic stage.");
+  }
+  if (values["qa-serving-shadow"] === true && action !== "stage") {
+    throw new Error("KCALCUE_QA_SERVING_SHADOW can only be set on a zero-traffic stage.");
   }
   if ((action === "promote" || action === "access-promote") && !isRevision(values.revision)) throw new Error("Provide the verified candidate --revision.");
   if (action === "rollback" && !isRevision(values.revision)) throw new Error("Provide the previously verified --revision.");
@@ -423,6 +427,9 @@ function main() {
     if (container.env.some(entry => entry?.name === "KCALCUE_QA_SUSPECTED_MILK")) {
       throw new Error("QA suspected-milk fixture cannot receive production traffic; traffic was not changed.");
     }
+    if (container.env.some(entry => entry?.name === "KCALCUE_QA_SERVING_SHADOW" || entry?.name === "KCALCUE_QA_SHADOW_ALLOWED_EMAILS")) {
+      throw new Error("QA serving-shadow mode cannot receive production traffic; traffic was not changed.");
+    }
   }
   function pinnedImageForTag(tag) {
     const image = `${config.region}-docker.pkg.dev/${config.projectId}/kcalcue/web:${tag}`;
@@ -471,7 +478,10 @@ function main() {
     const pinnedImage = pinnedImageForTag(values.tag);
     const serving = readServingState();
     const analysisEnabled = serving ? serving.analysisEnabled : false;
-    const qaExtras = values["qa-suspected-milk"] === true ? { KCALCUE_QA_SUSPECTED_MILK: "1" } : {};
+    const qaExtras = {
+      ...(values["qa-suspected-milk"] === true ? { KCALCUE_QA_SUSPECTED_MILK: "1" } : {}),
+      ...(values["qa-serving-shadow"] === true ? { KCALCUE_QA_SERVING_SHADOW: "1" } : {}),
+    };
     const revision = withRuntimeFile(analysisEnabled, envFile => gcloud(["run", "deploy", "kcalcue", `--image=${pinnedImage}`,
       `--region=${config.region}`, `--service-account=kcalcue-runtime@${config.projectId}.iam.gserviceaccount.com`,
       "--allow-unauthenticated", "--no-traffic", "--port=8080", "--cpu=1", "--memory=1Gi", "--concurrency=4", "--timeout=120s",

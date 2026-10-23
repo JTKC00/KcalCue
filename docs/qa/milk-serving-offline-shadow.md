@@ -19,6 +19,9 @@ The script runs:
 2. `src/lib/evaluation/milk-serving-shadow-evaluation.test.ts` — focused named
    synthetic evaluation scenes with **hand-written** nutrient and outcome oracles (not
    copied from engine output).
+3. `src/lib/domain/milk-serving-runtime-shadow.test.ts` — Gate C runtime Shadow adapter
+   regressions (QA flag/principal gating, anti-double-deduplication, fault isolation,
+   redaction privacy, and performance bounds).
 
 Synthetic fixtures live in `src/lib/evaluation/milk-serving-shadow-evaluation.fixture.ts`.
 Domain test helpers remain in `src/lib/domain/milk-serving.fixture.ts`.

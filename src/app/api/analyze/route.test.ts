@@ -50,6 +50,15 @@ import { MERGED_DUPLICATE_MILK_NOTICE } from "@/lib/domain/milk-dedupe";
 import { c3Run1SingleOatCartonAnalysis } from "@/lib/nutrition/m7-milk-dedupe.fixture";
 import { qaSuspectedMilkAnalysis } from "@/lib/domain/qa-suspected-milk";
 import { preparePhotoMilkAnalysis } from "@/lib/domain/photo-milk-analysis";
+import { publicShadowComparisonDiagnosticSchema } from "@/lib/domain/milk-serving-shadow-comparator";
+import * as shadowComparatorModule from "@/lib/domain/milk-serving-shadow-comparator";
+import {
+  getRuntimeShadowMemoryCounters,
+  QA_SERVING_SHADOW_ENV,
+  QA_SHADOW_ALLOWED_EMAILS_ENV,
+  resetRuntimeShadowMemoryCounters,
+  RUNTIME_SHADOW_LOG_TAG,
+} from "@/lib/domain/milk-serving-runtime-shadow";
 import { POST } from "./route";
 import { provenanceMetadata } from "@/test/provenance-fixture";
 
@@ -116,11 +125,13 @@ describe("POST /api/analyze", () => {
     vi.mocked(acquirePublicBody).mockReset().mockImplementation(createPublicBodyAdmission());
     vi.mocked(reserveDailyLiveAnalysis).mockReset().mockResolvedValue({ allowed: true, retryAfterSeconds: 0 });
     clearRateLimitStore();
+    resetRuntimeShadowMemoryCounters();
     vi.spyOn(Date, "now").mockReturnValue(1_000_000);
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
   afterEach(() => {
+    resetRuntimeShadowMemoryCounters();
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
   });
@@ -695,5 +706,131 @@ describe("POST /api/analyze", () => {
     expect(await response.json()).toEqual({ error: { code: "invalid_file" } });
     expect(authorize).not.toHaveBeenCalled();
     expect(analyzeImage).not.toHaveBeenCalled();
+  });
+
+  describe("runtime milk-serving Shadow integration (Gate C)", () => {
+    it.each([undefined, "", "0", "false", "true", "yes", "qa_shadow"] as const)(
+      "does not run shadow comparison when KCALCUE_QA_SERVING_SHADOW is %j",
+      async flag => {
+        if (flag !== undefined) {
+          vi.stubEnv(QA_SERVING_SHADOW_ENV, flag);
+        }
+        const compareSpy = vi.spyOn(shadowComparatorModule, "compareMilkServingShadow");
+        analyzeImage.mockResolvedValueOnce(c3Run1SingleOatCartonAnalysis);
+
+        const response = await POST(jpegRequest());
+        const body = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(body.analysis.foods).toHaveLength(1);
+        expect(body.analysis.foods[0].duplicateMilkNotice).toBe(MERGED_DUPLICATE_MILK_NOTICE);
+        expect(compareSpy).not.toHaveBeenCalled();
+        expect(getRuntimeShadowMemoryCounters().attempted).toBe(0);
+      },
+    );
+
+    it("executes shadow comparison on raw provider output when KCALCUE_QA_SERVING_SHADOW=1 without changing legacy response, provider calls, or quota", async () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      analyzeImage.mockResolvedValueOnce(c3Run1SingleOatCartonAnalysis);
+      const disabledResponse = await POST(jpegRequest());
+      const disabledBody = await disabledResponse.json();
+
+      vi.stubEnv(QA_SERVING_SHADOW_ENV, "1");
+      analyzeImage.mockClear();
+      vi.mocked(reserveDailyLiveAnalysis).mockClear();
+      errorSpy.mockClear();
+
+      const rawInput = structuredClone(c3Run1SingleOatCartonAnalysis);
+      analyzeImage.mockResolvedValueOnce(rawInput);
+
+      const enabledResponse = await POST(jpegRequest());
+      const enabledBody = await enabledResponse.json();
+
+      expect(enabledResponse.status).toBe(200);
+      expect(enabledBody).toEqual(disabledBody);
+      expect(analyzeImage).toHaveBeenCalledOnce();
+      expect(reserveDailyLiveAnalysis).toHaveBeenCalledOnce();
+      // Raw input returned by provider was not mutated or pre-deduplicated before shadow comparison
+      expect(rawInput).toEqual(c3Run1SingleOatCartonAnalysis);
+
+      const shadowLogCalls = errorSpy.mock.calls.filter(call => call[0] === RUNTIME_SHADOW_LOG_TAG);
+      expect(shadowLogCalls).toHaveLength(1);
+      const diagnostic = publicShadowComparisonDiagnosticSchema.parse(shadowLogCalls[0][1]);
+      expect(diagnostic.outcomeKind).toBe("uncomparable_without_user_decision");
+      expect(diagnostic.outcomeReason).toBe("unknown_portion");
+      expect(diagnostic.counters?.observedMilkRows).toBe(2);
+      expect(diagnostic.counters?.legacyPendingSlots).toBe(1);
+      expect(diagnostic.counters?.shadowPendingSlots).toBe(1);
+
+      const serialized = JSON.stringify(shadowLogCalls);
+      expect(serialized).not.toContain("OATLY");
+      expect(serialized).not.toContain("test-user");
+    });
+
+    it("never runs shadow comparison in demo mode, on unauthorized requests, or for non-QA users", async () => {
+      vi.stubEnv(QA_SERVING_SHADOW_ENV, "1");
+      const compareSpy = vi.spyOn(shadowComparatorModule, "compareMilkServingShadow");
+
+      // 1. Demo mode
+      const demoForm = new FormData();
+      demoForm.set("mode", "demo");
+      const demoRes = await POST(new Request("http://localhost/api/analyze", { method: "POST", body: demoForm }));
+      expect(demoRes.status).toBe(200);
+      expect(compareSpy).not.toHaveBeenCalled();
+
+      // 2. Unauthorized request (401)
+      const { HttpError } = await import("@/lib/server/auth");
+      authorize.mockRejectedValueOnce(new HttpError(401, "login_required"));
+      const unauthRes = await POST(jpegRequest());
+      expect(unauthRes.status).toBe(401);
+      expect(compareSpy).not.toHaveBeenCalled();
+
+      // 3. Non-QA authenticated user when KCALCUE_QA_SHADOW_ALLOWED_EMAILS is set
+      vi.stubEnv(QA_SHADOW_ALLOWED_EMAILS_ENV, "qa-only@example.com");
+      authorize.mockResolvedValueOnce({
+        db: { fixture: true },
+        user: { id: "regular-trial-user", email: "regular@example.com" },
+      });
+      analyzeImage.mockResolvedValueOnce(demoFoodAnalysis);
+      const nonQaRes = await POST(jpegRequest());
+      expect(nonQaRes.status).toBe(200);
+      expect(compareSpy).not.toHaveBeenCalled();
+
+      // 4. Authorized QA user when KCALCUE_QA_SHADOW_ALLOWED_EMAILS matches
+      authorize.mockResolvedValueOnce({
+        db: { fixture: true },
+        user: { id: "qa-user", email: "QA-Only@example.com" },
+      });
+      analyzeImage.mockResolvedValueOnce(demoFoodAnalysis);
+      const qaRes = await POST(jpegRequest());
+      expect(qaRes.status).toBe(200);
+      expect(compareSpy).toHaveBeenCalledOnce();
+    });
+
+    it("preserves 200 OK live analysis response and redacts errors when the shadow engine throws", async () => {
+      vi.stubEnv(QA_SERVING_SHADOW_ENV, "1");
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      vi.spyOn(shadowComparatorModule, "compareMilkServingShadow").mockImplementationOnce(() => {
+        throw new Error("PRIVATE_CANARY_SHADOW_THROW_MESSAGE");
+      });
+      analyzeImage.mockResolvedValueOnce(c3Run1SingleOatCartonAnalysis);
+
+      const response = await POST(jpegRequest());
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.mode).toBe("live");
+      expect(body.analysis.foods).toHaveLength(1);
+      expect(body.analysis.foods[0].duplicateMilkNotice).toBe(MERGED_DUPLICATE_MILK_NOTICE);
+
+      const shadowLogCalls = errorSpy.mock.calls.filter(call => call[0] === RUNTIME_SHADOW_LOG_TAG);
+      expect(shadowLogCalls).toHaveLength(1);
+      const diagnostic = publicShadowComparisonDiagnosticSchema.parse(shadowLogCalls[0][1]);
+      expect(diagnostic.outcomeKind).toBe("investigation_required");
+      expect(diagnostic.outcomeReason).toBe("execution_failure");
+      expect(diagnostic.failureStage).toBe("engine");
+      expect(diagnostic.counters).toBeNull();
+      expect(JSON.stringify(shadowLogCalls)).not.toContain("PRIVATE_CANARY_SHADOW_THROW_MESSAGE");
+    });
   });
 });

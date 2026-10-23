@@ -15,7 +15,7 @@ const image = `asia-east1-docker.pkg.dev/demo-kcalcue/kcalcue/web@${digest}`;
 // The fake service template is contaminated with Gemini. A revision describe
 // returns the deployed env/secret replacement, unless a failure mode forces
 // the candidate to stay contaminated or to carry the wrong digest.
-function run(action: "pause" | "resume" | "deploy" | "rollback" | "stage" | "promote" | "preflight" | "untag" | "access-stage" | "access-promote", failure = "", options: { nutritionSecretVersion?: string; smokeTag?: string; omitSmokeTag?: boolean; existingSmokeTag?: boolean; allowedEmails?: string[]; revision?: string; qaSuspectedMilk?: boolean } = {}) {
+function run(action: "pause" | "resume" | "deploy" | "rollback" | "stage" | "promote" | "preflight" | "untag" | "access-stage" | "access-promote", failure = "", options: { nutritionSecretVersion?: string; smokeTag?: string; omitSmokeTag?: boolean; existingSmokeTag?: boolean; allowedEmails?: string[]; revision?: string; qaSuspectedMilk?: boolean; qaServingShadow?: boolean } = {}) {
   const directory = mkdtempSync(path.join(tmpdir(), "kcalcue-cloud-routing-test-"));
   temporary.push(directory);
   const executable = path.join(directory, "gcloud.mjs");
@@ -170,6 +170,8 @@ else if (matches('run', 'services', 'update') || matches('run', 'deploy')) {
   if (isCurrent && failure === 'serving-secret-drift') env.push({ name: 'OTHER_API_KEY', valueFrom: { secretKeyRef: { name: 'kcalcue-other', key: '1' } } });
   if (!isCurrent && failure === 'extra-secret') env.push({ name: 'OTHER_API_KEY', valueFrom: { secretKeyRef: { name: 'kcalcue-other', key: '1' } } });
   if (!isCurrent && failure === 'qa-suspected-milk') env.push({ name: 'KCALCUE_QA_SUSPECTED_MILK', value: '1' });
+  if (!isCurrent && failure === 'qa-serving-shadow') env.push({ name: 'KCALCUE_QA_SERVING_SHADOW', value: '1' });
+  if (!isCurrent && failure === 'qa-serving-shadow-off') env.push({ name: 'KCALCUE_QA_SERVING_SHADOW', value: 'off' });
   if (!isCurrent && (failure === 'wrong-nutrition-name' || failure === 'wrong-nutrition-version')) {
     env = env.map(entry => {
       if (entry.name !== 'NUTRITION_API_KEY' || !entry.valueFrom) return entry;
@@ -278,6 +280,7 @@ else if (matches('run', 'services', 'update') || matches('run', 'deploy')) {
     ...(action === "deploy" || action === "stage" ? ["--tag", "trial-test"] : []),
     ...(action === "stage" && !options.omitSmokeTag ? ["--smoke-tag", smokeTag] : []),
     ...(options.qaSuspectedMilk ? ["--qa-suspected-milk"] : []),
+    ...(options.qaServingShadow ? ["--qa-serving-shadow"] : []),
     ...(action === "untag" && !options.omitSmokeTag ? ["--tag", smokeTag] : []),
     ...(action === "rollback" ? ["--revision", "kcalcue-00002-old"] : []),
     ...(action === "promote" && failure !== "missing-revision" ? ["--revision", "kcalcue-00003-new"] : []),
@@ -336,6 +339,7 @@ describe("Cloud Run stage and promote", () => {
     expect(finalState.candidateEnv).not.toHaveProperty("GEMINI_MODEL");
     expect(finalState.candidateEnv).not.toHaveProperty("GEMINI_API_KEY");
     expect(finalState.candidateEnv).not.toHaveProperty("KCALCUE_QA_SUSPECTED_MILK");
+    expect(finalState.candidateEnv).not.toHaveProperty("KCALCUE_QA_SERVING_SHADOW");
     expect(finalState.secretFlag).toBe("--set-secrets=OPENAI_API_KEY=kcalcue-openai:1");
     expect(finalState.listedEnv).toEqual(expect.arrayContaining([
       { name: "KCALCUE_VISION_PROVIDER", value: "gemini" },
@@ -368,6 +372,33 @@ describe("Cloud Run stage and promote", () => {
     const { result, calls, finalState } = run(action, "qa-suspected-milk");
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("QA suspected-milk fixture cannot receive production traffic");
+    expect(result.stderr).toContain("traffic was not changed");
+    expect(trafficChanged(calls)).toBe(false);
+    expect(finalState.routedRevision).toBe("kcalcue-00001-old");
+  });
+
+  it("sets the serving-shadow QA flag only on a zero-traffic stage", () => {
+    const staged = run("stage", "", { qaServingShadow: true });
+    expect(staged.result.status, staged.result.stderr).toBe(0);
+    expect(trafficChanged(staged.calls)).toBe(false);
+    expect(staged.finalState.candidateEnv?.KCALCUE_QA_SERVING_SHADOW).toBe("1");
+    expect(staged.finalState.routedRevision).toBe("kcalcue-00001-old");
+
+    const promoted = run("promote", "", { qaServingShadow: true });
+    expect(promoted.result.status).toBe(1);
+    expect(promoted.result.stderr).toContain("KCALCUE_QA_SERVING_SHADOW can only be set on a zero-traffic stage");
+    expect(promoted.calls).toEqual([]);
+  });
+
+  it.each([
+    ["promote", "qa-serving-shadow"],
+    ["promote", "qa-serving-shadow-off"],
+    ["rollback", "qa-serving-shadow"],
+    ["rollback", "qa-serving-shadow-off"],
+  ] as const)("refuses production traffic for a revision that has the serving-shadow QA flag (%s / %s)", (action, failure) => {
+    const { result, calls, finalState } = run(action, failure);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("QA serving-shadow mode cannot receive production traffic");
     expect(result.stderr).toContain("traffic was not changed");
     expect(trafficChanged(calls)).toBe(false);
     expect(finalState.routedRevision).toBe("kcalcue-00001-old");
@@ -867,6 +898,15 @@ describe("allowlist-only access transition", () => {
     expect(trafficChanged(calls)).toBe(false);
     expect(finalState.routedRevision).toBe("kcalcue-00001-old");
     expect(calls.some(call => call.includes("update-traffic"))).toBe(false);
+
+    const shadow = run("access-promote", "qa-serving-shadow", added);
+    expect(shadow.result.status).toBe(1);
+    expect(shadow.result.stderr).toContain("QA serving-shadow mode cannot receive production traffic");
+    expect(shadow.result.stderr).toContain("traffic was not changed");
+    expect(shadow.result.stdout).not.toContain("PASS:");
+    expect(trafficChanged(shadow.calls)).toBe(false);
+    expect(shadow.finalState.routedRevision).toBe("kcalcue-00001-old");
+    expect(shadow.calls.some(call => call.includes("update-traffic"))).toBe(false);
   });
 
   it.each([
