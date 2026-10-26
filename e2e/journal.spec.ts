@@ -1112,6 +1112,37 @@ test("saving a meal never uploads or persists its source image", async ({
   ).not.toBeVisible();
 });
 
+test("Live analysis rate limiting falls back to client-side Demo without another analyze request", async ({ page, context }, testInfo) => {
+  const backend = cloud();
+  await backend.install(context);
+  let analyses = 0;
+  await page.route("**/api/analyze", async (route) => {
+    analyses++;
+    await route.fulfill({
+      status: 429,
+      headers: { "Retry-After": "60" },
+      json: { error: { code: "rate_limited" } },
+    });
+  });
+  await page.goto("/");
+  await login(page);
+  await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
+  await page.locator('input[type="file"]').nth(1).setInputFiles(path.join(testInfo.project.testDir, "fixtures/hk-milk-tea.jpg"));
+  await page.getByRole("button", { name: "開始分析", exact: true }).click();
+  await expect(page.getByRole("button", { name: "改用示範餐", exact: true })).toBeVisible();
+  expect(analyses).toBe(1);
+
+  await page.getByRole("button", { name: "改用示範餐", exact: true }).click();
+  await expect(page.getByText("示範結果", { exact: true })).toBeVisible();
+  const foods = page.getByRole("combobox", { name: "食物名稱", exact: true });
+  await expect(foods).toHaveCount(4);
+  for (const [index, name] of ["白飯", "雞扒", "青菜", "醬汁"].entries()) {
+    await expect(foods.nth(index)).toHaveValue(name);
+  }
+  await expect(page.getByRole("heading", { name: /約 .*kcal/ })).toBeVisible();
+  expect(analyses).toBe(1);
+});
+
 test("real photo preview with mocked analysis supports correction, reload, history, edit and delete", async ({ page, context }, testInfo) => {
   const backend = cloud();
   await backend.install(context);
@@ -1140,8 +1171,8 @@ test("real photo preview with mocked analysis supports correction, reload, histo
   await page.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
   await page.locator('input[type="file"]').nth(1).setInputFiles(path.join(testInfo.project.testDir, "fixtures/hk-milk-tea.jpg"));
   await expect(page.getByRole("img", { name: "已選擇的餐點相片預覽" })).toBeVisible();
-  // The server is intentionally in demo mode; only this response is mocked live.
-  // The photo remains local. This is not production real-image AI acceptance.
+  // Live HTTP analysis is intercepted; server-side paid analysis is disabled.
+  // The photo stays in the test browser. This is not real-image AI acceptance.
   await page.getByRole("button", { name: "開始分析", exact: true }).click();
   await expect(page.getByRole("heading", { name: "分析緊你嘅餐點…" })).toBeVisible();
   expect(analyses).toBe(1);
