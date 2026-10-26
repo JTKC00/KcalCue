@@ -201,6 +201,68 @@ describe("POST /api/meals bounded input", () => {
     expect(body.record.items[0].nutritionMatch.includedInTotal).toBe(true);
   });
 
+  it("saves a suspected milk row out of the total and reads the confirmed row back", async () => {
+    const whole = {
+      displayName: "全脂牛奶",
+      normalizedName: "whole milk",
+      identityLevel: "ingredient" as const,
+      portionMin: 250,
+      portionMax: 250,
+      unit: "ml" as const,
+      recognitionConfidence: 0.8,
+      portionConfidence: 0.7,
+      uncertaintyReasons: [] as string[],
+      entrySource: "photo" as const,
+    };
+    const saved = await POST(jsonRequest(JSON.stringify({
+      ...meal,
+      mode: "live",
+      analysis: null,
+      items: [
+        { ...whole, id: "milk-kept", originalPortionMin: 250, originalPortionMax: 250 },
+        { ...whole, id: "milk-extra", originalPortionMin: 250, originalPortionMax: 250, suspectedDuplicateMilk: true },
+      ],
+    })));
+    expect(saved.status).toBe(200);
+    const record = (await saved.json()).record as MealRecord;
+    expect(record.items).toHaveLength(2);
+    expect(record.items[0].suspectedDuplicateMilk).toBeUndefined();
+    expect(record.items[0].nutritionMatch?.includedInTotal).toBe(true);
+    expect(record.items[1].suspectedDuplicateMilk).toBe(true);
+    expect(record.items[1].nutritionMatch?.includedInTotal).toBe(false);
+
+    vi.mocked(listMeals).mockResolvedValueOnce([record]);
+    authorize.mockResolvedValueOnce({ db: { doc: () => ({ get: async () => ({ data: () => ({ revision: "rev-1" }) }) }) }, user: { id: "qa-user" } });
+    const listed = await GET(new Request("http://localhost/api/meals"));
+    expect(listed.status).toBe(200);
+    const listedItems = (await listed.json()).records[0].items as MealRecord["items"];
+    expect(listedItems[1].suspectedDuplicateMilk).toBe(true);
+
+    vi.mocked(previousMeal).mockResolvedValueOnce({
+      record: {
+        ...record,
+        schemaVersion: CURRENT_MEAL_SCHEMA_VERSION,
+        photoRef: null,
+        journalNote: record.journalNote ?? null,
+      },
+      deleted: false,
+    } as never);
+    const confirmed = { ...record.items[1] };
+    delete confirmed.suspectedDuplicateMilk;
+    const followUp = await POST(jsonRequest(JSON.stringify({
+      ...meal,
+      mode: "live",
+      version: record.version,
+      mutationId: "33333333-3333-4333-8333-333333333333",
+      items: [record.items[0], confirmed],
+    })));
+    expect(followUp.status).toBe(200);
+    const updated = (await followUp.json()).record as MealRecord;
+    expect(updated.items).toHaveLength(2);
+    expect(updated.items.every(item => item.suspectedDuplicateMilk == null)).toBe(true);
+    expect(updated.items.every(item => item.nutritionMatch?.includedInTotal)).toBe(true);
+  });
+
   it("recomputes a saved USDA gram match after a unit edit without another provider call", async () => {
     const localMatch = new LocalNutritionProvider().resolve({
       ...meal.items[0], identityLevel: "ingredient", unit: "g",

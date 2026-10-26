@@ -483,6 +483,39 @@ describe("recognised protein vegetable salad estimation", () => {
     expect(meal.foods[0]?.unavailableReason).toContain("個人食用份量未知");
   });
 
+  it("counts an unconfirmed duplicate in meal coverage but never counts its calories", () => {
+    const confirmed = makeFood({
+      displayName: "全脂牛奶", normalizedName: "whole milk",
+      portionMin: 250, portionMax: 250, unit: "ml",
+    });
+    const suspect = { ...confirmed, suspectedDuplicateMilk: true as const };
+    const matched = service.calculateMeal([confirmed]);
+    const pending = service.calculateMeal([confirmed, suspect]);
+    expect(matched.coverage).toBe("complete");
+    expect(matched.totalCount).toBe(1);
+    expect(pending.coverage).toBe("partial");
+    expect(pending.includedCount).toBe(1);
+    expect(pending.totalCount).toBe(2);
+    expect(pending.totals).toEqual(matched.totals);
+    expect(pending.foods[1]?.includedInTotal).toBe(false);
+    expect(pending.foods[1]?.ranges).toBeNull();
+    expect(pending.foods[1]?.unavailableReason).toContain("可能係同一份");
+    const confirmedSecond = service.calculateMeal([confirmed, confirmed]);
+    expect(confirmedSecond.coverage).toBe("complete");
+    expect(confirmedSecond.includedCount).toBe(2);
+    expect(confirmedSecond.totals.calories.min).toBe(matched.totals.calories.min * 2);
+  });
+
+  it("does not hide a pending duplicate from coverage when its personal portion is unknown", () => {
+    const confirmed = makeFood({ displayName: "全脂牛奶", normalizedName: "whole milk" });
+    const pending = { ...confirmed, portionMin: null, portionMax: null, suspectedDuplicateMilk: true as const };
+    const result = service.calculateMeal([confirmed, pending]);
+    expect(result.coverage).toBe("partial");
+    expect(result.totalCount).toBe(2);
+    expect(result.includedCount).toBe(1);
+    expect(result.foods[1]?.includedInTotal).toBe(false);
+  });
+
   it("does not calculate a meal the photo could not identify", () => {
     const meal = service.calculateMeal([]);
     expect(meal.coverage).toBe("none");

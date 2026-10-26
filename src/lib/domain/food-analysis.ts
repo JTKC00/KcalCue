@@ -27,6 +27,11 @@ const foodFields = {
   duplicateMilkNotice: z.string().trim().min(1).max(180).optional(),
   /** Server-generated plant-milk notice, also retained in client and saved analysis. */
   otherMilkNotice: z.string().trim().min(1).max(180).optional(),
+  /**
+   * Extra same-family milk row held out of the confirmed total until the
+   * user says it is a separate serving. Application output, not a model field.
+   */
+  suspectedDuplicateMilk: z.literal(true).optional(),
 };
 const positivePortionSchema = z.number().positive().max(5000);
 

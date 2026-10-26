@@ -2,6 +2,13 @@ import { NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 import type { AnalysisProvenanceMetadata } from "@/lib/domain/analysis-provenance";
 import { preparePhotoMilkAnalysis } from "@/lib/domain/photo-milk-analysis";
+import { runMilkServingRuntimeShadow } from "@/lib/domain/milk-serving-runtime-shadow";
+import {
+  QA_SUSPECTED_MILK_FIELD,
+  qaSuspectedMilkAnalysis,
+  qaSuspectedMilkFixtureEnabled,
+  qaSuspectedMilkRequested,
+} from "@/lib/domain/qa-suspected-milk";
 import { DemoFoodVisionProvider } from "@/lib/providers/food-vision/demo";
 import {
   extractOpenAIErrorDetails,
@@ -110,10 +117,12 @@ export async function POST(request: Request) {
     }
 
     let userId: string;
+    let userEmail: string | undefined;
     let userDb: Awaited<ReturnType<typeof authenticated>>["db"];
     try {
       const { user, db } = await authenticated(request);
       userId = user.id;
+      userEmail = "email" in user && typeof user.email === "string" ? user.email : undefined;
       userDb = db;
     } catch (error) {
       return apiError(error);
@@ -138,6 +147,16 @@ export async function POST(request: Request) {
 
     imageMimeType = detectedMimeType;
     imageByteSize = bytes.byteLength;
+    if (
+      qaSuspectedMilkFixtureEnabled() &&
+      qaSuspectedMilkRequested(formData.get(QA_SUSPECTED_MILK_FIELD))
+    ) {
+      return NextResponse.json({
+        analysis: preparePhotoMilkAnalysis(qaSuspectedMilkAnalysis),
+        analysisProvenance: null,
+        mode: "live" as const,
+      });
+    }
     const attemptId = formData.get("attemptId");
     if (attemptId !== null &&
       (typeof attemptId !== "string" ||
@@ -180,13 +199,24 @@ export async function POST(request: Request) {
         });
       }
       visionStartedAt = performance.now();
-      const analysis = preparePhotoMilkAnalysis(await provider.analyzeImage(
+      const rawAnalysis = await provider.analyzeImage(
         {
           data: bytes.toString("base64"),
           mimeType: detectedMimeType,
         },
         { signal: request.signal, onMetadata },
-      ));
+      );
+      const analysis = preparePhotoMilkAnalysis(rawAnalysis);
+      try {
+        runMilkServingRuntimeShadow({
+          rawAnalysis,
+          mode: provider.mode,
+          userId,
+          userEmail,
+        });
+      } catch {
+        // Non-authoritative shadow execution must never affect the live response.
+      }
       return NextResponse.json({ analysis, analysisProvenance, mode: provider.mode });
     } finally {
       release();

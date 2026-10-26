@@ -1,4 +1,5 @@
 import type { ObservedFood } from "@/lib/domain/food-analysis";
+import { SUSPECTED_DUPLICATE_MILK_NOTICE } from "@/lib/domain/milk-dedupe";
 import type {
   MealCoverage,
   NutrientRange,
@@ -96,6 +97,16 @@ export function calculateFoodNutrition(
   food: ObservedFood,
   match: NutritionMatch | null,
 ): CalculatedFood {
+  if (food.suspectedDuplicateMilk === true) {
+    return {
+      food,
+      profile: null,
+      match,
+      ranges: null,
+      includedInTotal: false,
+      unavailableReason: SUSPECTED_DUPLICATE_MILK_NOTICE,
+    };
+  }
   if (food.portionMin === null || food.portionMax === null) {
     return {
       food, profile: null, match: null, ranges: null, includedInTotal: false,
@@ -145,7 +156,13 @@ export function calculateMealNutrition(foods: CalculatedFood[]): CalculatedMeal 
   const totals = emptyRanges();
   let includedCount = 0;
 
+  // Pending duplicate rows never contribute calories, but they must remain
+  // visible in the meal's coverage denominator. A matched confirmed serving
+  // cannot make a meal with unresolved duplicate rows look complete.
+  let confirmedCount = 0;
   for (const food of foods) {
+    if (food.food.suspectedDuplicateMilk === true) continue;
+    confirmedCount += 1;
     if (!food.ranges || !food.includedInTotal) continue;
     includedCount += 1;
     addRange(totals.calories, food.ranges.calories);
@@ -154,11 +171,15 @@ export function calculateMealNutrition(foods: CalculatedFood[]): CalculatedMeal 
     addRange(totals.fat, food.ranges.fat);
   }
 
+  const confirmedCoverage = classifyMealCoverage(includedCount, confirmedCount);
+  const hasPendingDuplicate = confirmedCount < foods.length;
   return {
     foods,
     totals,
     midpointCalories: (totals.calories.min + totals.calories.max) / 2,
-    coverage: classifyMealCoverage(includedCount, foods.length),
+    // Keep the reliable confirmed subtotal visible, but never call it a
+    // complete meal when an unresolved extra serving could change that total.
+    coverage: hasPendingDuplicate && confirmedCoverage === "complete" ? "partial" : confirmedCoverage,
     includedCount,
     totalCount: foods.length,
   };
