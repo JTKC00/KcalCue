@@ -98,6 +98,7 @@ describe("POST /api/nutrition/resolve", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
     clearUsdaCache();
     vi.restoreAllMocks();
   });
@@ -552,6 +553,130 @@ describe("POST /api/nutrition/resolve", () => {
     expect(blocked.status).toBe(429);
     expect(blocked.headers.get("Retry-After")).toBe("60");
     expect(body).toEqual({ error: { code: "rate_limited" } });
+  });
+
+  it("blocks rotating X-Forwarded-For and X-Real-IP spoofing while keeping verified UID buckets independent", async () => {
+    for (let index = 0; index < NUTRITION_RATE_LIMIT.limit; index += 1) {
+      const allowed = await POST(
+        new Request("http://localhost/api/nutrition/resolve", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-forwarded-for": `198.51.100.${index + 1}`,
+            "x-real-ip": `192.0.2.${index + 1}`,
+          },
+          body: JSON.stringify({ foods: [banana] }),
+        }),
+      );
+      expect(allowed.status).toBe(200);
+    }
+
+    const blockedAnonymous = await POST(
+      new Request("http://localhost/api/nutrition/resolve", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-forwarded-for": "203.0.113.250",
+          "x-real-ip": "198.51.100.250",
+        },
+        body: JSON.stringify({ foods: [banana] }),
+      }),
+    );
+    expect(blockedAnonymous.status).toBe(429);
+    expect(blockedAnonymous.headers.get("Retry-After")).toBe("60");
+    expect(await blockedAnonymous.json()).toEqual({ error: { code: "rate_limited" } });
+
+    // A verified user can still resolve local and remote foods with their own UID bucket.
+    for (let index = 0; index < NUTRITION_RATE_LIMIT.limit; index += 1) {
+      const allowedUser = await POST(
+        new Request("http://localhost/api/nutrition/resolve", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer valid-token",
+            "x-forwarded-for": `198.51.100.${index + 50}`,
+          },
+          body: JSON.stringify({ foods: [banana] }),
+        }),
+      );
+      expect(allowedUser.status).toBe(200);
+    }
+
+    const blockedUser = await POST(
+      new Request("http://localhost/api/nutrition/resolve", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer valid-token",
+          "x-forwarded-for": "198.51.100.251",
+        },
+        body: JSON.stringify({ foods: [banana] }),
+      }),
+    );
+    expect(blockedUser.status).toBe(429);
+    expect(blockedUser.headers.get("Retry-After")).toBe("60");
+
+    // Another verified user's UID bucket remains unaffected.
+    vi.mocked(authenticated).mockResolvedValueOnce({
+      db: {} as Awaited<ReturnType<typeof authenticated>>["db"],
+      user: { id: "second-verified-user", email: "second@example.test" },
+    } as Awaited<ReturnType<typeof authenticated>>);
+    const secondUser = await POST(
+      new Request("http://localhost/api/nutrition/resolve", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer second-token",
+        },
+        body: JSON.stringify({ foods: [banana] }),
+      }),
+    );
+    expect(secondUser.status).toBe(200);
+  });
+
+  it("enforces per-IP nutrition rate limits behind a configured trusted proxy chain even when left-most XFF rotates", async () => {
+    vi.stubEnv("KCALCUE_TRUSTED_PROXY_HOPS", "2");
+
+    for (let index = 0; index < NUTRITION_RATE_LIMIT.limit; index += 1) {
+      const allowed = await POST(
+        new Request("http://localhost/api/nutrition/resolve", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-forwarded-for": `198.51.100.${index + 1}, 203.0.113.50, 10.0.0.1`,
+            "x-real-ip": `192.0.2.${index + 1}`,
+          },
+          body: JSON.stringify({ foods: [banana] }),
+        }),
+      );
+      expect(allowed.status).toBe(200);
+    }
+
+    const blockedSameIp = await POST(
+      new Request("http://localhost/api/nutrition/resolve", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-forwarded-for": "198.51.100.250, 203.0.113.50, 10.0.0.1",
+          "x-real-ip": "192.0.2.250",
+        },
+        body: JSON.stringify({ foods: [banana] }),
+      }),
+    );
+    expect(blockedSameIp.status).toBe(429);
+    expect(blockedSameIp.headers.get("Retry-After")).toBe("60");
+
+    const allowedOtherIp = await POST(
+      new Request("http://localhost/api/nutrition/resolve", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-forwarded-for": "203.0.113.51, 10.0.0.1",
+        },
+        body: JSON.stringify({ foods: [banana] }),
+      }),
+    );
+    expect(allowedOtherIp.status).toBe(200);
   });
 
   it.each([undefined, "8"])(

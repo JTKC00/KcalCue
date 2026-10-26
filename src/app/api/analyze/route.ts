@@ -57,6 +57,21 @@ function errorResponse(code: string, status: number) {
   return NextResponse.json({ error: { code } }, { status });
 }
 
+function rateLimitedResponse(retryAfterSeconds?: number) {
+  const limited = rateLimitedJsonResponse(retryAfterSeconds);
+  return NextResponse.json(limited.body, {
+    status: limited.status,
+    headers: limited.headers,
+  });
+}
+
+function allowPreAdmissionReject(ip: string, userId: string): boolean {
+  return (
+    ip !== "unknown" ||
+    consumeRateLimit(`analyze:uid-reject:${userId}`, ANALYZE_RATE_LIMIT).allowed
+  );
+}
+
 export async function POST(request: Request) {
   let imageMimeType = "unknown";
   let imageByteSize = 0;
@@ -68,21 +83,13 @@ export async function POST(request: Request) {
 
   try {
     const ip = clientIpFromHeaders(request.headers);
-    if (!consumeRateLimit(`analyze:${ip}`, ANALYZE_RATE_LIMIT).allowed) {
-      const limited = rateLimitedJsonResponse();
-      return NextResponse.json(limited.body, {
-        status: limited.status,
-        headers: limited.headers,
-      });
+    if (ip !== "unknown" && !consumeRateLimit(`analyze:ip:${ip}`, ANALYZE_RATE_LIMIT).allowed) {
+      return rateLimitedResponse();
     }
 
     const bodyAdmission = acquirePublicBody("analyze");
     if (!bodyAdmission.release) {
-      const limited = rateLimitedJsonResponse(bodyAdmission.retryAfterSeconds);
-      return NextResponse.json(limited.body, {
-        status: limited.status,
-        headers: limited.headers,
-      });
+      return rateLimitedResponse(bodyAdmission.retryAfterSeconds);
     }
 
     let formData: FormData;
@@ -105,6 +112,20 @@ export async function POST(request: Request) {
     visionMode = provider.mode;
 
     if (provider.mode === "demo") {
+      if (ip === "unknown") {
+        let demoBucket = "analyze:anonymous";
+        if (request.headers.get("authorization")?.startsWith("Bearer ")) {
+          try {
+            const { user } = await authenticated(request);
+            demoBucket = `analyze:uid:${user.id}`;
+          } catch {
+            demoBucket = "analyze:anonymous";
+          }
+        }
+        if (!consumeRateLimit(demoBucket, ANALYZE_RATE_LIMIT).allowed) {
+          return rateLimitedResponse();
+        }
+      }
       visionStartedAt = performance.now();
       const analysis = preparePhotoMilkAnalysis(await provider.analyzeImage(
         {
@@ -125,23 +146,30 @@ export async function POST(request: Request) {
       userEmail = "email" in user && typeof user.email === "string" ? user.email : undefined;
       userDb = db;
     } catch (error) {
+      if (ip === "unknown" && !consumeRateLimit("analyze:anonymous", ANALYZE_RATE_LIMIT).allowed) {
+        return rateLimitedResponse();
+      }
       return apiError(error);
     }
     if (process.env.KCALCUE_ANALYSIS_ENABLED === "false") {
+      if (!allowPreAdmissionReject(ip, userId)) return rateLimitedResponse();
       return errorResponse("analysis_paused", 503);
     }
 
     const image = formData.get("image");
     if (!(image instanceof File) || image.size === 0) {
+      if (!allowPreAdmissionReject(ip, userId)) return rateLimitedResponse();
       return errorResponse("missing_image", 400);
     }
     if (image.size > MAX_IMAGE_BYTES) {
+      if (!allowPreAdmissionReject(ip, userId)) return rateLimitedResponse();
       return errorResponse("file_too_large", 413);
     }
 
     const bytes = Buffer.from(await image.arrayBuffer());
     const detectedMimeType = detectSupportedImageMimeType(bytes);
     if (!detectedMimeType) {
+      if (!allowPreAdmissionReject(ip, userId)) return rateLimitedResponse();
       return errorResponse("invalid_file", 415);
     }
 
@@ -160,8 +188,10 @@ export async function POST(request: Request) {
     const attemptId = formData.get("attemptId");
     if (attemptId !== null &&
       (typeof attemptId !== "string" ||
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(attemptId)))
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(attemptId))) {
+      if (!allowPreAdmissionReject(ip, userId)) return rateLimitedResponse();
       return errorResponse("invalid_request", 400);
+    }
     const attempt = attemptId === null ? undefined : {
       id: attemptId.toLowerCase(),
       // Salt the fingerprint by verified account so it cannot correlate photos
@@ -170,11 +200,7 @@ export async function POST(request: Request) {
     };
     const release = acquireLiveAnalysis(userId);
     if (!release) {
-      const limited = rateLimitedJsonResponse();
-      return NextResponse.json(limited.body, {
-        status: limited.status,
-        headers: limited.headers,
-      });
+      return rateLimitedResponse();
     }
 
     try {

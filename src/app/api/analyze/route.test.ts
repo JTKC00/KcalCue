@@ -572,6 +572,97 @@ describe("POST /api/analyze", () => {
     expect(analyzeImage).toHaveBeenCalledTimes(ANALYZE_RATE_LIMIT.limit);
   });
 
+  it("blocks unauthenticated and demo header-spoofing floods while keeping verified accounts usable", async () => {
+    analyzeImage.mockResolvedValue(demoFoodAnalysis);
+    for (let index = 0; index < ANALYZE_RATE_LIMIT.limit; index += 1) {
+      const demoForm = new FormData();
+      demoForm.set("mode", "demo");
+      const demo = await POST(
+        new Request("http://localhost/api/analyze", {
+          method: "POST",
+          headers: {
+            "x-forwarded-for": `198.51.100.${index + 1}`,
+            "x-real-ip": `192.0.2.${index + 1}`,
+          },
+          body: demoForm,
+        }),
+      );
+      expect(demo.status).toBe(200);
+    }
+
+    const blockedDemoForm = new FormData();
+    blockedDemoForm.set("mode", "demo");
+    const blockedDemo = await POST(
+      new Request("http://localhost/api/analyze", {
+        method: "POST",
+        headers: {
+          "x-forwarded-for": "198.51.100.99",
+          "x-real-ip": "192.0.2.99",
+        },
+        body: blockedDemoForm,
+      }),
+    );
+    expect(blockedDemo.status).toBe(429);
+    expect(blockedDemo.headers.get("Retry-After")).toBe("60");
+    expect(await blockedDemo.json()).toEqual({ error: { code: "rate_limited" } });
+
+    const { HttpError } = await import("@/lib/server/auth");
+    authorize.mockRejectedValueOnce(new HttpError(401, "login_required"));
+    const blockedUnauthenticated = await POST(
+      jpegRequest("meal.jpg", "image/jpeg", {
+        "x-forwarded-for": "198.51.100.100",
+        "x-real-ip": "192.0.2.100",
+      }),
+    );
+    expect(blockedUnauthenticated.status).toBe(429);
+    expect(blockedUnauthenticated.headers.get("Retry-After")).toBe("60");
+
+    // A verified user is still admitted despite anonymous bucket exhaustion.
+    const verifiedLive = await POST(jpegRequest());
+    expect(verifiedLive.status).toBe(200);
+  });
+
+  it("enforces per-IP analyze rate limits behind a configured trusted proxy chain even when left-most XFF rotates", async () => {
+    vi.stubEnv("KCALCUE_TRUSTED_PROXY_HOPS", "2");
+    analyzeImage.mockResolvedValue(demoFoodAnalysis);
+
+    for (let index = 0; index < ANALYZE_RATE_LIMIT.limit; index += 1) {
+      authorize.mockResolvedValueOnce({
+        db: { fixture: true },
+        user: { id: `user-${index}` },
+      });
+      const allowed = await POST(
+        jpegRequest("meal.jpg", "image/jpeg", {
+          "x-forwarded-for": `198.51.100.${index + 1}, 203.0.113.40, 10.0.0.1`,
+          "x-real-ip": `192.0.2.${index + 1}`,
+        }),
+      );
+      expect(allowed.status).toBe(200);
+    }
+
+    const blockedSameTrustedIp = await POST(
+      jpegRequest("meal.jpg", "image/jpeg", {
+        "x-forwarded-for": "198.51.100.250, 203.0.113.40, 10.0.0.1",
+        "x-real-ip": "192.0.2.250",
+      }),
+    );
+    expect(blockedSameTrustedIp.status).toBe(429);
+    expect(blockedSameTrustedIp.headers.get("Retry-After")).toBe("60");
+    expect(authorize).toHaveBeenCalledTimes(ANALYZE_RATE_LIMIT.limit);
+
+    // Another client IP through the same trusted proxy still succeeds.
+    authorize.mockResolvedValueOnce({
+      db: { fixture: true },
+      user: { id: "user-other-ip" },
+    });
+    const allowedOtherIp = await POST(
+      jpegRequest("meal.jpg", "image/jpeg", {
+        "x-forwarded-for": "203.0.113.41, 10.0.0.1",
+      }),
+    );
+    expect(allowedOtherIp.status).toBe(200);
+  });
+
   it("rejects an oversized multipart request before parsing the body", async () => {
     const response = await POST(
       new Request("http://localhost/api/analyze", {
