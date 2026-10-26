@@ -7,9 +7,10 @@ export interface RateLimitConfig {
 
 export interface ClientIpTrustOptions {
   /**
-   * Number of trusted reverse-proxy hops that append to X-Forwarded-For.
-   * Defaults to KCALCUE_TRUSTED_PROXY_HOPS when set, or 0 (untrusted) when
-   * multiple entry points with different hop counts are active.
+   * Number of trusted reverse-proxy hops that append to X-Forwarded-For when
+   * every active entry point is guaranteed to traverse the exact same proxy
+   * chain. Must remain 0 (untrusted) while mixed ingress topologies (e.g.
+   * Firebase Hosting Rewrite + Cloud Run direct URL) are both reachable.
    */
   trustedProxyHops?: number;
 }
@@ -48,17 +49,12 @@ export function clearRateLimitStore() {
 }
 
 function resolveTrustedProxyHops(options?: ClientIpTrustOptions): number {
-  if (options?.trustedProxyHops !== undefined) {
-    const hops = options.trustedProxyHops;
-    return Number.isSafeInteger(hops) && hops >= 1 && hops <= MAX_TRUSTED_PROXY_HOPS
-      ? hops
-      : 0;
+  if (options?.trustedProxyHops === undefined) {
+    return 0;
   }
-  const raw = process.env.KCALCUE_TRUSTED_PROXY_HOPS?.trim();
-  if (!raw || !/^[1-9]\d*$/.test(raw)) return 0;
-  const parsed = Number(raw);
-  return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= MAX_TRUSTED_PROXY_HOPS
-    ? parsed
+  const hops = options.trustedProxyHops;
+  return Number.isSafeInteger(hops) && hops >= 1 && hops <= MAX_TRUSTED_PROXY_HOPS
+    ? hops
     : 0;
 }
 
@@ -105,14 +101,6 @@ export function clientIpFromHeaders(
 ): string {
   const trustedProxyHops = resolveTrustedProxyHops(options);
   if (trustedProxyHops < 1) return "unknown";
-
-  const proto = headers.get("x-forwarded-proto");
-  if (proto !== null) {
-    const normalizedProto = proto.trim().toLowerCase();
-    if (normalizedProto !== "https" && normalizedProto !== "http") {
-      return "unknown";
-    }
-  }
 
   const forwarded = headers.get("x-forwarded-for");
   if (

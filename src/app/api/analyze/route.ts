@@ -97,6 +97,9 @@ export async function POST(request: Request) {
       const bytes = await readBoundedRequestBody(request, MAX_MULTIPART_BYTES);
       formData = await new Response(bytes, { headers: request.headers }).formData();
     } catch (error) {
+      if (ip === "unknown" && !consumeRateLimit("analyze:anonymous", ANALYZE_RATE_LIMIT).allowed) {
+        return rateLimitedResponse();
+      }
       return error instanceof RequestBodyTooLargeError
         ? errorResponse("file_too_large", 413)
         : error instanceof RequestBodyTimeoutError

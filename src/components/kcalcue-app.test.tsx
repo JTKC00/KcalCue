@@ -116,25 +116,34 @@ describe("KcalCueApp analysis cancel", () => {
     expect(screen.queryByAltText("已選擇的餐點相片預覽")).not.toBeInTheDocument();
   });
 
-  it("completes a demo analysis after cancel is not pressed", async () => {
+  it("completes a demo analysis after cancel is not pressed without consuming server /api/analyze quota, allowing unlimited visitor demo runs and live->demo fallback under 429", async () => {
     const user = userEvent.setup();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => {
-        return new Response(
-          JSON.stringify({ analysis: demoFoodAnalysis, mode: "demo" }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }),
+    const fetchMock = vi.fn(async () =>
+      Response.json({ error: { code: "rate_limited" } }, { status: 429, headers: { "Retry-After": "60" } }),
     );
+    vi.stubGlobal("fetch", fetchMock);
 
-    render(<KcalCueApp initialProviderMode="demo" />);
+    const view = render(<KcalCueApp initialProviderMode="demo" />);
     const libraryInput = document.querySelectorAll<HTMLInputElement>('input[type="file"]')[1];
     await user.upload(libraryInput!, pngFile());
     await user.click(screen.getByRole("button", { name: /開始分析/ }));
 
     expect(await screen.findByRole("heading", { name: /約 .*kcal/ })).toBeInTheDocument();
     expect(screen.getByText("示範結果")).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // Even when /api/analyze returns 429 rate_limited in live mode, switching to demo succeeds locally.
+    view.unmount();
+    render(<KcalCueApp initialProviderMode="live" />);
+    await user.upload(document.querySelectorAll<HTMLInputElement>('input[type="file"]')[1]!, pngFile());
+    await user.click(screen.getByRole("button", { name: /開始分析/ }));
+    expect(await screen.findByRole("button", { name: copy.useDemo })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: copy.useDemo }));
+    expect(await screen.findByRole("heading", { name: /約 .*kcal/ })).toBeInTheDocument();
+    expect(screen.getByText("示範結果")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("keeps an unknown personal portion blank until the user enters their own amount", async () => {

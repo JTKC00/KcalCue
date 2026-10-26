@@ -15,10 +15,12 @@ describe("clientIpFromHeaders", () => {
     vi.unstubAllEnvs();
   });
 
-  it("does not trust x-forwarded-for or x-real-ip by default when no proxy hop count is configured", () => {
+  it("does not trust x-forwarded-for, x-real-ip, x-forwarded-proto, or KCALCUE_TRUSTED_PROXY_HOPS env by default", () => {
+    vi.stubEnv("KCALCUE_TRUSTED_PROXY_HOPS", "2");
     const headers = new Headers({
       "x-forwarded-for": "203.0.113.10, 10.0.0.1",
       "x-real-ip": "198.51.100.2",
+      "x-forwarded-proto": "https",
     });
     expect(clientIpFromHeaders(headers)).toBe("unknown");
     expect(clientIpFromHeaders(new Headers({ "x-real-ip": "198.51.100.2" }))).toBe(
@@ -27,21 +29,18 @@ describe("clientIpFromHeaders", () => {
     expect(clientIpFromHeaders(new Headers())).toBe("unknown");
   });
 
-  it("extracts the verified client hop for a configured single-hop or multi-hop proxy chain and ignores spoofed prefixes", () => {
+  it("extracts the verified client hop for an explicitly configured single-hop or multi-hop proxy chain and ignores spoofed prefixes", () => {
     const singleHop = new Headers({
       "x-forwarded-for": "198.51.100.99, 198.51.100.98, 203.0.113.10",
       "x-real-ip": "10.1.1.1",
-      "x-forwarded-proto": "https",
     });
     expect(clientIpFromHeaders(singleHop, { trustedProxyHops: 1 })).toBe("203.0.113.10");
 
-    vi.stubEnv("KCALCUE_TRUSTED_PROXY_HOPS", "2");
     const twoHop = new Headers({
       "x-forwarded-for": "198.51.100.77, 203.0.113.25, 10.0.0.1",
       "x-real-ip": "10.1.1.1",
-      "x-forwarded-proto": "https",
     });
-    expect(clientIpFromHeaders(twoHop)).toBe("203.0.113.25");
+    expect(clientIpFromHeaders(twoHop, { trustedProxyHops: 2 })).toBe("203.0.113.25");
   });
 
   it("normalizes IPv4-mapped IPv6 and different IPv6 representations to the same canonical address", () => {
@@ -121,19 +120,16 @@ describe("clientIpFromHeaders", () => {
         { trustedProxyHops: 1 },
       ),
     ).toBe("unknown");
-    // Invalid x-forwarded-proto or invalid env configuration
+    // Out-of-range trustedProxyHops option fails closed
     expect(
-      clientIpFromHeaders(
-        new Headers({
-          "x-forwarded-for": "203.0.113.10",
-          "x-forwarded-proto": "javascript",
-        }),
-        { trustedProxyHops: 1 },
-      ),
+      clientIpFromHeaders(new Headers({ "x-forwarded-for": "203.0.113.10" }), {
+        trustedProxyHops: 0,
+      }),
     ).toBe("unknown");
-    vi.stubEnv("KCALCUE_TRUSTED_PROXY_HOPS", "invalid");
     expect(
-      clientIpFromHeaders(new Headers({ "x-forwarded-for": "203.0.113.10" })),
+      clientIpFromHeaders(new Headers({ "x-forwarded-for": "203.0.113.10" }), {
+        trustedProxyHops: 99,
+      }),
     ).toBe("unknown");
   });
 });

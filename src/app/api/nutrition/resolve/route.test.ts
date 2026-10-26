@@ -634,7 +634,7 @@ describe("POST /api/nutrition/resolve", () => {
     expect(secondUser.status).toBe(200);
   });
 
-  it("enforces per-IP nutrition rate limits behind a configured trusted proxy chain even when left-most XFF rotates", async () => {
+  it("fails closed when KCALCUE_TRUSTED_PROXY_HOPS is set in env so mixed-ingress XFF spoofing cannot bypass nutrition rate limits", async () => {
     vi.stubEnv("KCALCUE_TRUSTED_PROXY_HOPS", "2");
 
     for (let index = 0; index < NUTRITION_RATE_LIMIT.limit; index += 1) {
@@ -643,8 +643,9 @@ describe("POST /api/nutrition/resolve", () => {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-forwarded-for": `198.51.100.${index + 1}, 203.0.113.50, 10.0.0.1`,
+            "x-forwarded-for": `198.51.100.${index + 1}, 10.0.0.1`,
             "x-real-ip": `192.0.2.${index + 1}`,
+            "x-forwarded-proto": "https",
           },
           body: JSON.stringify({ foods: [banana] }),
         }),
@@ -652,31 +653,20 @@ describe("POST /api/nutrition/resolve", () => {
       expect(allowed.status).toBe(200);
     }
 
-    const blockedSameIp = await POST(
+    const blockedSpoofedHop = await POST(
       new Request("http://localhost/api/nutrition/resolve", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-forwarded-for": "198.51.100.250, 203.0.113.50, 10.0.0.1",
+          "x-forwarded-for": "203.0.113.99, 10.0.0.1",
           "x-real-ip": "192.0.2.250",
+          "x-forwarded-proto": "https",
         },
         body: JSON.stringify({ foods: [banana] }),
       }),
     );
-    expect(blockedSameIp.status).toBe(429);
-    expect(blockedSameIp.headers.get("Retry-After")).toBe("60");
-
-    const allowedOtherIp = await POST(
-      new Request("http://localhost/api/nutrition/resolve", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-forwarded-for": "203.0.113.51, 10.0.0.1",
-        },
-        body: JSON.stringify({ foods: [banana] }),
-      }),
-    );
-    expect(allowedOtherIp.status).toBe(200);
+    expect(blockedSpoofedHop.status).toBe(429);
+    expect(blockedSpoofedHop.headers.get("Retry-After")).toBe("60");
   });
 
   it.each([undefined, "8"])(
