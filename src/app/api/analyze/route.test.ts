@@ -572,6 +572,171 @@ describe("POST /api/analyze", () => {
     expect(analyzeImage).toHaveBeenCalledTimes(ANALYZE_RATE_LIMIT.limit);
   });
 
+  it("blocks unauthenticated and demo header-spoofing floods while keeping verified accounts usable", async () => {
+    analyzeImage.mockResolvedValue(demoFoodAnalysis);
+    for (let index = 0; index < ANALYZE_RATE_LIMIT.limit; index += 1) {
+      const demoForm = new FormData();
+      demoForm.set("mode", "demo");
+      const demo = await POST(
+        new Request("http://localhost/api/analyze", {
+          method: "POST",
+          headers: {
+            "x-forwarded-for": `198.51.100.${index + 1}`,
+            "x-real-ip": `192.0.2.${index + 1}`,
+          },
+          body: demoForm,
+        }),
+      );
+      expect(demo.status).toBe(200);
+    }
+
+    const blockedDemoForm = new FormData();
+    blockedDemoForm.set("mode", "demo");
+    const blockedDemo = await POST(
+      new Request("http://localhost/api/analyze", {
+        method: "POST",
+        headers: {
+          "x-forwarded-for": "198.51.100.99",
+          "x-real-ip": "192.0.2.99",
+        },
+        body: blockedDemoForm,
+      }),
+    );
+    expect(blockedDemo.status).toBe(429);
+    expect(blockedDemo.headers.get("Retry-After")).toBe("60");
+    expect(await blockedDemo.json()).toEqual({ error: { code: "rate_limited" } });
+
+    const { HttpError } = await import("@/lib/server/auth");
+    authorize.mockRejectedValueOnce(new HttpError(401, "login_required"));
+    const blockedUnauthenticated = await POST(
+      jpegRequest("meal.jpg", "image/jpeg", {
+        "x-forwarded-for": "198.51.100.100",
+        "x-real-ip": "192.0.2.100",
+      }),
+    );
+    expect(blockedUnauthenticated.status).toBe(429);
+    expect(blockedUnauthenticated.headers.get("Retry-After")).toBe("60");
+
+    // A verified user is still admitted despite anonymous bucket exhaustion.
+    const verifiedLive = await POST(jpegRequest());
+    expect(verifiedLive.status).toBe(200);
+  });
+
+  it("fails closed when KCALCUE_TRUSTED_PROXY_HOPS is set so mixed-ingress XFF spoofing cannot bypass rate limits, and rate-limits malformed, oversized, and timed-out multipart floods without blocking verified accounts", async () => {
+    vi.stubEnv("KCALCUE_TRUSTED_PROXY_HOPS", "2");
+    analyzeImage.mockResolvedValue(demoFoodAnalysis);
+
+    // 1. Malformed multipart flood with rotating spoofed XFF + X-Forwarded-Proto
+    for (let index = 0; index < ANALYZE_RATE_LIMIT.limit; index += 1) {
+      const malformed = await POST(
+        new Request("http://localhost/api/analyze", {
+          method: "POST",
+          headers: {
+            "content-type": "multipart/form-data; boundary=test",
+            "x-forwarded-for": `198.51.100.${index + 1}, 10.0.0.1`,
+            "x-real-ip": `192.0.2.${index + 1}`,
+            "x-forwarded-proto": "https",
+          },
+          body: "--test\r\nunfinished-private-input",
+        }),
+      );
+      expect(malformed.status).toBe(400);
+      expect(await malformed.json()).toEqual({ error: { code: "invalid_file" } });
+    }
+
+    const blockedMalformed = await POST(
+      new Request("http://localhost/api/analyze", {
+        method: "POST",
+        headers: {
+          "content-type": "multipart/form-data; boundary=test",
+          "x-forwarded-for": "198.51.100.250, 10.0.0.1",
+          "x-real-ip": "192.0.2.250",
+          "x-forwarded-proto": "https",
+        },
+        body: "--test\r\nunfinished-private-input",
+      }),
+    );
+    expect(blockedMalformed.status).toBe(429);
+    expect(blockedMalformed.headers.get("Retry-After")).toBe("60");
+    expect(await blockedMalformed.json()).toEqual({ error: { code: "rate_limited" } });
+    expect(authorize).not.toHaveBeenCalled();
+
+    // Unauthenticated live request also shares the exhausted anonymous bucket and gets 429.
+    const { HttpError } = await import("@/lib/server/auth");
+    authorize.mockRejectedValueOnce(new HttpError(401, "login_required"));
+    const unauthAfterMalformed = await POST(jpegRequest());
+    expect(unauthAfterMalformed.status).toBe(429);
+    expect(unauthAfterMalformed.headers.get("Retry-After")).toBe("60");
+
+    // Verified UID live analysis still succeeds despite anonymous bucket exhaustion.
+    const verifiedAfterMalformed = await POST(jpegRequest());
+    expect(verifiedAfterMalformed.status).toBe(200);
+    expect(authorize).toHaveBeenCalledTimes(2);
+
+    // 2. Oversized multipart flood
+    clearRateLimitStore();
+    for (let index = 0; index < ANALYZE_RATE_LIMIT.limit; index += 1) {
+      const oversized = await POST(
+        new Request("http://localhost/api/analyze", {
+          method: "POST",
+          headers: {
+            "content-length": String(11 * 1024 * 1024),
+            "x-forwarded-for": `198.51.100.${index + 10}, 10.0.0.1`,
+          },
+        }),
+      );
+      expect(oversized.status).toBe(413);
+      expect(await oversized.json()).toEqual({ error: { code: "file_too_large" } });
+    }
+    const blockedOversized = await POST(
+      new Request("http://localhost/api/analyze", {
+        method: "POST",
+        headers: {
+          "content-length": String(11 * 1024 * 1024),
+          "x-forwarded-for": "198.51.100.251, 10.0.0.1",
+        },
+      }),
+    );
+    expect(blockedOversized.status).toBe(429);
+    expect(blockedOversized.headers.get("Retry-After")).toBe("60");
+    expect((await POST(jpegRequest())).status).toBe(200);
+
+    // 3. Timed-out multipart flood
+    clearRateLimitStore();
+    const requestBodyModule = await import("@/lib/server/request-body");
+    const readSpy = vi
+      .spyOn(requestBodyModule, "readBoundedRequestBody")
+      .mockRejectedValue(new requestBodyModule.RequestBodyTimeoutError());
+    for (let index = 0; index < ANALYZE_RATE_LIMIT.limit; index += 1) {
+      const timedOut = await POST(
+        new Request("http://localhost/api/analyze", {
+          method: "POST",
+          headers: {
+            "content-type": "multipart/form-data; boundary=test",
+            "x-forwarded-for": `198.51.100.${index + 20}, 10.0.0.1`,
+          },
+          body: "--test--\r\n",
+        }),
+      );
+      expect(timedOut.status).toBe(408);
+      expect(await timedOut.json()).toEqual({ error: { code: "network_timeout" } });
+    }
+    const blockedTimeout = await POST(
+      new Request("http://localhost/api/analyze", {
+        method: "POST",
+        headers: {
+          "content-type": "multipart/form-data; boundary=test",
+          "x-forwarded-for": "198.51.100.252, 10.0.0.1",
+        },
+        body: "--test--\r\n",
+      }),
+    );
+    expect(blockedTimeout.status).toBe(429);
+    expect(blockedTimeout.headers.get("Retry-After")).toBe("60");
+    readSpy.mockRestore();
+    expect((await POST(jpegRequest())).status).toBe(200);
+  });
+
   it("rejects an oversized multipart request before parsing the body", async () => {
     const response = await POST(
       new Request("http://localhost/api/analyze", {

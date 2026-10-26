@@ -12,7 +12,12 @@ const env = {
   FIREBASE_ADMIN_PRIVATE_KEY: "",
   KCALCUE_ALLOWED_EMAILS: "",
 
-  OPENAI_API_KEY: "",
+  // Select the Live UI so Playwright's /api/analyze mocks receive photo requests.
+  // Any request that misses a mock must never execute paid analysis.
+  KCALCUE_VISION_PROVIDER: "openai",
+  OPENAI_API_KEY: "test-openai-key-not-a-real-credential",
+  KCALCUE_ANALYSIS_ENABLED: "false",
+  GEMINI_API_KEY: "",
   NUTRITION_API_KEY: "",
 };
 function run(args) {

@@ -30,6 +30,7 @@ import {
   analyzeAbortOutcome,
   loadingStepClass,
 } from "@/lib/client/analyze-session";
+import { DemoFoodVisionProvider } from "@/lib/providers/food-vision/demo";
 import { OPENAI_HTTP_TIMEOUT_MS } from "@/lib/providers/food-vision/timeout";
 import {
   inferSupportedImageMimeType,
@@ -49,7 +50,11 @@ import {
 import { ResultView } from "./result-view";
 import { authorizedFetch } from "@/lib/firebase/client";
 import type { MealDraft } from "@/lib/meals/types";
-import { readAnalysisProvenance, type AnalysisProvenance } from "@/lib/domain/analysis-provenance";
+import {
+  readAnalysisProvenance,
+  type AnalysisProvenance,
+  type AnalysisProvenanceMetadata,
+} from "@/lib/domain/analysis-provenance";
 
 type AppStage = "input" | "analyzing" | "result" | "unable" | "error";
 type ProviderMode = FoodVisionProvider["mode"];
@@ -569,10 +574,28 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
     );
 
     try {
-      const formData = new FormData();
+      let body: AnalyzeResponse;
       if (demoRequest) {
-        formData.set("mode", "demo");
+        let demoProvenance: AnalysisProvenanceMetadata | null = null;
+        await delay(DEMO_ANALYZE_DELAY_MS, controller.signal);
+        const demoAnalysis = await new DemoFoodVisionProvider().analyzeImage(
+          { data: "", mimeType: "image/jpeg" },
+          {
+            signal: controller.signal,
+            onMetadata: (metadata) => {
+              demoProvenance = metadata;
+            },
+          },
+        );
+        controller.signal.throwIfAborted();
+        if (analyzeAbortRef.current !== controller) return;
+        body = {
+          analysis: preparePhotoMilkAnalysis(demoAnalysis),
+          analysisProvenance: demoProvenance,
+          mode: "demo",
+        };
       } else {
+        const formData = new FormData();
         formData.set("image", file);
         // One ID per explicit analysis action. Transport replays of this POST
         // must not reserve or invoke the paid provider a second time.
@@ -580,23 +603,20 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
         if (new URLSearchParams(window.location.search).get("qaSuspectedMilk") === "1") {
           formData.set("qaSuspectedMilk", "1");
         }
-      }
 
-      const [response] = await Promise.all([
-        authorizedFetch("/api/analyze", {
+        const response = await authorizedFetch("/api/analyze", {
           method: "POST",
           body: formData,
           signal: controller.signal,
-        }),
-        demoRequest ? delay(DEMO_ANALYZE_DELAY_MS, controller.signal) : Promise.resolve(),
-      ]);
-      const body = (await response.json()) as AnalyzeResponse;
-      controller.signal.throwIfAborted();
-      if (analyzeAbortRef.current !== controller) return;
+        });
+        body = (await response.json()) as AnalyzeResponse;
+        controller.signal.throwIfAborted();
+        if (analyzeAbortRef.current !== controller) return;
 
-      if (!response.ok) {
-        const code = typeof body.error?.code === "string" ? body.error.code : "unknown";
-        throw getError(code);
+        if (!response.ok) {
+          const code = typeof body.error?.code === "string" ? body.error.code : "unknown";
+          throw getError(code);
+        }
       }
 
       const parsed = foodAnalysisSchema.safeParse(body.analysis);

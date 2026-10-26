@@ -220,6 +220,9 @@ function main() {
     } else if (container.env.some(entry => entry?.name === "KCALCUE_QA_SERVING_SHADOW" || entry?.name === "KCALCUE_QA_SHADOW_ALLOWED_EMAILS")) {
       throw new Error("QA serving-shadow mode cannot receive production traffic; traffic was not changed.");
     }
+    if (container.env.some(entry => entry?.name === "KCALCUE_TRUSTED_PROXY_HOPS")) {
+      throw new Error("KCALCUE_TRUSTED_PROXY_HOPS cannot be enabled while multiple ingress paths are active; traffic was not changed.");
+    }
     assertProductionProvider(described, container, { requireProvider: true, expectedImage });
   }
   function productionTraffic() {
@@ -462,6 +465,9 @@ function main() {
     }
     if (container.env.some(entry => entry?.name === "KCALCUE_QA_SERVING_SHADOW" || entry?.name === "KCALCUE_QA_SHADOW_ALLOWED_EMAILS")) {
       throw new Error("QA serving-shadow mode cannot receive production traffic; traffic was not changed.");
+    }
+    if (container.env.some(entry => entry?.name === "KCALCUE_TRUSTED_PROXY_HOPS")) {
+      throw new Error("KCALCUE_TRUSTED_PROXY_HOPS cannot be enabled while multiple ingress paths are active; traffic was not changed.");
     }
   }
   function pinnedImageForTag(tag) {

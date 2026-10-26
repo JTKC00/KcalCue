@@ -41,23 +41,23 @@ const requestSchema = z.object({
 const MAX_PARALLEL_USDA_LOOKUPS = 3;
 const USDA_ENRICHMENT_DEADLINE_MS = 12_000;
 
+function rateLimitedResponse(retryAfterSeconds?: number) {
+  const limited = rateLimitedJsonResponse(retryAfterSeconds);
+  return NextResponse.json(limited.body, {
+    status: limited.status,
+    headers: limited.headers,
+  });
+}
+
 export async function POST(request: Request) {
   const ip = clientIpFromHeaders(request.headers);
-  if (!consumeRateLimit(`nutrition:${ip}`, NUTRITION_RATE_LIMIT).allowed) {
-    const limited = rateLimitedJsonResponse();
-    return NextResponse.json(limited.body, {
-      status: limited.status,
-      headers: limited.headers,
-    });
+  if (ip !== "unknown" && !consumeRateLimit(`nutrition:ip:${ip}`, NUTRITION_RATE_LIMIT).allowed) {
+    return rateLimitedResponse();
   }
 
   const bodyAdmission = acquirePublicBody("nutrition");
   if (!bodyAdmission.release) {
-    const limited = rateLimitedJsonResponse(bodyAdmission.retryAfterSeconds);
-    return NextResponse.json(limited.body, {
-      status: limited.status,
-      headers: limited.headers,
-    });
+    return rateLimitedResponse(bodyAdmission.retryAfterSeconds);
   }
 
   let body: unknown;
@@ -65,6 +65,9 @@ export async function POST(request: Request) {
     const bytes = await readBoundedRequestBody(request, 150_000);
     body = JSON.parse(new TextDecoder().decode(bytes));
   } catch (error) {
+    if (ip === "unknown" && !consumeRateLimit("nutrition:anonymous", NUTRITION_RATE_LIMIT).allowed) {
+      return rateLimitedResponse();
+    }
     return NextResponse.json(
       { error: { code: error instanceof RequestBodyTimeoutError ? "network_timeout" : "invalid_request" } },
       { status: error instanceof RequestBodyTooLargeError ? 413
@@ -76,6 +79,9 @@ export async function POST(request: Request) {
 
   const parsed = requestSchema.safeParse(body);
   if (!parsed.success) {
+    if (ip === "unknown" && !consumeRateLimit("nutrition:anonymous", NUTRITION_RATE_LIMIT).allowed) {
+      return rateLimitedResponse();
+    }
     return NextResponse.json({ error: { code: "invalid_request" } }, { status: 400 });
   }
 
@@ -110,6 +116,9 @@ export async function POST(request: Request) {
         try {
           const account = await Promise.race([authenticated(request), stopped]);
           if (account === null) {
+            if (ip === "unknown" && !consumeRateLimit("nutrition:anonymous", NUTRITION_RATE_LIMIT).allowed) {
+              return rateLimitedResponse();
+            }
             for (const index of remoteIndexes) {
               warnings.push({ index, code: deadline.signal.aborted ? "timeout" : "canceled" });
             }
@@ -117,9 +126,15 @@ export async function POST(request: Request) {
           }
           remoteAccount = account;
         } catch (error) {
+          if (ip === "unknown" && !consumeRateLimit("nutrition:anonymous", NUTRITION_RATE_LIMIT).allowed) {
+            return rateLimitedResponse();
+          }
           return apiError(error);
         }
         stopAuthentication();
+        if (!consumeRateLimit(`nutrition:uid:${remoteAccount.user.id}`, NUTRITION_RATE_LIMIT).allowed) {
+          return rateLimitedResponse();
+        }
         const usda = new UsdaNutritionClient(apiKey, async () =>
           (await reserveHourlyUsdaCall(remoteAccount.db, remoteAccount.user.id)).allowed,
         remoteAccount.user.id);
@@ -154,6 +169,19 @@ export async function POST(request: Request) {
       } finally {
         clearTimeout(timeout);
         stopAuthentication();
+      }
+    } else {
+      let localBucket: string | null = ip === "unknown" ? "nutrition:anonymous" : null;
+      if (request.headers.get("authorization")?.startsWith("Bearer ")) {
+        try {
+          const { user } = await authenticated(request);
+          localBucket = `nutrition:uid:${user.id}`;
+        } catch {
+          if (ip === "unknown") localBucket = "nutrition:anonymous";
+        }
+      }
+      if (localBucket && !consumeRateLimit(localBucket, NUTRITION_RATE_LIMIT).allowed) {
+        return rateLimitedResponse();
       }
     }
 
