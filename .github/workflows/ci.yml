@@ -5,12 +5,16 @@ on:
     paths-ignore:
       - '**.md'
       - 'docs/**'
+      - '!docs/research/nutrition-coverage-baseline.json'
+      - '!docs/research/nutrition-coverage-baseline.md'
       - 'LICENSE'
       - '.gitignore'
   pull_request:
     paths-ignore:
       - '**.md'
       - 'docs/**'
+      - '!docs/research/nutrition-coverage-baseline.json'
+      - '!docs/research/nutrition-coverage-baseline.md'
       - 'LICENSE'
       - '.gitignore'
 
