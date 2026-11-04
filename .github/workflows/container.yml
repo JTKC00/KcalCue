@@ -22,10 +22,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   container:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 6
     steps:
       - uses: actions/checkout@v6
       - name: Verify private fixtures stay out of Docker context
@@ -126,7 +130,7 @@ jobs:
         run: |
           docker run --detach --name kcalcue-ci kcalcue:ci
           trap 'docker rm -f kcalcue-ci' EXIT
-          for attempt in {1..30}; do
+          for _ in {1..30}; do
             if docker exec kcalcue-ci node -e 'fetch("http://127.0.0.1:8080/api/status").then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))'; then
               break
             fi
