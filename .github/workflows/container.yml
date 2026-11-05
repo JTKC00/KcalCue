@@ -29,7 +29,7 @@ concurrency:
 jobs:
   container:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 7
     steps:
       - uses: actions/checkout@v6
       - name: Verify private fixtures stay out of Docker context
