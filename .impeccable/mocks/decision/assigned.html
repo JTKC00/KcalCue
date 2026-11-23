@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-HK">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=390, initial-scale=1">
+<title>KcalCue · 兩餸飯餸牌</title>
+<style>
+  :root {
+    --sign: #c62a1f; --yolk: #ffd23f; --steel: #e6e9eb; --steel-2: #d2d7da; --steel-3: #aeb5ba;
+    --foam: #fcfcfa; --ink: #1e1b18; --ink-2: #57524c; --keep: #2e7d32; --u: 8px;
+    --hei: -apple-system, "PingFang HK", "Noto Sans HK", "Microsoft JhengHei", sans-serif;
+    --num: "DIN Condensed", "Bahnschrift", "Roboto Condensed", "Arial Narrow", sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 390px; height: 844px; overflow: hidden; }
+  body { background: var(--steel); color: var(--ink); font-family: var(--hei); position: relative; }
+  .sign { background: var(--sign); height: 64px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; }
+  .brand { color: var(--yolk); font-size: 26px; font-weight: 800; letter-spacing: -0.01em; }
+  .acct { color: #fff; border: 2px solid rgba(255,255,255,.75); height: 40px; padding: 0 14px; border-radius: 4px; display: flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 600; }
+  .sync { background: var(--ink); color: #f1efe9; height: 26px; padding: 0 16px; display: flex; align-items: center; gap: 8px; font-size: 12px; }
+  .sync i { width: 8px; height: 8px; border-radius: 50%; background: var(--keep); box-shadow: 0 0 0 2px #fff; }
+  main { padding: 16px 16px 0; }
+  .title { display: flex; align-items: baseline; justify-content: space-between; }
+  h1 { font-size: 28px; font-weight: 800; letter-spacing: -0.01em; }
+  .date { font-size: 15px; color: var(--ink-2); font-weight: 600; }
+  .board { margin-top: 12px; background: var(--yolk); border: 3px solid var(--ink); border-radius: 4px; padding: 12px 14px 12px; }
+  .board-top { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; font-weight: 700; }
+  .big { font-family: var(--num); font-size: 64px; line-height: .92; font-weight: 700; letter-spacing: -0.01em; margin-top: 6px; }
+  .big small { font-size: 22px; margin-left: 6px; }
+  .scale { position: relative; height: 12px; margin-top: 10px; background: rgba(30,27,24,.14); border-radius: 2px; }
+  .scale b { position: absolute; top: 0; bottom: 0; background: var(--ink); border-radius: 2px; }
+  .ticks { display: flex; justify-content: space-between; font-family: var(--num); font-size: 12px; margin-top: 3px; color: #5a4a10; }
+  .macros { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin-top: 10px; background: var(--ink); border: 2px solid var(--ink); }
+  .macros div { background: #fff4c4; padding: 6px 8px; }
+  .macros span { font-size: 12px; font-weight: 700; display: block; }
+  .macros strong { font-family: var(--num); font-size: 22px; font-weight: 700; }
+  .macros em { font-style: normal; font-size: 12px; margin-left: 2px; }
+  .gap { margin-top: 8px; font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .hatch { width: 22px; height: 10px; border: 1.5px solid var(--ink); background: repeating-linear-gradient(-45deg, var(--ink) 0 1.5px, transparent 1.5px 5px); }
+  .actions { display: grid; grid-template-columns: 1.6fr 1fr; gap: 8px; margin-top: 12px; }
+  .btn { height: 52px; border-radius: 4px; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 16px; font-weight: 800; }
+  .btn.cam { background: var(--sign); color: #fff; border: 3px solid var(--ink); }
+  .btn.man { background: var(--foam); border: 3px solid var(--ink); }
+  .slot { margin-top: 14px; }
+  .slot-h { display: flex; align-items: baseline; justify-content: space-between; border-bottom: 2px solid var(--ink); padding-bottom: 4px; }
+  .slot-h h2 { font-size: 17px; font-weight: 800; }
+  .slot-h h2 small { font-family: var(--num); font-size: 16px; font-weight: 700; color: var(--ink-2); margin-left: 6px; }
+  .slot-h .sum { font-family: var(--num); font-size: 19px; font-weight: 700; }
+  .tray { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 6px; background: var(--steel-2); border: 1px solid var(--steel-3); border-top: 0; }
+  .plac { background: var(--foam); border: 2px solid var(--ink); border-radius: 3px; padding: 7px 10px 8px; min-height: 60px; }
+  .plac b { display: block; font-size: 19px; font-weight: 800; letter-spacing: .02em; }
+  .plac span { font-family: var(--num); font-size: 17px; font-weight: 700; color: var(--ink-2); }
+  .plac.unknown span { display: inline-flex; align-items: center; gap: 6px; font-family: var(--hei); font-size: 12px; font-weight: 700; }
+  .note { font-size: 12px; color: var(--ink-2); padding: 6px 2px 0; }
+  .note b { color: var(--ink); margin-right: 6px; }
+  .empty { border: 2px dashed var(--steel-3); border-top: 0; padding: 12px; font-size: 13px; color: var(--ink-2); font-weight: 600; background: rgba(255,255,255,.35); }
+  nav { position: absolute; left: 0; right: 0; bottom: 0; height: 80px; background: var(--foam); border-top: 3px solid var(--ink); display: grid; grid-template-columns: 1fr 96px 1fr; align-items: center; }
+  nav a { display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 12px; font-weight: 700; color: var(--ink-2); }
+  nav a.on { color: var(--ink); }
+  nav a.on::after { content: ""; width: 28px; height: 4px; background: var(--sign); margin-top: 2px; }
+  nav .add { justify-self: center; width: 72px; height: 72px; margin-top: -34px; background: var(--sign); border: 3px solid var(--ink); border-radius: 50%; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 12px; font-weight: 800; }
+  svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+</style>
+</head>
+<body>
+  <header class="sign">
+    <span class="brand">KcalCue</span>
+    <span class="acct"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>帳戶</span>
+  </header>
+  <div class="sync"><i></i>已同步 · 下午1:12</div>
+  <main>
+    <div class="title"><h1>今日飲食</h1><span class="date">11月23日 星期一</span></div>
+    <section class="board">
+      <div class="board-top"><span>已知部分卡路里</span><span>2 餐</span></div>
+      <div class="big">325–660<small>kcal</small></div>
+      <div class="scale"><b style="left:21.7%;width:22.3%"></b></div>
+      <div class="ticks"><span>0</span><span>500</span><span>1000</span><span>1500 kcal</span></div>
+      <div class="macros">
+        <div><span>蛋白質</span><strong>10–24</strong><em>g</em></div>
+        <div><span>碳水</span><strong>75–154</strong><em>g</em></div>
+        <div><span>脂肪</span><strong>8–27</strong><em>g</em></div>
+      </div>
+      <p class="gap"><i class="hatch"></i>1 餐未完整計入，未知不代表零。</p>
+    </section>
+    <div class="actions">
+      <span class="btn cam"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>AI 相片辨識</span>
+      <span class="btn man">＋ 手動記餐</span>
+    </div>
+    <section class="slot">
+      <div class="slot-h"><h2>早餐<small>08:15</small></h2><span class="sum">約 325–660 kcal</span></div>
+      <div class="tray">
+        <div class="plac"><b>港式奶茶</b><span>90–310 kcal</span></div>
+        <div class="plac"><b>菠蘿包</b><span>230–350 kcal</span></div>
+      </div>
+    </section>
+    <section class="slot">
+      <div class="slot-h"><h2>午餐<small>13:05</small></h2><span class="sum">整餐未知</span></div>
+      <div class="tray">
+        <div class="plac"><b>白飯</b><span>200–260 kcal</span></div>
+        <div class="plac unknown"><b>叉燒</b><span><i class="hatch"></i>份量未知</span></div>
+      </div>
+      <p class="note"><b>備註</b>同同事食，飯食咗一半</p>
+    </section>
+    <section class="slot">
+      <div class="slot-h"><h2>晚餐</h2><span class="sum"></span></div>
+      <div class="empty">未有記錄</div>
+    </section>
+  </main>
+  <nav>
+    <a class="on"><svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v9h-5v-6H9v6H4z"/></svg>今日</a>
+    <span class="add"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>新增</span>
+    <a><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4h4"/><path d="M12 8v4l3 2"/></svg>歷史</a>
+  </nav>
+</body>
+</html>

@@ -20,6 +20,7 @@ import { AlertIcon, CheckIcon, PlusIcon, RefreshIcon, ShieldIcon } from "./icons
 import { FoodEditor, type RecognitionBadge } from "./food-editor";
 import type { PhotoMilkChoiceId } from "@/lib/nutrition/photo-milk";
 import { ImagePreviewFallback } from "./image-preview-fallback";
+import { RangeRail } from "./range-rail";
 import { mealCalories, type MealCalorieCorrection } from "@/lib/meals/calories";
 
 interface ResultViewProps {
@@ -143,7 +144,7 @@ export function ResultView({
     <main className="result-page" id="main-content">
       <section className="result-hero" aria-labelledby="result-title">
         <div className="result-hero-copy">
-          <p className="eyebrow">{manualCalories ? "本餐卡路里" : copy.resultEyebrow}</p>
+          <p className="board-label">{manualCalories ? "本餐卡路里" : copy.resultEyebrow}</p>
           {manualCalories ? (
             <h1 id="result-title">手動記錄：<span>{manualCalories.min}</span> kcal</h1>
           ) : showTotal && !finalCalories.invalidCorrection ? (
@@ -156,6 +157,9 @@ export function ResultView({
               暫未能計算
             </h1>
           )}
+          <RangeRail
+            range={manualCalories ?? (showTotal && !finalCalories.invalidCorrection ? calories : null)}
+          />
           {manualCalories ? (
             <p className="midpoint">{showTotal ? `參考估算：約 ${calories.min}–${calories.max} kcal` : "營養參考不足；手動卡路里不代表營養素已確認。"}</p>
           ) : finalCalories.invalidCorrection ? (
@@ -164,6 +168,25 @@ export function ResultView({
             <p className="midpoint">{pendingDuplicateCount > 0 ? "已確認部分中間估算" : "中間估算"}：約 {midpoint} kcal</p>
           ) : null}
         </div>
+        {showTotal ? (
+          <section className="macro-grid" aria-label="主要營養素估算範圍" aria-live="polite">
+            <div className="macro-card macro-protein">
+              <span>Protein</span>
+              <strong>{displayRange(meal.totals.protein)}g</strong>
+              <small>蛋白質</small>
+            </div>
+            <div className="macro-card macro-carbs">
+              <span>Carbs</span>
+              <strong>{displayRange(meal.totals.carbs)}g</strong>
+              <small>碳水化合物</small>
+            </div>
+            <div className="macro-card macro-fat">
+              <span>Fat</span>
+              <strong>{displayRange(meal.totals.fat)}g</strong>
+              <small>脂肪</small>
+            </div>
+          </section>
+        ) : null}
         <div className={`mode-chip mode-${mode}`}>
           {mode === "demo"
             ? "示範結果"
@@ -186,25 +209,6 @@ export function ResultView({
               <RefreshIcon />
               AI 辨認已完成，正在補查營養參考；你可以先修正餐點。
             </p>
-          ) : null}
-          {showTotal ? (
-            <section className="macro-grid" aria-label="主要營養素估算範圍" aria-live="polite">
-              <div className="macro-card macro-protein">
-                <span>Protein</span>
-                <strong>{displayRange(meal.totals.protein)}g</strong>
-                <small>蛋白質</small>
-              </div>
-              <div className="macro-card macro-carbs">
-                <span>Carbs</span>
-                <strong>{displayRange(meal.totals.carbs)}g</strong>
-                <small>碳水化合物</small>
-              </div>
-              <div className="macro-card macro-fat">
-                <span>Fat</span>
-                <strong>{displayRange(meal.totals.fat)}g</strong>
-                <small>脂肪</small>
-              </div>
-            </section>
           ) : null}
 
           <section
@@ -253,8 +257,8 @@ export function ResultView({
           <section className="breakdown-section" aria-labelledby="breakdown-title">
             <div className="section-heading-row">
               <div>
-                <p className="eyebrow">逐項修正</p>
                 <h2 id="breakdown-title">{copy.foodBreakdown}</h2>
+                <p className="subhead">逐項修正</p>
                 <p>{copy.foodBreakdownBody}</p>
               </div>
               <span className="item-count">{items.length} 項</span>
@@ -270,6 +274,7 @@ export function ResultView({
               {items.map((item, index) => (
                 <FoodEditor
                   key={item.id}
+                  number={index + 1}
                   item={item}
                   calculation={meal.foods[index]}
                   recognition={recognitionSources[index]}
@@ -295,8 +300,8 @@ export function ResultView({
           <section className="uncertainty-section" aria-labelledby="uncertainty-title">
             <div className="section-heading-row compact">
               <div>
-                <p className="eyebrow">範圍背後</p>
                 <h2 id="uncertainty-title">{copy.uncertaintyTitle}</h2>
+                <p className="subhead">範圍背後</p>
               </div>
             </div>
             <ul className="reason-list">

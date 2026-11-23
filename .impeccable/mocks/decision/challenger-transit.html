@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-HK">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=390, initial-scale=1">
+<title>KcalCue · 午夜路綫圖</title>
+<style>
+  :root {
+    --night: #13234a; --night-2: #1b2f5e; --night-3: #2a4178; --porc: #f4f6f8; --porc-2: #b9c4d8;
+    --scarlet: #e0322b; --cobalt: #2f6fd8; --amber: #f2a93b; --green: #2fa45c;
+    --sans: -apple-system, "PingFang HK", "Noto Sans HK", "Microsoft JhengHei", sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 390px; height: 844px; overflow: hidden; }
+  body { background: var(--night); color: var(--porc); font-family: var(--sans); position: relative; font-variant-numeric: tabular-nums; }
+  header { padding: 14px 16px 0; display: flex; justify-content: space-between; align-items: center; }
+  .brand { font-size: 22px; font-weight: 700; }
+  .acct { font-size: 14px; border: 1.5px solid var(--porc-2); border-radius: 22px; height: 38px; padding: 0 14px; display: flex; align-items: center; }
+  .sync { padding: 6px 16px 0; font-size: 12px; color: var(--porc-2); display: flex; align-items: center; gap: 6px; }
+  .sync i { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+  main { padding: 14px 16px 0; }
+  h1 { font-size: 26px; font-weight: 700; }
+  h1 small { font-size: 14px; font-weight: 500; color: var(--porc-2); margin-left: 8px; }
+  .term { margin-top: 12px; background: var(--porc); color: var(--night); border-radius: 12px; padding: 12px 14px; }
+  .term p { font-size: 13px; font-weight: 600; color: #4a5a7c; }
+  .term .big { font-size: 44px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
+  .term .big small { font-size: 16px; margin-left: 4px; }
+  .fares { display: flex; gap: 6px; margin-top: 8px; }
+  .fares span { flex: 1; border: 1.5px solid #c8d1e2; border-radius: 8px; padding: 4px 8px; font-size: 12px; font-weight: 600; color: #4a5a7c; }
+  .fares b { display: block; font-size: 16px; color: var(--night); }
+  .actions { display: grid; grid-template-columns: 1.5fr 1fr; gap: 8px; margin-top: 12px; }
+  .btn { height: 50px; border-radius: 25px; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 16px; font-weight: 700; }
+  .btn.cam { background: var(--scarlet); color: #fff; }
+  .btn.man { border: 1.5px solid var(--porc-2); }
+  .line { position: relative; margin-top: 18px; padding-left: 48px; }
+  .line::before { content: ""; position: absolute; left: 17px; top: 10px; height: 104px; width: 6px; border-radius: 3px; background: var(--amber); }
+  .line::after { content: ""; position: absolute; left: 17px; top: 114px; height: 112px; width: 6px; border-radius: 3px; background: var(--scarlet); }
+  .seg3 { position: absolute; left: 17px; top: 226px; height: 84px; width: 6px; border-radius: 3px; background: repeating-linear-gradient(var(--cobalt) 0 8px, transparent 8px 14px); }
+  .stop { position: relative; min-height: 104px; }
+  .stop::before { content: ""; position: absolute; z-index: 1; left: -40px; top: 2px; width: 24px; height: 24px; border-radius: 50%; background: var(--porc); border: 5px solid var(--c); }
+  .stop.open::before { background: var(--night); border-style: dashed; }
+  .stop h2 { font-size: 15px; font-weight: 700; color: var(--c); }
+  .stop h2 small { color: var(--porc-2); font-weight: 500; margin-left: 6px; }
+  .stop h3 { font-size: 18px; font-weight: 700; margin-top: 2px; }
+  .stop .k { font-size: 15px; font-weight: 700; margin-top: 2px; }
+  .stop .k.unknown { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--porc-2); }
+  .hatch { width: 22px; height: 10px; border: 1px solid var(--porc-2); border-radius: 2px; background: repeating-linear-gradient(-45deg, var(--porc-2) 0 1px, transparent 1px 4px); }
+  .stop .note { font-size: 12px; color: var(--porc-2); margin-top: 2px; }
+  .stop.open h3 { font-size: 14px; font-weight: 500; color: var(--porc-2); }
+  nav { position: absolute; left: 0; right: 0; bottom: 0; height: 78px; background: var(--night-2); border-top: 1px solid var(--night-3); display: grid; grid-template-columns: 1fr 96px 1fr; align-items: center; }
+  nav a { display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 12px; color: var(--porc-2); }
+  nav a.on { color: var(--porc); font-weight: 700; }
+  nav .add { justify-self: center; width: 62px; height: 62px; border-radius: 50%; background: var(--scarlet); color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; margin-top: -20px; box-shadow: 0 0 0 5px var(--night-2); }
+  svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+</style>
+</head>
+<body>
+  <header><span class="brand">KcalCue</span><span class="acct">帳戶</span></header>
+  <div class="sync"><i></i>已同步 · 下午1:12</div>
+  <main>
+    <h1>今日飲食<small>11月23日 星期一</small></h1>
+    <section class="term">
+      <p>已知部分卡路里 · 2 餐</p>
+      <p class="big">325–660<small>kcal</small></p>
+      <div class="fares">
+        <span>蛋白質<b>10–24 g</b></span><span>碳水<b>75–154 g</b></span><span>脂肪<b>8–27 g</b></span>
+      </div>
+    </section>
+    <div class="actions">
+      <span class="btn cam"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>AI 相片辨識</span>
+      <span class="btn man">＋ 手動記餐</span>
+    </div>
+    <section class="line">
+      <i class="seg3"></i>
+      <div class="stop" style="--c: var(--amber)"><h2>早餐<small>08:15</small></h2><h3>港式奶茶、菠蘿包</h3><p class="k">約 325–660 kcal</p></div>
+      <div class="stop" style="--c: var(--scarlet)"><h2>午餐<small>13:05</small></h2><h3>白飯、叉燒</h3><p class="k unknown"><i class="hatch"></i>整餐卡路里未知</p><p class="note">備註：同同事食，飯食咗一半</p></div>
+      <div class="stop open" style="--c: var(--cobalt)"><h2>晚餐</h2><h3>未有記錄</h3></div>
+    </section>
+  </main>
+  <nav>
+    <a class="on"><svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v9h-5v-6H9v6H4z"/></svg>今日</a>
+    <span class="add"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>新增</span>
+    <a><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4h4"/><path d="M12 8v4l3 2"/></svg>歷史</a>
+  </nav>
+</body>
+</html>

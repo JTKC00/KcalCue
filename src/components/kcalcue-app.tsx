@@ -184,14 +184,14 @@ function ModeBanner({ demoMode }: { demoMode: boolean }) {
 function HeroCopy() {
   return (
     <div className="hero-copy">
-      <div className="principle-pill">
-        <CheckIcon />
-        {copy.rangePrinciple}
-      </div>
       <h1>
         一張相，睇清一餐嘅<span>大概範圍。</span>
       </h1>
       <p>{copy.heroBody}</p>
+      <div className="principle-pill">
+        <CheckIcon />
+        {copy.rangePrinciple}
+      </div>
       <div className="trust-row" aria-label="產品特點">
         <span>卡路里範圍</span>
         <span>主要營養素</span>
@@ -205,8 +205,8 @@ function HowItWorks() {
   return (
     <section className="how-section" aria-labelledby="how-title">
       <div className="section-intro">
-        <p className="eyebrow">簡單三步</p>
         <h2 id="how-title">由相片去到可修正嘅估算</h2>
+        <p className="subhead">簡單三步</p>
       </div>
       <div className="step-grid">
         <article>
@@ -266,8 +266,8 @@ function LoadingView({
           <div className="loading-orbit" aria-hidden="true">
             <SparklesIcon />
           </div>
-          <p className="eyebrow">{demoMode ? "準備示範結果" : "AI 圖片分析"}</p>
           <h1>{copy.loadingTitle}</h1>
+          <p className="subhead">{demoMode ? "準備示範結果" : "AI 圖片分析"}</p>
           <p>{copy.loadingBody}</p>
           <p className={loadingStepClass(step, 0)}>等候 AI 圖片分析完成；營養資料會在結果頁繼續補查。</p>
           <div className="loading-actions">
@@ -325,8 +325,8 @@ function RecoveryView({
           <div className="recovery-icon">
             <AlertIcon />
           </div>
-          <p className="eyebrow">{kind === "unable" ? "需要多少少資料" : "可以重新處理"}</p>
           <h1>{title}</h1>
+          <p className="subhead">{kind === "unable" ? "需要多少少資料" : "可以重新處理"}</p>
           <p>{body}</p>
           <div className="recovery-actions">
             <button className="button button-primary" type="button" onClick={onRetry}>
@@ -955,7 +955,6 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
             </div>
           ) : null}
           <section className="hero-section">
-            <HeroCopy />
             <ImageInput
               file={file}
               previewUrl={previewUrl}
@@ -967,6 +966,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
               }}
               onAnalyze={() => void analyze()}
             />
+            <HeroCopy />
           </section>
           <HowItWorks />
           <button className="button button-secondary" type="button" onClick={startManual}>手動加入食物</button>

@@ -21,16 +21,19 @@ import {
   type MealRecord,
 } from "@/lib/meals/types";
 import { PhotoPreparationError, preparePhoto } from "@/lib/meals/photo";
-import { unitCopy } from "@/content/zh-HK";
+import { copy as zhCopy, unitCopy } from "@/content/zh-HK";
 import { foodAnalysisSchema } from "@/lib/domain/food-analysis";
 import { roundRange } from "@/lib/nutrition/calculation";
+import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
+import { NutritionService } from "@/lib/nutrition/service";
 import { KcalCueApp } from "./kcalcue-app";
 import { PwaControls } from "./pwa-controls";
 import { CalorieCorrectionInput } from "./calorie-correction-input";
 import { PrivateMealPhoto } from "./private-meal-photo";
-import { dayCalories, mealCalories, sameCalorieBasis } from "@/lib/meals/calories";
+import { dayCalories, mealCalories, sameCalorieBasis, type MealCalorieSummary } from "@/lib/meals/calories";
 import { MAX_JOURNAL_NOTE_CODE_POINTS, journalNoteCodePoints, normalizeJournalNote } from "@/lib/meals/journal-note";
-import { CameraIcon, FoodStampIcon, HistoryIcon, HomeIcon, JournalIcon, PlusIcon, UserIcon, type FoodStampKind } from "./icons";
+import { CameraIcon, CloseIcon, HistoryIcon, HomeIcon, JournalIcon, PlusIcon, UserIcon } from "./icons";
+import { RangeRail } from "./range-rail";
 
 const repository = new MealRepository();
 const messages: Record<string, string> = {
@@ -83,8 +86,7 @@ function clearPhotoNotice(notice: JournalNotice): JournalNotice {
     notice === photoRateLimitNotice ? "" : notice;
 }
 
-function mealCalorieLabel(record: MealRecord) {
-  const calories = mealCalories(record);
+function mealCalorieLabel(calories: MealCalorieSummary) {
   if (calories.coverage === "insufficient") return "整餐卡路里未知；詳情可查看已知食物估算";
   if (!calories.range) return "卡路里未知";
   if (calories.source === "user") return `手動記錄：${calories.range.min} kcal`;
@@ -92,28 +94,42 @@ function mealCalorieLabel(record: MealRecord) {
   return `${calories.coverage === "complete" ? "估算" : "已知部分"}：約 ${range.min}–${range.max} kcal`;
 }
 
-const mealStamp: Record<MealRecord["mealType"], FoodStampKind> = {
-  breakfast: "bowl",
-  lunch: "salad",
-  dinner: "soup",
-  snack: "apple",
-};
+interface MealPlacard {
+  name: string;
+  state: "known" | "unknown" | "plain";
+  kcal: string | null;
+}
 
-function FoodStampCluster({ variant = "today" }: { variant?: "today" | "new" | "empty" }) {
-  const stamps: FoodStampKind[] = variant === "new"
-    ? ["tomato", "rice", "milk", "carrot"]
-    : variant === "empty"
-      ? ["bread", "tea", "apple"]
-      : ["apple", "bread", "carrot", "cup"];
-  return (
-    <div className={`food-stamp-cluster food-stamp-${variant}`} aria-hidden="true">
-      {stamps.map((stamp, index) => (
-        <span key={`${variant}-${index}`} className={`food-stamp food-stamp-${index + 1}`}>
-          <FoodStampIcon kind={stamp} />
-        </span>
-      ))}
-    </div>
-  );
+interface MealView {
+  placards: MealPlacard[];
+  calorieLabel: string;
+  calorieKnown: boolean;
+}
+
+let placardService: NutritionService | null = null;
+const mealViewCache = new WeakMap<MealRecord, MealView>();
+
+function mealView(record: MealRecord): MealView {
+  const cached = mealViewCache.get(record);
+  if (cached) return cached;
+  const calories = mealCalories(record);
+  // A whole-meal user kcal replaces the reference estimate; per-item reference
+  // ranges beside it would read as a competing total, so those placards show names only.
+  const userTotal = calories.source === "user";
+  placardService ??= new NutritionService(new LocalNutritionProvider());
+  const foods = userTotal ? [] : placardService.calculateMeal(record.items).foods;
+  const placards = record.items.map((item, index): MealPlacard => {
+    const food = foods[index];
+    const range = food?.includedInTotal && food.ranges ? roundRange(food.ranges.calories, 5) : null;
+    return {
+      name: item.displayName.trim() || zhCopy.emptyName,
+      state: userTotal ? "plain" : range ? "known" : "unknown",
+      kcal: range ? `約 ${range.min}–${range.max} kcal` : null,
+    };
+  });
+  const view = { placards, calorieLabel: mealCalorieLabel(calories), calorieKnown: Boolean(calories.range) };
+  mealViewCache.set(record, view);
+  return view;
 }
 
 function journalDateLabel(date: string) {
@@ -1028,12 +1044,33 @@ export function MealJournal({
     : ready && syncedAt
       ? "is-synced"
       : "is-syncing";
+  const entryActions = (
+    <div className="journal-title-actions">
+      <button
+        className="button button-primary journal-quick-action is-primary"
+        aria-label="AI 相片辨識"
+        disabled={busy}
+        onClick={() => start()}
+      >
+        <span className="journal-quick-icon"><CameraIcon /></span>
+        <span><strong>AI 相片辨識</strong><small>相片起草</small></span>
+      </button>
+      <button
+        className="button button-secondary journal-quick-action"
+        aria-label="＋ 手動記餐"
+        disabled={busy}
+        onClick={() => start(true)}
+      >
+        <span className="journal-quick-icon"><PlusIcon /></span>
+        <span><strong>手動記餐</strong><small>最快記低</small></span>
+      </button>
+    </div>
+  );
 
   return (
     <div className="journal-shell">
       <header className="journal-header">
         <a className="journal-brand" href="#today" aria-label="KcalCue 今日">
-          <span className="journal-brand-mark" aria-hidden="true" />
           <span>
             <strong>KcalCue</strong>
             <small>每日飲食小記</small>
@@ -1077,8 +1114,8 @@ export function MealJournal({
               重試儲存
             </button>
           )}
-          <button aria-label="關閉訊息" onClick={() => { setNotice(""); setSyncNotice(""); }}>
-            ×
+          <button className="journal-notice-close" aria-label="關閉訊息" onClick={() => { setNotice(""); setSyncNotice(""); }}>
+            <CloseIcon />
           </button>
         </div>
       )}
@@ -1214,8 +1251,8 @@ export function MealJournal({
           <section className="journal-card journal-loading-card">
             <span className="journal-loading-mark" aria-hidden="true"><JournalIcon /></span>
             <div>
-              <p className="eyebrow">準備你嘅日誌</p>
               <h1>正在讀取記錄…</h1>
+              <p className="subhead">準備你嘅日誌</p>
               <p>餐點同草稿會喺準備好之後出現。</p>
             </div>
           </section>
@@ -1224,11 +1261,10 @@ export function MealJournal({
         <div className="journal-editor">
           {!draft ? (
             <main className="journal-main journal-new-start">
-              <section className="journal-card journal-start-hero">
-                <FoodStampCluster variant="new" />
+              <section className="journal-start-hero">
                 <div className="journal-start-copy">
-                  <p className="eyebrow">今日想記低啲咩？</p>
                   <h1>記低新一餐</h1>
+                  <p className="subhead">今日想記低啲咩？</p>
                   <p>
                     唔一定要影相。直接記低食物同份量就得；想快啲開始，亦可以用 AI 相片幫你起草。
                   </p>
@@ -1237,17 +1273,6 @@ export function MealJournal({
               <div className="journal-entry-grid" aria-label="新增餐點方式">
                 <button
                   className="journal-entry-card is-primary"
-                  aria-label="手動記一餐"
-                  onClick={() => start(true)}
-                >
-                  <span className="journal-entry-icon"><JournalIcon /></span>
-                  <span>
-                    <strong>手動記一餐</strong>
-                    <small>最直接 · 唔需要相片</small>
-                  </span>
-                </button>
-                <button
-                  className="journal-entry-card"
                   aria-label="用相片 AI 辨識"
                   onClick={() => start()}
                 >
@@ -1257,21 +1282,53 @@ export function MealJournal({
                     <small>先起草，再由你逐項確認</small>
                   </span>
                 </button>
+                <button
+                  className="journal-entry-card"
+                  aria-label="手動記一餐"
+                  onClick={() => start(true)}
+                >
+                  <span className="journal-entry-icon"><JournalIcon /></span>
+                  <span>
+                    <strong>手動記一餐</strong>
+                    <small>最直接 · 唔需要相片</small>
+                  </span>
+                </button>
               </div>
             </main>
           ) : (
             <>
-              <section className="journal-card meal-metadata editor-card">
-                <div className="editor-heading">
-                  <div>
-                    <p className="eyebrow">{draft.version ? "編輯日誌" : "新增日誌"}</p>
-                    <h1>{draft.version ? "修正餐點" : "新餐點草稿"}</h1>
-                    <p>先記低時間同餐次；食物、份量同營養可以逐項調整。</p>
-                  </div>
-                  <span className={`editor-mode-chip ${draft.mode === "live" ? "is-ai" : "is-manual"}`}>
-                    {draft.mode === "live" ? "AI 起草" : "手動記錄"}
-                  </span>
+              <section className="editor-heading">
+                <div>
+                  <h1>{draft.version ? "修正餐點" : "新餐點草稿"}</h1>
+                  <p className="subhead">{draft.version ? "編輯日誌" : "新增日誌"}</p>
                 </div>
+                <span className={`editor-mode-chip ${draft.mode === "live" ? "is-ai" : "is-manual"}`}>
+                  {draft.mode === "live" ? "AI 起草" : "手動記錄"}
+                </span>
+              </section>
+              <fieldset className="editor-fields" disabled={busy}>
+                <KcalCueApp
+                  key={editorKey}
+                  initialProviderMode={initialProviderMode}
+                  initialDraft={initialDraft ?? draft}
+                  calorieCorrection={draft.calorieCorrection}
+                  mealNote={draft.journalNote}
+                  manual={manual}
+                  onDraftChange={onDraftChange}
+                  onPhotoSelected={onPhotoSelected}
+                  onExit={() => {
+                    void discard();
+                  }}
+                  onNewMeal={() => {
+                    if (busyRef.current ||
+                        !confirm("放棄這份草稿並開啟另一餐？已儲存的記錄不會改變。"))
+                      return;
+                    openDraft(newDraft(), true);
+                  }}
+                />
+              </fieldset>
+              <section className="journal-card meal-metadata editor-card">
+                <p className="editor-intro">先記低時間同餐次；食物、份量同營養可以逐項調整。</p>
                 <div className="editor-section-label">
                   <span>時間與餐次</span>
                   <small>按 {draft.timezone} 記錄</small>
@@ -1327,12 +1384,20 @@ export function MealJournal({
                     : "確認後先會加入每日記錄"}
                 </p>
               </section>
+              {draft.items.length > 0 && draft.mode !== "demo" && (
+                <CalorieCorrectionInput
+                  correction={draft.calorieCorrection}
+                  input={draft.calorieInput}
+                  disabled={busy}
+                  onChange={(change) => setDraft((value) => value ? { ...value, ...change } : value)}
+                />
+              )}
               <section className="journal-card journal-note-card">
                 <div className="journal-note-card-heading">
                   <span className="journal-note-icon" aria-hidden="true"><JournalIcon /></span>
                   <div>
-                    <p className="eyebrow">留低少少背景</p>
                     <h2>餐點備註 <small>選填</small></h2>
+                    <p className="subhead">留低少少背景</p>
                   </div>
                 </div>
                 <div className="journal-note-field">
@@ -1370,35 +1435,6 @@ export function MealJournal({
                   )}
                 </div>
               </section>
-              {draft.items.length > 0 && draft.mode !== "demo" && (
-                <CalorieCorrectionInput
-                  correction={draft.calorieCorrection}
-                  input={draft.calorieInput}
-                  disabled={busy}
-                  onChange={(change) => setDraft((value) => value ? { ...value, ...change } : value)}
-                />
-              )}
-              <fieldset className="editor-fields" disabled={busy}>
-                <KcalCueApp
-                  key={editorKey}
-                  initialProviderMode={initialProviderMode}
-                  initialDraft={initialDraft ?? draft}
-                  calorieCorrection={draft.calorieCorrection}
-                  mealNote={draft.journalNote}
-                  manual={manual}
-                  onDraftChange={onDraftChange}
-                  onPhotoSelected={onPhotoSelected}
-                  onExit={() => {
-                    void discard();
-                  }}
-                  onNewMeal={() => {
-                    if (busyRef.current ||
-                        !confirm("放棄這份草稿並開啟另一餐？已儲存的記錄不會改變。"))
-                      return;
-                    openDraft(newDraft(), true);
-                  }}
-                />
-              </fieldset>
               <section className="journal-card journal-actions">
                 {preparing && <p role="status">正在準備壓縮照片…</p>}
                 {photoFailure === "retryable" && (
@@ -1456,7 +1492,7 @@ export function MealJournal({
                   </button>
                 )}
               </section>
-              <div className="save-bar">
+              <div className={draft.items.length ? "save-bar" : "save-bar is-idle"}>
                 {draft.mode === "live" ? (
                   <p className="save-review-note" id="save-review-note" role="note">
                     AI 可能認錯或漏掉食物、估錯份量；共用餐點只記自己吃喝的部分，請逐項核對後再儲存。
@@ -1486,35 +1522,15 @@ export function MealJournal({
       ) : (
         <main className={`journal-main journal-main-${tab}`}>
           <section className={`journal-title journal-hero-card ${tab === "history" ? "is-history" : ""}`}>
-            {tab === "today" && <FoodStampCluster variant="today" />}
             <div className="journal-heading-copy">
-              <p className="eyebrow">{tab === "today" ? "一餐一餐，慢慢記低" : "翻返你記低過嘅每一餐"}</p>
               <h1>{tab === "today" ? "今日飲食" : "歷史記錄"}</h1>
               <p className="journal-date-line">
                 {tab === "today" ? todayLabel : "按日回顧、查看備註，同埋修正已保存嘅餐點。"}
               </p>
-            </div>
-            <div className="journal-title-actions">
-              <button
-                className="button button-primary journal-quick-action is-primary"
-                aria-label="＋ 手動記餐"
-                disabled={busy}
-                onClick={() => start(true)}
-              >
-                <span className="journal-quick-icon"><PlusIcon /></span>
-                <span><strong>手動記餐</strong><small>最快記低</small></span>
-              </button>
-              <button
-                className="button button-secondary journal-quick-action"
-                aria-label="AI 相片辨識"
-                disabled={busy}
-                onClick={() => start()}
-              >
-                <span className="journal-quick-icon"><CameraIcon /></span>
-                <span><strong>AI 相片辨識</strong><small>相片起草</small></span>
-              </button>
+              <p className="subhead">{tab === "today" ? "一餐一餐，慢慢記低" : "翻返你記低過嘅每一餐"}</p>
             </div>
           </section>
+          {tab === "history" && entryActions}
           {draft && (
             <section className="journal-card draft-banner">
               <span className="draft-banner-icon" aria-hidden="true"><JournalIcon /></span>
@@ -1553,18 +1569,21 @@ export function MealJournal({
           )}
           {tab === "today" && !visible.length && !cloudRecordsUnknown && (
             <div className="day-summary journal-card today-summary is-empty" role="region" aria-label="今日摘要">
-              <div><span>今日餐數</span><strong>0</strong><small>餐</small></div>
-              <div><span>卡路里</span><strong>未記錄</strong><small>未知不代表零</small></div>
+              <div className="day-summary-count"><span>今日餐數</span><strong>0</strong><small>餐</small></div>
+              <div className="day-summary-kcal is-unknown">
+                <span>卡路里</span><strong>未記錄</strong><small>未知不代表零</small>
+                <RangeRail range={null} ticks={false} />
+              </div>
             </div>
           )}
+          {tab === "today" && !visible.length && entryActions}
           {!visible.length && (
             <section className="journal-card empty-journal">
-              <FoodStampCluster variant="empty" />
               <div className="empty-journal-copy">
-                <p className="eyebrow">{cloudRecordsUnknown ? "仲未讀完雲端" : "今日由第一餐開始"}</p>
                 <h2>{cloudRecordsUnknown
                   ? tab === "today" ? "尚未確認今日記錄" : "尚未確認歷史記錄"
                   : tab === "today" ? "今日未有記錄" : "未有餐點記錄"}</h2>
+                <p className="subhead">{cloudRecordsUnknown ? "仲未讀完雲端" : "今日由第一餐開始"}</p>
                 <p>
                   {cloudRecordsUnknown
                     ? "尚未成功讀取雲端餐點，不能確認是否沒有記錄。可先記低一餐，連線後再同步。"
@@ -1580,19 +1599,19 @@ export function MealJournal({
               <div className="journal-entry-actions">
                 <button
                   className="button button-primary"
-                  aria-label="手動記一餐"
-                  onClick={() => start(true)}
-                >
-                  <JournalIcon />
-                  手動記一餐
-                </button>
-                <button
-                  className="button button-secondary"
                   aria-label="用相片 AI 辨識"
                   onClick={() => start()}
                 >
                   <CameraIcon />
                   用相片 AI 辨識
+                </button>
+                <button
+                  className="button button-secondary"
+                  aria-label="手動記一餐"
+                  onClick={() => start(true)}
+                >
+                  <JournalIcon />
+                  手動記一餐
                 </button>
               </div>
             </section>
@@ -1613,23 +1632,26 @@ export function MealJournal({
             const MealNameHeading = tab === "today" ? "h4" : "h3";
             return (
               <section className="journal-day" key={date}>
-                <div className="journal-day-heading">
-                  <h2>{journalDateLabel(date)}</h2>
-                  <span>{date}</span>
-                </div>
+                {tab === "history" && (
+                  <div className="journal-day-heading">
+                    <h2>{journalDateLabel(date)}</h2>
+                    <span>{date}</span>
+                  </div>
+                )}
                 <div className={`day-summary journal-card ${tab === "today" ? "today-summary" : "history-summary"}`} role="region" aria-label={tab === "today" ? "今日摘要" : `${date} 摘要`}>
-                  <div><span>{tab === "today" ? "今日餐數" : "餐數"}</span><strong>{calories.mealCount}</strong><small>餐</small></div>
-                  <div>
+                  <div className="day-summary-count"><span>{tab === "today" ? "今日餐數" : "餐數"}</span><strong>{calories.mealCount}</strong><small>餐</small></div>
+                  <div className={calorieRange ? "day-summary-kcal" : "day-summary-kcal is-unknown"}>
                     <span>{calorieRange && calories.partialCount + calories.unknownCount > 0 ? "已知部分卡路里" : "卡路里"}</span>
                     <strong>{calorieRange
                       ? calories.referenceCount ? `${calorieRange.min}–${calorieRange.max}` : calorieRange.min
                       : "未知"}</strong>
                     <small>kcal</small>
+                    <RangeRail range={calorieRange ? { min: calorieRange.min, max: calorieRange.max } : null} />
                   </div>
                   {Object.entries(nutrition.totals).filter(([key]) => key !== "calories").map(([key, range]) => {
                     const rounded = roundRange(range, 1);
                     return (
-                      <div key={key}>
+                      <div key={key} className="day-summary-macro">
                         <span>
                           {
                             {
@@ -1648,42 +1670,52 @@ export function MealJournal({
                       </div>
                     );
                   })}
-                  {calories.manualCount > 0 && <p>含 {calories.manualCount} 餐手動卡路里記錄；營養素仍按食物參考估算。</p>}
-                  {calories.partialCount + calories.unknownCount > 0 && <p>以上並非全日總數：{calories.partialCount + calories.unknownCount} 餐未完整計入，未知不代表零。</p>}
+                  {calories.manualCount > 0 && <p className="day-summary-note">含 {calories.manualCount} 餐手動卡路里記錄；營養素仍按食物參考估算。</p>}
+                  {calories.partialCount + calories.unknownCount > 0 && <p className="day-summary-note is-gap">以上並非全日總數：{calories.partialCount + calories.unknownCount} 餐未完整計入，未知不代表零。</p>}
                   {nutrition.includedCount < nutrition.totalCount && (
-                    <p>
+                    <p className="day-summary-note is-gap">
                       營養素部分估算：只計入 {nutrition.includedCount}／
                       {nutrition.totalCount} 項食物，未計入項目不代表零營養。
                     </p>
                   )}
                 </div>
+                {tab === "today" && entryActions}
                 {groups.map((group) => (
                   <section className="meal-group" key={group.key} aria-label={group.label ?? undefined}>
                     {group.label && <h3 className="meal-group-title">{group.label}</h3>}
                     {group.records.length === 0 && <p className="meal-group-empty">未有記錄</p>}
                     <div className="meal-list">
-                      {group.records.map((record) => (
-                        <article className="journal-card meal-row" key={record.id}>
-                          <span className="meal-stamp" aria-hidden="true">
-                            <FoodStampIcon kind={mealStamp[record.mealType]} />
-                          </span>
+                      {group.records.map((record) => {
+                        const view = mealView(record);
+                        return (
+                        <article className="meal-row" key={record.id}>
                           <div className="meal-row-content">
                             <div className="meal-meta-line">
-                              <p>{record.time} · {mealTypes[record.mealType]}</p>
+                              <p className="meal-time">{record.time} · {mealTypes[record.mealType]}</p>
                               {tab === "history" && <span className="meal-current-note">已保存</span>}
+                              <p className={view.calorieKnown ? "meal-calories" : "meal-calories is-unknown"}>{view.calorieLabel}</p>
                             </div>
-                            <MealNameHeading>
+                            <MealNameHeading className="sr-only">
                               {record.items
                                 .map((item) => item.displayName)
                                 .join("、")}
                             </MealNameHeading>
+                            <ul className="placard-tray">
+                              {view.placards.map((placard, index) => (
+                                <li key={index} className={`placard is-${placard.state}`}>
+                                  <span className="placard-name">{placard.name}</span>
+                                  {placard.state !== "plain" && (
+                                    <span className="placard-kcal">{placard.kcal ?? zhCopy.nutritionUnavailable}</span>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
                             {!!record.journalNote?.trim() && (
                               <div className="meal-journal-note">
                                 <strong>備註</strong>
                                 <span>{record.journalNote}</span>
                               </div>
                             )}
-                            <p className="meal-calories">{mealCalorieLabel(record)}</p>
                             {tab === "history" && userId !== "guest" && record.photoRef && (
                               <PrivateMealPhoto
                                 key={`${userId}:${authEpoch}:${record.id}:${record.photoRef.attachmentId}:${record.photoRef.generation}`}
@@ -1711,7 +1743,8 @@ export function MealJournal({
                             </div>
                           </div>
                         </article>
-                      ))}
+                        );
+                      })}
                     </div>
                   </section>
                 ))}
@@ -1733,12 +1766,12 @@ export function MealJournal({
             disabled={busy}
             aria-current={!account && tab === key ? "page" : undefined}
             onClick={() => {
-              if (key === "new") start(true);
+              if (key === "new") start();
               else go(key);
             }}
           >
             <span className="journal-nav-icon" aria-hidden="true">
-              {key === "today" ? <HomeIcon /> : key === "new" ? <PlusIcon /> : <HistoryIcon />}
+              {key === "today" ? <HomeIcon /> : key === "new" ? <CameraIcon /> : <HistoryIcon />}
             </span>
             <span className="journal-nav-label">{label}</span>
           </button>

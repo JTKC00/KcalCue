@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-HK">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=390, initial-scale=1">
+<title>KcalCue · 類別標準</title>
+<style>
+  :root {
+    --bg: #f2f2f7; --card: #ffffff; --ink: #1c1c1e; --ink-2: #6c6c70; --sep: #e5e5ea;
+    --green: #34c759; --green-d: #248a3d; --track: #e9e9ee;
+    --sans: -apple-system, "PingFang HK", "Noto Sans HK", "Microsoft JhengHei", sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 390px; height: 844px; overflow: hidden; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--sans); position: relative; font-variant-numeric: tabular-nums; }
+  header { padding: 14px 16px 0; display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: var(--ink-2); }
+  header b { color: var(--green-d); font-weight: 600; }
+  .acct { width: 36px; height: 36px; border-radius: 50%; background: #e1e1e6; display: flex; align-items: center; justify-content: center; color: var(--ink-2); }
+  main { padding: 6px 16px 0; }
+  .date { font-size: 13px; font-weight: 600; color: var(--ink-2); text-transform: uppercase; }
+  h1 { font-size: 34px; font-weight: 700; letter-spacing: -0.01em; }
+  .card { margin-top: 12px; background: var(--card); border-radius: 14px; padding: 14px 16px; }
+  .k-lbl { font-size: 14px; font-weight: 600; color: var(--ink-2); display: flex; justify-content: space-between; }
+  .big { font-size: 40px; font-weight: 700; letter-spacing: -0.02em; margin-top: 2px; }
+  .big small { font-size: 17px; font-weight: 600; color: var(--ink-2); margin-left: 4px; }
+  .bar { position: relative; height: 10px; border-radius: 5px; background: var(--track); margin-top: 8px; }
+  .bar b { position: absolute; top: 0; bottom: 0; border-radius: 5px; background: var(--green); }
+  .macro { display: grid; grid-template-columns: 56px 1fr 72px; align-items: center; gap: 10px; margin-top: 12px; font-size: 14px; }
+  .macro .bar { margin-top: 0; height: 6px; }
+  .macro .bar b { background: #5ac8fa; }
+  .macro strong { text-align: right; font-weight: 600; }
+  .gap { margin-top: 12px; font-size: 12px; color: var(--ink-2); }
+  .actions { display: grid; grid-template-columns: 1.5fr 1fr; gap: 10px; margin-top: 12px; }
+  .btn { height: 50px; border-radius: 12px; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 16px; font-weight: 600; }
+  .btn.cam { background: var(--green); color: #fff; }
+  .btn.man { background: #e5e5ea; color: var(--ink); }
+  .sec { margin: 18px 4px 6px; font-size: 13px; color: var(--ink-2); font-weight: 600; }
+  .group { background: var(--card); border-radius: 14px; }
+  .item { display: grid; grid-template-columns: 1fr auto; padding: 11px 16px; border-bottom: 1px solid var(--sep); }
+  .item:last-child { border-bottom: 0; }
+  .item h3 { font-size: 16px; font-weight: 600; }
+  .item p { font-size: 13px; color: var(--ink-2); margin-top: 2px; }
+  .item span { font-size: 15px; font-weight: 600; align-self: center; }
+  .item span.u { color: var(--ink-2); font-weight: 500; }
+  nav { position: absolute; left: 0; right: 0; bottom: 0; height: 82px; background: rgba(249,249,249,.96); border-top: 1px solid #d1d1d6; display: grid; grid-template-columns: repeat(3, 1fr); padding-top: 8px; }
+  nav a { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11px; color: #8e8e93; }
+  nav a.on { color: var(--green-d); }
+  svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+</style>
+</head>
+<body>
+  <header><span>已同步 · <b>下午1:12</b></span><span class="acct"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg></span></header>
+  <main>
+    <p class="date">11月23日 星期一</p>
+    <h1>今日飲食</h1>
+    <section class="card">
+      <p class="k-lbl"><span>已知部分卡路里</span><span>2 餐</span></p>
+      <p class="big">325–660<small>kcal</small></p>
+      <div class="bar"><b style="left:22%;width:22%"></b></div>
+      <div class="macro"><span>蛋白質</span><div class="bar"><b style="left:10%;width:14%"></b></div><strong>10–24 g</strong></div>
+      <div class="macro"><span>碳水</span><div class="bar"><b style="left:25%;width:26%"></b></div><strong>75–154 g</strong></div>
+      <div class="macro"><span>脂肪</span><div class="bar"><b style="left:8%;width:19%"></b></div><strong>8–27 g</strong></div>
+      <p class="gap">1 餐未完整計入，未知不代表零。</p>
+    </section>
+    <div class="actions">
+      <span class="btn cam"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>AI 相片辨識</span>
+      <span class="btn man">＋ 手動記餐</span>
+    </div>
+    <p class="sec">早餐</p>
+    <section class="group">
+      <div class="item"><div><h3>港式奶茶、菠蘿包</h3><p>08:15</p></div><span>約 325–660 kcal</span></div>
+    </section>
+    <p class="sec">午餐</p>
+    <section class="group">
+      <div class="item"><div><h3>白飯、叉燒</h3><p>13:05 · 同同事食，飯食咗一半</p></div><span class="u">整餐未知</span></div>
+    </section>
+    <p class="sec">晚餐</p>
+    <section class="group"><div class="item"><div><p>未有記錄</p></div></div></section>
+  </main>
+  <nav>
+    <a class="on"><svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v9h-5v-6H9v6H4z"/></svg>今日</a>
+    <a><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>新增</a>
+    <a><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4h4"/><path d="M12 8v4l3 2"/></svg>歷史</a>
+  </nav>
+</body>
+</html>
