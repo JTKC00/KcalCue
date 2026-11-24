@@ -1,5 +1,7 @@
 # J1b.1 — Journal UI visual system
 
+> **Superseded on 2026-11-23 by PR #132 (兩餸飯餸牌).** The palette, cartoon food stamps, warm hero card and manual-first entry below no longer describe the app. `DESIGN.md` is the current visual system, and `DECISIONS.md` §9 records the decision. This file is kept as the J1b.1 history. Its responsive and accessibility baseline (no horizontal overflow, 44px targets, visible focus, safe-area navigation, wrapping long text, state understandable without colour) still applies.
+
 This document records the approved KcalCue journal visual direction implemented on the J1b.1 refresh branch.
 
 ## Product feeling

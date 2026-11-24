@@ -111,7 +111,16 @@ V0.1 支援 browser 可靠預覽的 JPEG、PNG、WebP，限制 10MB，client/ser
 
 ## 9. 香港繁體中文及 calm visual system
 
-共用狀態及錯誤文案集中在 `src/content/zh-HK.ts`，元件專屬短文案留在相關元件。視覺採暖白、深綠、柔和珊瑚色，避免醫療 dashboard、健身競賽或 body judgement 語氣。結果層級固定為 kcal range → confidence → breakdown → uncertainty → correction controls。
+共用狀態及錯誤文案集中在 `src/content/zh-HK.ts`，元件專屬短文案留在相關元件。避免醫療 dashboard、健身競賽或 body judgement 語氣。結果層級固定為 kcal range → confidence → breakdown → uncertainty → correction controls。
+
+> 2026-11-23 更新（James 選定，PR #132）：視覺改為「兩餸飯餸牌」，取代原本的暖白、深綠、柔和珊瑚色。完整規格以 `DESIGN.md` 為準，重點如下：
+> - 招牌紅 `#c62a1f` 用於頂部招牌及每組唯一主要動作；價錢牌黃 `#ffd23f` 承載當頁總數；不鏽鋼灰為底，所有框線用墨色。
+> - 綠色 `#2e7d32` 只用於「儲存餐點」、「已保存」及已同步圓點。
+> - 狀態先靠形狀，不靠顏色：虛線是 AI 草稿或未儲存，實線是已儲存，45° 斜線是未知或資料不足。未知不顯示為零。
+> - 卡路里範圍按比例畫在 0 至最少 1500 kcal 的刻度條上。
+> - AI 相片辨識是主要入口（紅色），手動記餐是次要入口，但每個入口畫面都保留。
+> - 數字用自行託管的 Barlow Condensed（`public/fonts/`，CSP `font-src 'self'`），中文用系統黑體。
+> - 未決定：App icon（`public/icon.svg` 及 PNG）仍是舊配色，等 James 決定保留或重畫。
 
 ## 10. 可安裝但不離線假裝分析的 PWA
 
