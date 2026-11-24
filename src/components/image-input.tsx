@@ -72,8 +72,8 @@ export function ImageInput({
             <CameraIcon className="floating-camera" />
           </div>
           <div className="upload-copy">
-            <p className="eyebrow">由一張清楚餐點相開始</p>
             <h2 id="upload-title">影相或者揀相</h2>
+            <p className="subhead">由一張清楚餐點相開始</p>
             <p>最好由上而下影，確保整個餐碟同食物份量都睇得清。</p>
           </div>
           <div className="upload-actions">
@@ -126,8 +126,8 @@ export function ImageInput({
           </div>
           <div className="selected-image-content">
             <div>
-              <p className="eyebrow">{copy.selectedTitle}</p>
               <h2 id="upload-title">{file.name}</h2>
+              <p className="subhead">{copy.selectedTitle}</p>
               <p>{copy.selectedBody}</p>
             </div>
             <div className="selected-meta">

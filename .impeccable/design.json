@@ -1,0 +1,583 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-23T21:20:45.431Z",
+  "title": "Design System: KcalCue",
+  "extensions": {
+    "colorMeta": {
+      "sign": {
+        "role": "primary",
+        "displayName": "Signboard Red",
+        "canonical": "#c62a1f",
+        "description": "The header band, the main action of each group (AI 相片辨識, 影相分析, 用相片 AI 辨識, retry), the raised camera tab, the current-tab bar, the analysis scan line, alert and invalid frames, error text, and the dashed AI 起草 chip. Also the browser theme colour. It frames and acts; it is never a reading surface.",
+        "tonalRamp": [
+          "#170604",
+          "#4c0201",
+          "#800201",
+          "#b6120b",
+          "#de4436",
+          "#fc7665",
+          "#ffb3a7",
+          "#ffe9e5"
+        ]
+      },
+      "sign-deep": {
+        "role": "primary",
+        "displayName": "Roast Red",
+        "canonical": "#9f1f16",
+        "description": "Hover and current states of every red control; destructive text (刪除, the delete icon) and the invalid-correction alert on the meal board.",
+        "tonalRamp": [
+          "#150705",
+          "#480c07",
+          "#800302",
+          "#ab2c22",
+          "#d35344",
+          "#f17f70",
+          "#f9b6ab",
+          "#ffe9e5"
+        ]
+      },
+      "sign-tint": {
+        "role": "primary",
+        "displayName": "Signboard Tint",
+        "canonical": "#ffe2dc",
+        "description": "Small secondary text set on red (sublabels such as 相片起草) and the disabled account button.",
+        "tonalRamp": [
+          "#0d0a0a",
+          "#2d2220",
+          "#513c38",
+          "#735b56",
+          "#957b76",
+          "#b69f9a",
+          "#d3c6c3",
+          "#f2edec"
+        ]
+      },
+      "yolk": {
+        "role": "secondary",
+        "displayName": "Yolk",
+        "canonical": "#ffd23f",
+        "description": "The price boards, the KcalCue wordmark on red, text selection, the per-dish kcal tag in the editor, yolk-on-ink numerals (item count, dish index, principle pill, demo chip), the syncing status dot and the photo status badge.",
+        "tonalRamp": [
+          "#0f0b01",
+          "#2f2401",
+          "#514002",
+          "#765e03",
+          "#9e7e02",
+          "#c6a121",
+          "#dcc88f",
+          "#f4eedd"
+        ]
+      },
+      "yolk-soft": {
+        "role": "secondary",
+        "displayName": "Soft Yolk",
+        "canonical": "#fff1b8",
+        "description": "The macro cells under each price board, provisional notices (coverage, inline warnings, mode banner, demo note) and hover on choice controls.",
+        "tonalRamp": [
+          "#0d0b06",
+          "#2b250c",
+          "#4d410e",
+          "#6e612c",
+          "#90824d",
+          "#b1a577",
+          "#d0cab0",
+          "#f0efe6"
+        ]
+      },
+      "keep": {
+        "role": "tertiary",
+        "displayName": "Keep Green",
+        "canonical": "#2e7d32",
+        "description": "The save action (儲存餐點 in the save bar) and the 已保存 chip. Nothing else.",
+        "tonalRamp": [
+          "#060e06",
+          "#082e0a",
+          "#01510d",
+          "#237429",
+          "#49974b",
+          "#76b876",
+          "#b0d5af",
+          "#e7f2e6"
+        ]
+      },
+      "keep-deep": {
+        "role": "tertiary",
+        "displayName": "Keep Green Deep",
+        "canonical": "#1f5f24",
+        "description": "Hover on the save action.",
+        "tonalRamp": [
+          "#070d07",
+          "#0f2d11",
+          "#144f1a",
+          "#337136",
+          "#559456",
+          "#7fb57f",
+          "#b4d3b4",
+          "#e8f2e8"
+        ]
+      },
+      "steel": {
+        "role": "neutral",
+        "displayName": "Stainless Counter",
+        "canonical": "#e6e9eb",
+        "description": "The page ground, the installed-app background, disabled fields and the scrollbar track.",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#242526",
+          "#404244",
+          "#5f6263",
+          "#808384",
+          "#a3a5a7",
+          "#c8c9ca",
+          "#eeeeef"
+        ]
+      },
+      "steel-2": {
+        "role": "neutral",
+        "displayName": "Tray Steel",
+        "canonical": "#d5dade",
+        "description": "Tray strips under placards (meal rows, the editor's food list), ghost-button hover, disabled buttons and the analysis photo well.",
+        "tonalRamp": [
+          "#0b0b0c",
+          "#232527",
+          "#3f4346",
+          "#5d6265",
+          "#7e8387",
+          "#a1a6a9",
+          "#c7c9cb",
+          "#eeeeef"
+        ]
+      },
+      "steel-3": {
+        "role": "neutral",
+        "displayName": "Brushed Steel",
+        "canonical": "#b3bac0",
+        "description": "Tray edges, hairlines between list rows and disabled button frames.",
+        "tonalRamp": [
+          "#0a0b0c",
+          "#232528",
+          "#3d4347",
+          "#5c6267",
+          "#7d8389",
+          "#a0a6ab",
+          "#c6cacc",
+          "#edeeef"
+        ]
+      },
+      "steel-4": {
+        "role": "neutral",
+        "displayName": "Rivet Grey",
+        "canonical": "#8a9198",
+        "description": "Dashed outlines of empty slots, disabled field frames, the data-source hairline and the scrollbar thumb. Lines only, never text (2.6:1 on the counter).",
+        "tonalRamp": [
+          "#0a0b0c",
+          "#222528",
+          "#3d4348",
+          "#5c6269",
+          "#7c838a",
+          "#a0a6ac",
+          "#c6c9cd",
+          "#edeef0"
+        ]
+      },
+      "foam": {
+        "role": "neutral",
+        "displayName": "Foam White",
+        "canonical": "#fcfcfa",
+        "description": "Placards, cards, resting buttons, chips, notices, the save bar and the bottom nav.",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252524",
+          "#424241",
+          "#616160",
+          "#828281",
+          "#a5a5a3",
+          "#c9c9c8",
+          "#eeeeee"
+        ]
+      },
+      "white": {
+        "role": "neutral",
+        "displayName": "White",
+        "canonical": "#ffffff",
+        "description": "Text fields, the hover lift of foam controls, and text on red and green.",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Counter Ink",
+        "canonical": "#1e1b18",
+        "description": "Every frame and rule, primary text, the rail fill, the hatch, the status strip and the focus outline.",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#262523",
+          "#45413e",
+          "#64605d",
+          "#85827e",
+          "#a8a4a1",
+          "#cbc9c7",
+          "#efeeee"
+        ]
+      },
+      "ink-2": {
+        "role": "neutral",
+        "displayName": "Ink 2",
+        "canonical": "#4c4741",
+        "description": "Secondary text, rail ticks, times and dates.",
+        "tonalRamp": [
+          "#0c0b0a",
+          "#272522",
+          "#46413c",
+          "#66605a",
+          "#87817b",
+          "#a9a49e",
+          "#cbc9c5",
+          "#efeeed"
+        ]
+      },
+      "ink-3": {
+        "role": "neutral",
+        "displayName": "Ink 3",
+        "canonical": "#635d56",
+        "description": "Tertiary text, placeholders, resting nav labels and subtitle lines.",
+        "tonalRamp": [
+          "#0c0b0a",
+          "#272521",
+          "#46413b",
+          "#666059",
+          "#88817a",
+          "#aaa49d",
+          "#ccc8c5",
+          "#efeeed"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "The price-board total only."
+      },
+      "wordmark": {
+        "displayName": "Wordmark",
+        "purpose": "KcalCue in Yolk on the red band."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Screen titles (今日飲食, 歷史記錄, 記低新一餐); 24px for the editor title; 22px for analysing, recovery and the photo hero."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Section and day headings (食物明細, 主要不確定因素, History dates); 18px for card headings; 17px for tray titles (早餐, 午餐, 晚餐, 小食) over a 3px ink rule."
+      },
+      "placard-name": {
+        "displayName": "Placard Name",
+        "purpose": "Dish names on placards and in the dish-name field."
+      },
+      "figure": {
+        "displayName": "Figure",
+        "purpose": "Macro values, the meal count and the meal-board figure line; the day board's kcal unit is 22px in 600 and the editor's kcal tag 22px in 700."
+      },
+      "figure-sm": {
+        "displayName": "Placard Figure",
+        "purpose": "Kcal ranges on placards and in tray meta lines."
+      },
+      "numeric-meta": {
+        "displayName": "Numeric Meta",
+        "purpose": "Times and the Today date (16px for History day stamps); 13px for rail ticks; 18px inside date, time and number fields (20px for portions)."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Running text; 15px in Ink 2 for secondary copy inside cards."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Board and cell labels, chip text and form labels."
+      },
+      "label-sm": {
+        "displayName": "Small Label",
+        "purpose": "Field captions, nav labels and small tags (已保存, 備註)."
+      },
+      "button": {
+        "displayName": "Button",
+        "purpose": "Button labels; 16px in the save bar and quick actions, 17px on large buttons."
+      }
+    },
+    "shadows": [],
+    "rings": [
+      {
+        "name": "alert-ring",
+        "value": "inset 0 0 0 1px var(--sign)",
+        "purpose": "Doubles the 2px red frame of alert notices and invalid fields. A border, never depth."
+      },
+      {
+        "name": "status-dot-ring",
+        "value": "0 0 0 2px var(--ink), 0 0 0 3.5px #f2f0ea",
+        "purpose": "Rings the 9px status dot on the ink strip."
+      },
+      {
+        "name": "offline-dot-ring",
+        "value": "inset 0 0 0 2px #f2f0ea",
+        "purpose": "The hollow status dot while offline."
+      }
+    ],
+    "patterns": [
+      {
+        "name": "hatch",
+        "token": "--hatch",
+        "value": "repeating-linear-gradient(-45deg, var(--ink) 0 1.5px, transparent 1.5px 5px)",
+        "purpose": "Unknown or insufficient data: a 20×10px swatch in a 1.5px ink frame inline, or the whole rail when a total is unknown."
+      }
+    ],
+    "literals": [
+      {
+        "value": "#f2f0ea",
+        "purpose": "Paper-white text and rings on the ink status strip (not yet a token)."
+      },
+      {
+        "value": "rgba(30, 27, 24, 0.16)",
+        "purpose": "Range-rail track: Counter Ink at 16%."
+      },
+      {
+        "value": "rgba(255, 255, 255, 0.85)",
+        "purpose": "Frame of the 帳戶 outline button on the red band (0.45 when disabled)."
+      }
+    ],
+    "motion": [
+      {
+        "name": "press",
+        "value": "transform 150ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Buttons and the camera tab nudge 1px down while pressed."
+      },
+      {
+        "name": "fill",
+        "value": "background-color 150ms ease, color 150ms ease",
+        "purpose": "Hover fills: red to Roast Red, Foam to White, ghost to Tray Steel."
+      },
+      {
+        "name": "disclosure",
+        "value": "transform 180ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Details chevrons turn from -45° to 45° when opened."
+      },
+      {
+        "name": "placard-in",
+        "value": "280ms cubic-bezier(0.16, 1, 0.3, 1) both; translateY(10px) to none; 45ms stagger, capped at 180ms",
+        "purpose": "Food editor placards rise into place when a draft arrives."
+      },
+      {
+        "name": "scan",
+        "value": "1.8s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate",
+        "purpose": "The 5px Signboard Red scan line sweeps the photo while analysing."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "animation and transition durations 0.01ms, one iteration",
+        "purpose": "prefers-reduced-motion collapses every animation and transition."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "narrow-phone (max-width)",
+        "value": "374px",
+        "purpose": "Date takes its own row; day-board figure 52px; upload button icons hidden."
+      },
+      {
+        "name": "phone (max-width)",
+        "value": "520px",
+        "purpose": "12px gutter; 14px card padding; tagline hidden; entry cards stack."
+      },
+      {
+        "name": "compact (max-width)",
+        "value": "760px",
+        "purpose": "Meal metadata in two columns."
+      },
+      {
+        "name": "wide (min-width)",
+        "value": "761px",
+        "purpose": "24px gutter; 20px section gaps; three-column how-to steps."
+      },
+      {
+        "name": "tray-wall (min-width)",
+        "value": "900px",
+        "purpose": "Today's four trays form a 2×2 wall; History meal rows pair up."
+      },
+      {
+        "name": "result-split (min-width)",
+        "value": "1000px",
+        "purpose": "Result main column plus a 272px sticky sidebar."
+      },
+      {
+        "name": "food-placard (container min-width)",
+        "value": "420px",
+        "purpose": "Portion fields share one row inside a food placard."
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Signboard Red ticket for the main action of a group; hover Roast Red, a press nudges it 1px down.",
+      "html": "<button class=\"ds-btn ds-btn-primary\" type=\"button\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M5 7h3l1.2-2h5.6L16 7h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z\"/><circle cx=\"12\" cy=\"13\" r=\"3.5\"/></svg>影相分析</button>",
+      "css": ".ds-btn { min-height: 48px; padding: 0 18px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 2px solid var(--ink, #1e1b18); border-radius: var(--radius, 4px); color: var(--ink, #1e1b18); background: var(--foam, #fcfcfa); font-family: var(--font-hei, -apple-system, BlinkMacSystemFont, \"PingFang HK\", \"Noto Sans HK\", sans-serif); font-size: 0.9375rem; font-weight: 700; line-height: 1.2; text-align: center; cursor: pointer; transition: background-color 150ms ease, color 150ms ease, transform 150ms cubic-bezier(0.16, 1, 0.3, 1); } .ds-btn svg { width: 20px; height: 20px; flex: none; } .ds-btn:hover { background: var(--white, #ffffff); } .ds-btn:active { transform: translateY(1px); } .ds-btn:focus-visible { outline: 3px solid var(--ink, #1e1b18); outline-offset: 2px; } .ds-btn-primary { color: var(--white, #ffffff); background: var(--sign, #c62a1f); } .ds-btn-primary:hover { background: var(--sign-deep, #9f1f16); }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "The default button: Foam White in a 2px ink frame; hover lifts it to White.",
+      "html": "<button class=\"ds-btn\" type=\"button\">查看／修正</button>",
+      "css": ".ds-btn { min-height: 48px; padding: 0 18px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 2px solid var(--ink, #1e1b18); border-radius: var(--radius, 4px); color: var(--ink, #1e1b18); background: var(--foam, #fcfcfa); font-family: var(--font-hei, -apple-system, BlinkMacSystemFont, \"PingFang HK\", \"Noto Sans HK\", sans-serif); font-size: 0.9375rem; font-weight: 700; line-height: 1.2; text-align: center; cursor: pointer; transition: background-color 150ms ease, color 150ms ease, transform 150ms cubic-bezier(0.16, 1, 0.3, 1); } .ds-btn svg { width: 20px; height: 20px; flex: none; } .ds-btn:hover { background: var(--white, #ffffff); } .ds-btn:active { transform: translateY(1px); } .ds-btn:focus-visible { outline: 3px solid var(--ink, #1e1b18); outline-offset: 2px; }"
+    },
+    {
+      "name": "Field",
+      "kind": "input",
+      "refersTo": "input-field",
+      "description": "White field in a 2px ink frame with 3px corners, 48px tall; date, time and number values switch to Barlow 600.",
+      "html": "<div class=\"ds-fields\"><label class=\"ds-field\">時間<input class=\"ds-input ds-input-num\" type=\"time\" value=\"12:30\"></label><label class=\"ds-field\">餐次<select class=\"ds-input\"><option>早餐</option><option selected>午餐</option><option>晚餐</option><option>小食</option></select></label></div>",
+      "css": ".ds-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; max-width: 360px; } .ds-field { min-width: 0; display: grid; gap: 4px; color: var(--ink, #1e1b18); font-family: var(--font-hei, -apple-system, BlinkMacSystemFont, \"PingFang HK\", \"Noto Sans HK\", sans-serif); font-size: 0.8125rem; font-weight: 700; } .ds-input { box-sizing: border-box; width: 100%; min-width: 0; min-height: 48px; padding: 10px 12px; border: 2px solid var(--ink, #1e1b18); border-radius: var(--radius-sm, 3px); color: var(--ink, #1e1b18); background-color: var(--white, #ffffff); font-family: var(--font-hei, -apple-system, BlinkMacSystemFont, \"PingFang HK\", \"Noto Sans HK\", sans-serif); font-size: 1rem; font-weight: 400; line-height: 1.3; } .ds-input-num { font-family: var(--font-num, \"Barlow Condensed\", \"DIN Condensed\", \"Arial Narrow\", sans-serif); font-size: 1.125rem; font-weight: 600; } select.ds-input { appearance: none; padding-right: 38px; background-image: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%231e1b18' stroke-width='2'/%3E%3C/svg%3E\"); background-repeat: no-repeat; background-position: right 14px center; } .ds-input:focus-visible { outline: 3px solid var(--ink, #1e1b18); outline-offset: 2px; } .ds-input[aria-invalid=\"true\"] { border-color: var(--sign, #c62a1f); box-shadow: inset 0 0 0 1px var(--sign, #c62a1f); } .ds-input:disabled { color: var(--ink-3, #635d56); border-color: var(--steel-4, #8a9198); background-color: var(--steel, #e6e9eb); }"
+    },
+    {
+      "name": "State Chips",
+      "kind": "chip",
+      "refersTo": "chip-ai-draft",
+      "description": "Square tags: dashed for AI drafts (AI 起草 in Signboard Red, AI 分析結果 in ink), solid when manual, Keep Green only for 已保存, Yolk-on-ink counts.",
+      "html": "<div class=\"ds-chips\"><span class=\"ds-chip ds-chip-ai\">AI 起草</span><span class=\"ds-chip\">手動記錄</span><span class=\"ds-chip ds-chip-board\">AI 分析結果</span><span class=\"ds-chip ds-chip-board ds-chip-demo\">示範結果</span><span class=\"ds-chip-saved\">已保存</span><span class=\"ds-count\">2 項</span></div>",
+      "css": ".ds-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--ink, #1e1b18); font-family: var(--font-hei, -apple-system, BlinkMacSystemFont, \"PingFang HK\", \"Noto Sans HK\", sans-serif); } .ds-chip { padding: 3px 10px; border: 2px solid var(--ink, #1e1b18); border-radius: var(--radius-sm, 3px); background: var(--foam, #fcfcfa); font-size: 0.8125rem; font-weight: 700; white-space: nowrap; } .ds-chip-ai { border-style: dashed; border-color: var(--sign, #c62a1f); color: var(--sign, #c62a1f); } .ds-chip-board { padding: 2px 8px; border-style: dashed; font-size: 0.75rem; } .ds-chip-demo { border-style: solid; color: var(--yolk, #ffd23f); background: var(--ink, #1e1b18); } .ds-chip-saved { padding: 0 6px; border: 2px solid var(--keep, #2e7d32); border-radius: var(--radius-sm, 3px); color: var(--keep, #2e7d32); font-size: 0.75rem; font-weight: 700; line-height: 1.5; } .ds-count { padding: 1px 10px; border-radius: var(--radius-sm, 3px); color: var(--yolk, #ffd23f); background: var(--ink, #1e1b18); font-family: var(--font-num, \"Barlow Condensed\", \"DIN Condensed\", \"Arial Narrow\", sans-serif); font-size: 1.0625rem; font-weight: 700; }"
+    },
+    {
+      "name": "Signboard Band and Status Strip",
+      "kind": "nav",
+      "refersTo": "signboard-band",
+      "description": "Full-bleed Signboard Red band with the Yolk Barlow wordmark and an outline 帳戶 button, over the ink status strip whose ringed dot is Yolk while connecting and green once synced.",
+      "html": "<div class=\"ds-top\"><header class=\"ds-band\"><a class=\"ds-brand\" href=\"#today\"><strong>KcalCue</strong><small>每日飲食小記</small></a><button class=\"ds-account\" type=\"button\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"8\" r=\"3.2\"/><path d=\"M5.5 20c.6-3.6 3-5.5 6.5-5.5s5.9 1.9 6.5 5.5\"/></svg><span>帳戶</span></button></header><div class=\"ds-strip\" role=\"status\"><span class=\"ds-dot\"></span><span>已同步 · 24/11/2026 上午12:05:05</span></div></div>",
+      "css": ".ds-top { font-family: var(--font-hei, -apple-system, BlinkMacSystemFont, \"PingFang HK\", \"Noto Sans HK\", sans-serif); } .ds-band { min-height: 64px; padding: 8px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--white, #ffffff); background: var(--sign, #c62a1f); } .ds-brand { display: inline-flex; align-items: baseline; gap: 10px; color: var(--yolk, #ffd23f); text-decoration: none; } .ds-brand strong { font-family: var(--font-num, \"Barlow Condensed\", \"DIN Condensed\", \"Arial Narrow\", sans-serif); font-size: 2rem; font-weight: 700; line-height: 1; letter-spacing: 0.005em; } .ds-brand small { color: var(--white, #ffffff); font-size: 0.8125rem; font-weight: 600; } .ds-account { min-height: 44px; padding: 0 14px; display: inline-flex; align-items: center; gap: 8px; border: 2px solid rgba(255, 255, 255, 0.85); border-radius: var(--radius, 4px); color: var(--white, #ffffff); background: transparent; font-family: var(--font-hei, -apple-system, BlinkMacSystemFont, \"PingFang HK\", \"Noto Sans HK\", sans-serif); font-size: 0.9375rem; font-weight: 700; cursor: pointer; transition: background-color 150ms ease; } .ds-account svg { width: 20px; height: 20px; } .ds-account:hover { background: var(--sign-deep, #9f1f16); } .ds-brand:focus-visible, .ds-account:focus-visible { outline: 3px solid var(--yolk, #ffd23f); outline-offset: 2px; } .ds-strip { min-height: 30px; padding: 5px 16px; display: flex; align-items: center; gap: 8px; color: #f2f0ea; background: var(--ink, #1e1b18); font-size: 0.75rem; font-weight: 600; line-height: 1.3; } .ds-dot { width: 9px; height: 9px; flex: none; border-radius: 50%; background: #2e7d32; box-shadow: 0 0 0 2px var(--ink, #1e1b18), 0 0 0 3.5px #f2f0ea; }"
+    },
+    {
+      "name": "Bottom Navigation",
+      "kind": "nav",
+      "refersTo": "nav-bar",
+      "description": "Foam bar under a 3px ink rule; the current tab carries a 28×4px red bar; the centre camera is a 74px red circle in a 3px ink ring raised 28px, with no shadow.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"主導覽\"><button type=\"button\" aria-current=\"page\"><span class=\"ds-nav-icon\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"m4 10 8-6 8 6\"/><path d=\"M6.5 9.5V20h11V9.5\"/><path d=\"M10 20v-6h4v6\"/></svg></span><span>今日</span></button><button class=\"ds-nav-add\" type=\"button\"><span class=\"ds-nav-icon\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M5 7h3l1.2-2h5.6L16 7h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z\"/><circle cx=\"12\" cy=\"13\" r=\"3.5\"/></svg></span><span>新增</span></button><button type=\"button\"><span class=\"ds-nav-icon\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M4 12a8 8 0 1 0 2.3-5.7L4 8.5\"/><path d=\"M4 4v4.5h4.5\"/><path d=\"M12 8v4l2.5 1.5\"/></svg></span><span>歷史</span></button></nav>",
+      "css": ".ds-nav { margin-top: 32px; display: grid; grid-template-columns: minmax(0, 1fr) 96px minmax(0, 1fr); align-items: end; border-top: 3px solid var(--ink, #1e1b18); background: var(--foam, #fcfcfa); font-family: var(--font-hei, -apple-system, BlinkMacSystemFont, \"PingFang HK\", \"Noto Sans HK\", sans-serif); } .ds-nav button { position: relative; min-height: 60px; display: grid; justify-items: center; align-content: center; gap: 2px; padding: 0; border: 0; color: var(--ink-3, #635d56); background: transparent; font-family: inherit; font-size: 0.75rem; font-weight: 700; cursor: pointer; } .ds-nav button:hover, .ds-nav button[aria-current] { color: var(--ink, #1e1b18); } .ds-nav button[aria-current]:not(.ds-nav-add)::after { content: \"\"; position: absolute; bottom: 5px; width: 28px; height: 4px; background: var(--sign, #c62a1f); } .ds-nav button:focus-visible { outline: 3px solid var(--ink, #1e1b18); outline-offset: 2px; } .ds-nav-icon, .ds-nav-icon svg { width: 22px; height: 22px; display: grid; place-items: center; } .ds-nav .ds-nav-add { width: 74px; height: 74px; min-height: 74px; margin: -28px auto 6px; border: 3px solid var(--ink, #1e1b18); border-radius: 50%; color: var(--white, #ffffff); background: var(--sign, #c62a1f); transition: background-color 150ms ease, transform 150ms cubic-bezier(0.16, 1, 0.3, 1); } .ds-nav .ds-nav-add:hover { color: var(--white, #ffffff); background: var(--sign-deep, #9f1f16); } .ds-nav .ds-nav-add:active { transform: translateY(1px); } .ds-nav .ds-nav-add .ds-nav-icon, .ds-nav .ds-nav-add .ds-nav-icon svg { width: 26px; height: 26px; }"
+    },
+    {
+      "name": "Price Board",
+      "kind": "card",
+      "refersTo": "price-board",
+      "description": "The day price board: board label, 60px Barlow range, a to-scale 0–1500 kcal rail, three Soft Yolk macro cells and hatched gap notes.",
+      "html": "<section class=\"ds-board\" aria-label=\"今日摘要\"><div class=\"ds-board-count\"><span>今日餐數</span><strong>2</strong><small>餐</small></div><div class=\"ds-board-kcal\"><span>已知部分卡路里</span><strong>325–660</strong><small>kcal</small><span class=\"ds-rail\" aria-hidden=\"true\"><span class=\"ds-rail-track\"><span class=\"ds-rail-fill\"></span></span><span class=\"ds-rail-ticks\"><span class=\"ds-t0\">0</span><span class=\"ds-t1\">500</span><span class=\"ds-t2\">1000</span><span class=\"ds-t3\">1500</span></span></span></div><div class=\"ds-board-macro\"><span>蛋白質</span><strong>10–24</strong><small>g</small></div><div class=\"ds-board-macro\"><span>碳水</span><strong>75–154</strong><small>g</small></div><div class=\"ds-board-macro\"><span>脂肪</span><strong>8–27</strong><small>g</small></div><p class=\"ds-board-note\">以上並非全日總數：1 餐未完整計入，未知不代表零。</p></section>",
+      "css": ".ds-board { position: relative; max-width: 520px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); overflow: hidden; border: 3px solid var(--ink, #1e1b18); border-radius: var(--radius, 4px); color: var(--ink, #1e1b18); background: var(--yolk, #ffd23f); font-family: var(--font-hei, -apple-system, BlinkMacSystemFont, \"PingFang HK\", \"Noto Sans HK\", sans-serif); } .ds-board-count { position: absolute; top: 10px; right: 14px; display: flex; align-items: baseline; gap: 4px; font-size: 0.8125rem; font-weight: 700; } .ds-board-count strong { font-family: var(--font-num, \"Barlow Condensed\", \"DIN Condensed\", \"Arial Narrow\", sans-serif); font-size: 1.5rem; line-height: 1; } .ds-board-kcal { grid-column: 1 / -1; padding: 12px 14px; display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 6px; } .ds-board-kcal > span:first-child { flex-basis: 100%; padding-right: 112px; font-size: 0.8125rem; font-weight: 700; } .ds-board-kcal strong { font-family: var(--font-num, \"Barlow Condensed\", \"DIN Condensed\", \"Arial Narrow\", sans-serif); font-size: 3.75rem; font-weight: 700; line-height: 1; letter-spacing: -0.005em; font-variant-numeric: tabular-nums lining-nums; } .ds-board-kcal small { font-family: var(--font-num, \"Barlow Condensed\", \"DIN Condensed\", \"Arial Narrow\", sans-serif); font-size: 1.375rem; font-weight: 600; } .ds-rail { flex-basis: 100%; margin-top: 10px; display: block; } .ds-rail-track { position: relative; display: block; height: 12px; border-radius: 2px; background: rgba(30, 27, 24, 0.16); } .ds-rail-fill { position: absolute; top: 0; bottom: 0; left: 21.667%; width: 22.333%; min-width: 4px; border-radius: 2px; background: var(--ink, #1e1b18); } .ds-rail-ticks { position: relative; display: block; height: 16px; margin-top: 3px; color: var(--ink-2, #4c4741); font-family: var(--font-num, \"Barlow Condensed\", \"DIN Condensed\", \"Arial Narrow\", sans-serif); font-size: 0.8125rem; font-weight: 600; line-height: 16px; } .ds-rail-ticks span { position: absolute; top: 0; transform: translateX(-50%); } .ds-rail-ticks .ds-t0 { left: 0; transform: none; } .ds-rail-ticks .ds-t1 { left: 33.333%; } .ds-rail-ticks .ds-t2 { left: 66.667%; } .ds-rail-ticks .ds-t3 { left: 100%; transform: translateX(-100%); } .ds-board-macro { padding: 8px 12px 10px; display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 3px; border-top: 3px solid var(--ink, #1e1b18); background: var(--yolk-soft, #fff1b8); } .ds-board-macro + .ds-board-macro { border-left: 2px solid var(--ink, #1e1b18); } .ds-board-macro span { flex-basis: 100%; font-size: 0.8125rem; font-weight: 700; } .ds-board-macro strong { font-family: var(--font-num, \"Barlow Condensed\", \"DIN Condensed\", \"Arial Narrow\", sans-serif); font-size: 1.5rem; font-weight: 700; line-height: 1.1; } .ds-board-macro small { font-family: var(--font-num, \"Barlow Condensed\", \"DIN Condensed\", \"Arial Narrow\", sans-serif); font-size: 1rem; font-weight: 600; } .ds-board-note { grid-column: 1 / -1; margin: 0; padding: 8px 14px; display: flex; align-items: baseline; gap: 8px; border-top: 2px solid var(--ink, #1e1b18); font-size: 0.8125rem; font-weight: 600; line-height: 1.5; } .ds-board-note::before { content: \"\"; width: 20px; height: 10px; flex: none; border: 1.5px solid var(--ink, #1e1b18); background: var(--hatch, repeating-linear-gradient(-45deg, #1e1b18 0 1.5px, transparent 1.5px 5px)); }"
+    },
+    {
+      "name": "Meal Tray and Placards",
+      "kind": "card",
+      "refersTo": "placard",
+      "description": "A meal tray: 3px ink title rule, Tray Steel strip, solid ink placards packed edge to edge (auto-fit 144px, 8px gap), hatched unknowns, and a dashed grey empty slot.",
+      "html": "<div class=\"ds-trays\"><h3 class=\"ds-tray-title\">午餐</h3><article class=\"ds-tray\"><div class=\"ds-meta\"><p class=\"ds-time\">12:30 · 午餐</p><p class=\"ds-meal-kcal ds-unknown\">整餐卡路里未知；詳情可查看已知食物估算</p></div><ul class=\"ds-placards\"><li class=\"ds-placard\"><span class=\"ds-placard-name\">白飯</span><span class=\"ds-placard-kcal\">約 130–195 kcal</span></li><li class=\"ds-placard ds-placard-unknown\"><span class=\"ds-placard-name\">叉燒</span><span class=\"ds-placard-kcal\">未有足夠資料</span></li></ul><div class=\"ds-note\"><strong>備註</strong><span>同同事食，飯食咗一半</span></div><div class=\"ds-actions\"><button class=\"ds-btn\" type=\"button\">查看／修正</button><button class=\"ds-btn ds-btn-ghost\" type=\"button\">刪除</button></div></article><h3 class=\"ds-tray-title\">晚餐</h3><p class=\"ds-tray-empty\">未有記錄</p></div>",
+      "css": ".ds-btn { min-height: 44px; padding: 0 14px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 2px solid var(--ink, #1e1b18); border-radius: var(--radius, 4px); color: var(--ink, #1e1b18); background: var(--foam, #fcfcfa); font-family: var(--font-hei, -apple-system, BlinkMacSystemFont, \"PingFang HK\", \"Noto Sans HK\", sans-serif); font-size: 0.875rem; font-weight: 700; line-height: 1.2; text-align: center; cursor: pointer; transition: background-color 150ms ease, color 150ms ease, transform 150ms cubic-bezier(0.16, 1, 0.3, 1); } .ds-btn svg { width: 20px; height: 20px; flex: none; } .ds-btn:hover { background: var(--white, #ffffff); } .ds-btn:active { transform: translateY(1px); } .ds-btn:focus-visible { outline: 3px solid var(--ink, #1e1b18); outline-offset: 2px; } .ds-btn-ghost { border-color: transparent; color: var(--sign-deep, #9f1f16); background: transparent; } .ds-btn-ghost:hover { background: var(--steel-2, #d5dade); } .ds-trays { max-width: 420px; display: grid; color: var(--ink, #1e1b18); font-family: var(--font-hei, -apple-system, BlinkMacSystemFont, \"PingFang HK\", \"Noto Sans HK\", sans-serif); } .ds-tray-title { margin: 0; padding: 0 2px 5px; border-bottom: 3px solid var(--ink, #1e1b18); font-size: 1.0625rem; font-weight: 700; line-height: 1.25; } .ds-tray + .ds-tray-title { margin-top: 16px; } .ds-tray { padding: 10px; display: grid; gap: 10px; border: 1px solid var(--steel-3, #b3bac0); border-top: 0; background: var(--steel-2, #d5dade); } .ds-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; } .ds-time { margin: 0; color: var(--ink-2, #4c4741); font-family: var(--font-num, \"Barlow Condensed\", \"DIN Condensed\", \"Arial Narrow\", sans-serif); font-size: 1.0625rem; font-weight: 600; } .ds-meal-kcal { margin: 0 0 0 auto; font-family: var(--font-num, \"Barlow Condensed\", \"DIN Condensed\", \"Arial Narrow\", sans-serif); font-size: 1.1875rem; font-weight: 700; line-height: 1.3; } .ds-meal-kcal.ds-unknown { flex-basis: 100%; margin-left: 0; display: flex; align-items: baseline; gap: 8px; font-family: var(--font-hei, -apple-system, BlinkMacSystemFont, \"PingFang HK\", \"Noto Sans HK\", sans-serif); font-size: 0.8125rem; } .ds-meal-kcal.ds-unknown::before, .ds-placard-unknown .ds-placard-kcal::before { content: \"\"; width: 20px; height: 10px; flex: none; border: 1.5px solid var(--ink, #1e1b18); background: var(--hatch, repeating-linear-gradient(-45deg, #1e1b18 0 1.5px, transparent 1.5px 5px)); } .ds-placards { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(144px, 1fr)); gap: 8px; } .ds-placard { min-height: 66px; padding: 8px 10px 9px; display: grid; align-content: start; gap: 2px; border: 2px solid var(--ink, #1e1b18); border-radius: var(--radius-sm, 3px); background: var(--foam, #fcfcfa); } .ds-placard-name { font-size: 1.375rem; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; } .ds-placard-kcal { font-family: var(--font-num, \"Barlow Condensed\", \"DIN Condensed\", \"Arial Narrow\", sans-serif); font-size: 1.1875rem; font-weight: 700; } .ds-placard-unknown .ds-placard-kcal { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-hei, -apple-system, BlinkMacSystemFont, \"PingFang HK\", \"Noto Sans HK\", sans-serif); font-size: 0.8125rem; } .ds-note { display: flex; align-items: baseline; gap: 8px; font-size: 0.875rem; line-height: 1.55; } .ds-note strong { flex: none; padding: 0 6px; border: 1.5px solid var(--ink, #1e1b18); border-radius: var(--radius-sm, 3px); background: var(--foam, #fcfcfa); font-size: 0.75rem; } .ds-actions { display: flex; flex-wrap: wrap; gap: 8px; } .ds-tray-empty { margin: 0; padding: 10px 12px; border: 2px dashed var(--steel-4, #8a9198); border-top: 0; color: var(--ink-3, #635d56); font-size: 0.875rem; font-weight: 600; }"
+    },
+    {
+      "name": "Draft Food Placard",
+      "kind": "card",
+      "refersTo": "food-placard-draft",
+      "description": "An editor placard still to be checked: dashed ink frame, Yolk-on-ink index, dashed-underline name field, Yolk kcal tag, badges and 少／普通／多 presets.",
+      "html": "<div class=\"ds-food-list\"><article class=\"ds-food\"><div class=\"ds-food-head\"><div class=\"ds-food-index\" aria-hidden=\"true\">1</div><div class=\"ds-food-title\"><label for=\"ds-food-1\">食物名稱</label><input id=\"ds-food-1\" class=\"ds-food-name\" value=\"港式奶茶\"></div><button class=\"ds-icon-btn\" type=\"button\" aria-label=\"刪除 港式奶茶\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5\"/></svg></button></div><div class=\"ds-food-summary\"><strong>約 90–310 kcal</strong><span class=\"ds-badge\">AI 辨認：請核對</span><span class=\"ds-badge\">營養資料：高</span></div><fieldset class=\"ds-preset\"><legend>快速調整份量</legend><div class=\"ds-segment\"><button type=\"button\">少</button><button type=\"button\">普通</button><button type=\"button\">多</button></div></fieldset></article></div>",
+      "css": ".ds-food-list { max-width: 420px; padding: 8px; display: grid; grid-template-columns: repeat(auto-fit, minmax(272px, 1fr)); align-items: start; gap: 8px; border: 1px solid var(--steel-3, #b3bac0); color: var(--ink, #1e1b18); background: var(--steel-2, #d5dade); font-family: var(--font-hei, -apple-system, BlinkMacSystemFont, \"PingFang HK\", \"Noto Sans HK\", sans-serif); } .ds-food { container-type: inline-size; padding: 12px; display: grid; gap: 10px; border: 2px dashed var(--ink, #1e1b18); border-radius: var(--radius-sm, 3px); background: var(--foam, #fcfcfa); animation: ds-placard-in 280ms cubic-bezier(0.16, 1, 0.3, 1) both; } @keyframes ds-placard-in { from { transform: translateY(10px); } to { transform: none; } } @media (prefers-reduced-motion: reduce) { .ds-food { animation: none; } } .ds-food-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: end; gap: 10px; } .ds-food-index { width: 36px; height: 36px; align-self: center; display: grid; place-items: center; border-radius: var(--radius-sm, 3px); color: var(--yolk, #ffd23f); background: var(--ink, #1e1b18); font-family: var(--font-num, \"Barlow Condensed\", \"DIN Condensed\", \"Arial Narrow\", sans-serif); font-size: 1.25rem; font-weight: 700; } .ds-food-title { min-width: 0; display: grid; gap: 2px; } .ds-food-title label { color: var(--ink-2, #4c4741); font-size: 0.75rem; font-weight: 700; } .ds-food-name { box-sizing: border-box; width: 100%; min-width: 0; min-height: 44px; padding: 2px 4px; border: 0; border-bottom: 2px dashed var(--ink, #1e1b18); border-radius: 0; color: var(--ink, #1e1b18); background: transparent; font-family: var(--font-hei, -apple-system, BlinkMacSystemFont, \"PingFang HK\", \"Noto Sans HK\", sans-serif); font-size: 1.375rem; font-weight: 700; } .ds-food-name:hover { background: var(--white, #ffffff); } .ds-food-name:focus { border: 2px solid var(--ink, #1e1b18); border-radius: var(--radius-sm, 3px); background: var(--white, #ffffff); } .ds-food-name:focus-visible { outline: 3px solid var(--ink, #1e1b18); outline-offset: 2px; } .ds-icon-btn { width: 44px; height: 44px; align-self: center; display: grid; place-items: center; padding: 0; border: 2px solid transparent; border-radius: var(--radius, 4px); color: var(--sign-deep, #9f1f16); background: transparent; cursor: pointer; } .ds-icon-btn svg { width: 20px; height: 20px; } .ds-icon-btn:hover { border-color: var(--ink, #1e1b18); background: var(--white, #ffffff); } .ds-icon-btn:focus-visible { outline: 3px solid var(--ink, #1e1b18); outline-offset: 2px; } .ds-food-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; } .ds-food-summary strong { padding: 1px 10px; border: 2px solid var(--ink, #1e1b18); border-radius: var(--radius-sm, 3px); background: var(--yolk, #ffd23f); font-family: var(--font-num, \"Barlow Condensed\", \"DIN Condensed\", \"Arial Narrow\", sans-serif); font-size: 1.375rem; font-weight: 700; line-height: 1.25; } .ds-badge { padding: 1px 8px; border: 1.5px solid var(--ink, #1e1b18); border-radius: var(--radius-sm, 3px); background: var(--foam, #fcfcfa); font-size: 0.75rem; font-weight: 700; line-height: 1.6; } .ds-preset { min-width: 0; margin: 0; padding: 0; display: grid; border: 0; } .ds-preset legend { margin-bottom: 6px; padding: 0; color: var(--ink-2, #4c4741); font-size: 0.75rem; font-weight: 700; } .ds-segment { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); overflow: hidden; border: 2px solid var(--ink, #1e1b18); border-radius: var(--radius-sm, 3px); } .ds-segment button { min-height: 44px; border: 0; color: var(--ink, #1e1b18); background: var(--foam, #fcfcfa); font-family: var(--font-hei, -apple-system, BlinkMacSystemFont, \"PingFang HK\", \"Noto Sans HK\", sans-serif); font-size: 0.9375rem; font-weight: 700; cursor: pointer; } .ds-segment button + button { border-left: 2px solid var(--ink, #1e1b18); } .ds-segment button:hover { background: var(--yolk-soft, #fff1b8); } .ds-segment button:focus-visible { outline: 3px solid var(--ink, #1e1b18); outline-offset: 2px; }"
+    },
+    {
+      "name": "Save Bar",
+      "kind": "custom",
+      "refersTo": "button-save",
+      "description": "Foam bar in a 3px ink frame with Keep Green 儲存餐點 beside 放棄修改; sticky above the nav only while the draft has foods, static otherwise.",
+      "html": "<div class=\"ds-save-bar\"><p class=\"ds-save-note\">AI 可能認錯或漏掉食物、估錯份量；共用餐點只記自己吃喝的部分，請逐項核對後再儲存。</p><button class=\"ds-btn\" type=\"button\">放棄修改</button><button class=\"ds-btn ds-btn-save\" type=\"button\">儲存餐點</button></div>",
+      "css": ".ds-btn { min-height: 52px; padding: 0 18px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 2px solid var(--ink, #1e1b18); border-radius: var(--radius, 4px); color: var(--ink, #1e1b18); background: var(--foam, #fcfcfa); font-family: var(--font-hei, -apple-system, BlinkMacSystemFont, \"PingFang HK\", \"Noto Sans HK\", sans-serif); font-size: 1rem; font-weight: 700; line-height: 1.2; text-align: center; cursor: pointer; transition: background-color 150ms ease, color 150ms ease, transform 150ms cubic-bezier(0.16, 1, 0.3, 1); } .ds-btn svg { width: 20px; height: 20px; flex: none; } .ds-btn:hover { background: var(--white, #ffffff); } .ds-btn:active { transform: translateY(1px); } .ds-btn:focus-visible { outline: 3px solid var(--ink, #1e1b18); outline-offset: 2px; } .ds-save-bar { max-width: 520px; padding: 10px; display: flex; flex-wrap: wrap; gap: 8px; border: 3px solid var(--ink, #1e1b18); border-radius: var(--radius, 4px); background: var(--foam, #fcfcfa); font-family: var(--font-hei, -apple-system, BlinkMacSystemFont, \"PingFang HK\", \"Noto Sans HK\", sans-serif); } .ds-save-bar .ds-btn { flex: 1 1 0; } .ds-save-note { flex-basis: 100%; margin: 0; color: var(--ink-2, #4c4741); font-size: 0.75rem; line-height: 1.45; } .ds-btn-save { color: var(--white, #ffffff); background: var(--keep, #2e7d32); } .ds-btn-save:hover { background: var(--keep-deep, #1f5f24); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "兩餸飯餸牌: The Two-Dish Rice Counter",
+    "overview": "Every meal is a tray of picked dishes, laid out the way a Hong Kong two-dish-rice (兩餸飯) shop shows its food: a signboard-red band overhead, a stainless counter below, each dish on its own ink-framed placard, and the total written up on a yolk price board. The AI lays the dishes out as placards, the eater checks each one, and the honest range sits on the board. Surfaces are printed, not glassy: heavy ink frames, near-square corners, condensed numerals readable across a café table, and no shadow anywhere.\n\nDensity is counter-dense rather than dashboard-dense. Placards pack edge to edge in their trays, totals are large and drawn to scale, and everything else stays quiet foam and steel. State is carried by form before colour: a dashed line is a draft still to be checked, a solid line is saved, a 45° ink hatch is unknown, and an empty slot is a dashed grey outline. Each colour has one job: red is the shop's sign and its main action, yolk carries the headline total, green belongs only to saving.\n\nAI photo recognition is the primary entry and wears the red; manual logging sits beside it in foam, secondary but always available. The world refuses the calorie-app default: no calorie ring counting down a goal, no pastel macro donuts, no cream-and-sage wellness cards. It replaces the warm-white, deep-green and coral palette that DECISIONS.md §9 still describes; that section's fixed result order still binds.\n\nOpen decisions: the app icon (public/icon.svg and its PNG versions, a deep-green #173f35 tile with cream and orange) predates this world and has not been confirmed by James, so it was deliberately left untouched and stays that way until he chooses keep or redraw. The subtitle lines under headings stay as written until James decides whether to remove them.",
+    "keyCharacteristics": [
+      "Signboard-red band and primary action over a stainless-steel ground.",
+      "Foam-white placards in 2–3px ink frames with 3–4px corners.",
+      "Yolk price boards with range rails drawn from 0 to at least 1500 kcal.",
+      "Barlow Condensed for figures; the system Hei stack for names and sentences.",
+      "State by form: dashed is draft, solid is saved, hatched is unknown.",
+      "Green only for save and saved; no shadows anywhere."
+    ],
+    "rules": [
+      {
+        "name": "The Keep-Green Rule",
+        "body": "Green belongs only to saving and saved: the 儲存餐點 button, the 已保存 chip and the synced dot. A screen with nothing saved or being saved shows no green.",
+        "section": "colors"
+      },
+      {
+        "name": "The Signboard Rule",
+        "body": "Red is the shop's sign and the one main action per group. It frames and acts (band, primary buttons, camera tab, current tab, error frames); it never becomes a reading surface.",
+        "section": "colors"
+      },
+      {
+        "name": "The Price-Board Rule",
+        "body": "A screen's headline total (the day on Today and History, the meal on the result screen) sits on a Yolk board in Counter Ink, with its range rail and its macros on Soft Yolk beneath. Per-meal and per-dish ranges stay small on their trays and placards.",
+        "section": "colors"
+      },
+      {
+        "name": "The Figures-In-Barlow Rule",
+        "body": "A number that stands as a value (kcal, grams, counts, times, dates, ticks, numeric inputs) is set in Barlow Condensed; a number inside a Chinese sentence stays in Hei with its sentence.",
+        "section": "typography"
+      },
+      {
+        "name": "The Edge-to-Edge Rule",
+        "body": "Placards pack edge to edge: auto-fit columns with an 8px gap, at least 144px wide in trays and 272px in the food editor, so a tray fills its width however many dishes it holds.",
+        "section": "layout"
+      },
+      {
+        "name": "The One-Scale Rule",
+        "body": "Every kcal range is drawn to scale on a rail that starts at 0 and reaches at least 1500 kcal, so ordinary meals and days share one scale. A range that runs past 1500 extends its own rail to the next 500 kcal (ticks every 500 up to 2000, then every 1000).",
+        "section": "layout"
+      },
+      {
+        "name": "The No-Shadow Rule",
+        "body": "No drop shadows, glows, blurs or offset shadows, at rest or on hover. box-shadow appears only as a zero-offset, zero-blur ring that thickens a frame or rings the status dot.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Form-Is-State Rule",
+        "body": "State is carried by form before colour. Dashed Counter Ink marks a draft or an AI-origin item still to be checked: food placards in the editor, the unsaved-draft banner, the AI 分析結果 chip, original-AI details, low-confidence badges and panels, provisional Soft Yolk notices and the 新增食物 slot (the editor's AI 起草 chip draws the same dash in Signboard Red). Solid ink is the resting frame: saved placards and trays on Today and History, and the interface's own boards, cards, fields and buttons. The ink hatch marks unknown or insufficient data. Dashed Rivet Grey marks an empty slot.",
+        "section": "shapes"
+      }
+    ],
+    "dos": [
+      "Do carry state by form: dashed ink for drafts and AI-origin items, solid ink once saved, the 45° ink hatch for unknown or insufficient data, dashed Rivet Grey for empty slots.",
+      "Do lead entry points with the AI photo action in Signboard Red and keep a Foam White manual option on the same surface.",
+      "Do set figures that stand as values in Barlow Condensed (700 for amounts, 600 for times, dates and ticks) and names and sentences in the Hei stack.",
+      "Do draw every kcal range to scale on a rail from 0 to at least 1500 kcal, ink fill at its true position, hatched when the total is unknown.",
+      "Do frame placards, cards, fields and buttons in Counter Ink (2px; 3px for boards, entry buttons, the save bar and the nav rule) with 3px or 4px corners.",
+      "Do pack placards edge to edge with auto-fit columns and an 8px gap (144px minimum in trays, 272px in the food editor).",
+      "Do keep the result order kcal range → confidence → breakdown → uncertainty → correction controls.",
+      "Do keep the save bar sticky above the nav only while the draft has foods, static otherwise.",
+      "Do keep touch targets at 44px or more and the 3px ink focus outline (Yolk on the red band).",
+      "Do keep the structural hooks, aria-labels and accessible names through every restyle."
+    ],
+    "donts": [
+      "Don't use green for anything but saving and saved.",
+      "Don't add drop shadows, glows or blur for depth; separate with frames, tone and overlap.",
+      "Don't show an unknown as zero, a blank or an empty rail; hatch it and say so.",
+      "Don't reach for the calorie-app default: no calorie ring counting down a goal, no pastel macro donuts, no cream-and-sage wellness cards.",
+      "Don't change UI copy without James's approval; a restyle keeps every string.",
+      "Don't add new subtitle lines under headings on new surfaces; the existing ones are carried copy awaiting James's decision.",
+      "Don't round frames past 4px; circles are only for dots and the camera.",
+      "Don't let Signboard Red fill a reading surface.",
+      "Don't recolour, redraw or replace the app icon (public/icon.svg and its PNGs) until James confirms keep or redraw."
+    ]
+  }
+}

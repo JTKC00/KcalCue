@@ -26,6 +26,9 @@
 !public/icon-192.png
 !public/icon-512.png
 !public/apple-touch-icon.png
+!public/fonts/
+!public/fonts/barlow-condensed-600.woff2
+!public/fonts/barlow-condensed-700.woff2
 !scripts/
 !scripts/check-codecs.mjs
 !scripts/smoke-container.mjs

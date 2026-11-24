@@ -88,7 +88,7 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-it("makes manual journal entry the primary action while keeping AI photo entry secondary", async () => {
+it("makes AI photo entry the primary action while keeping manual journal entry available", async () => {
   fixture.list.mockResolvedValue([]);
   fixture.syncedAt.a = "2026-10-07T00:00:00.000Z";
   render(<MealJournal initialProviderMode="live" />);
@@ -96,8 +96,8 @@ it("makes manual journal entry the primary action while keeping AI photo entry s
 
   const manualButton = screen.getByRole("button", { name: "＋ 手動記餐" });
   const aiButton = screen.getByRole("button", { name: "AI 相片辨識" });
-  expect(manualButton).toHaveClass("button-primary");
-  expect(aiButton).toHaveClass("button-secondary");
+  expect(aiButton).toHaveClass("button-primary");
+  expect(manualButton).toHaveClass("button-secondary");
 
   fireEvent.click(manualButton);
   expect(await screen.findByTestId("mock-kcalcue-app")).toHaveAttribute("data-manual", "true");

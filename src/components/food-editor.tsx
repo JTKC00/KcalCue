@@ -24,6 +24,7 @@ export interface RecognitionBadge {
 }
 
 interface FoodEditorProps {
+  number?: number;
   item: EditableFoodItem;
   calculation: CalculatedFood;
   recognition: RecognitionBadge;
@@ -90,6 +91,7 @@ function calorieRange(calculation: CalculatedFood): string {
 }
 
 export function FoodEditor({
+  number,
   item,
   calculation,
   recognition,
@@ -119,7 +121,7 @@ export function FoodEditor({
     <article className="food-card">
       <div className="food-card-heading">
         <div className="food-index" aria-hidden="true">
-          {item.displayName.trim().slice(0, 1) || "＋"}
+          {number ?? (item.displayName.trim().slice(0, 1) || "＋")}
         </div>
         <div className="food-title-wrap">
           <label htmlFor={`${fieldId}-name`}>食物名稱</label>

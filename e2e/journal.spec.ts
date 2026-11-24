@@ -264,12 +264,9 @@ test("journal visual refresh keeps mobile and desktop hierarchy usable", async (
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "今日飲食", exact: true })).toBeVisible();
   await expect(page.locator(".journal-hero-card")).toBeVisible();
-  await expect(page.locator(".food-stamp-cluster").first()).toHaveAttribute("aria-hidden", "true");
   await expect(page.getByRole("button", { name: "＋ 手動記餐", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "AI 相片辨識", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "新增", exact: true })).toHaveClass(/journal-nav-add/);
-  await expect(page.locator(".food-stamp svg").first()).toHaveCSS("width", "26px");
-  await expect(page.locator(".food-stamp svg").first()).toHaveCSS("height", "26px");
   await expect(page.getByText("未記錄", { exact: true })).toBeVisible();
   await expect(page.getByText("未知不代表零", { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
@@ -280,8 +277,6 @@ test("journal visual refresh keeps mobile and desktop hierarchy usable", async (
     await wide.goto("/");
     await expect(wide.getByRole("heading", { name: "今日飲食", exact: true })).toBeVisible();
     await expect(wide.locator(".journal-title-actions")).toBeVisible();
-    await expect(wide.locator(".food-stamp svg").first()).toHaveCSS("width", "30px");
-    await expect(wide.locator(".food-stamp svg").first()).toHaveCSS("height", "30px");
     expect(await wide.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
   } finally {
     await desktop.close();
@@ -707,8 +702,6 @@ test("correcting an AI dish to banana survives cloud save, reload and history ed
   await page.getByRole("button", { name: "歷史", exact: true }).click();
   await expect(page.getByRole("heading", { name: "歷史記錄", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "香蕉", exact: true })).toBeVisible();
-  await expect(page.locator(".meal-stamp svg").first()).toHaveCSS("width", "20px");
-  await expect(page.locator(".meal-stamp svg").first()).toHaveCSS("height", "20px");
   await page.getByRole("button", { name: "查看／修正", exact: true }).click();
   await expect(page.getByRole("combobox", { name: "食物名稱", exact: true })).toHaveValue("香蕉");
   await expect(estimate).toHaveText(correctedEstimate!);
