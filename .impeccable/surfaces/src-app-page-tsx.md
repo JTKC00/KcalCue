@@ -33,5 +33,5 @@ The result screen: the AI's dishes arrive as a wall of placards, each with its o
 
 ## Unresolved
 
-- App icon (`public/icon.svg`): James has not confirmed keep or redraw; untouched in this build.
+- App icon (`public/icon.svg`): untouched in this build; redrawn on 2026-11-24 as the hanging price board (see DESIGN.md).
 - Eyebrow lines kept as subtitles; full removal is a later copy decision for James.
