@@ -26,12 +26,12 @@
     "@google/genai": "2.24.0",
     "firebase": "12.18.0",
     "firebase-admin": "14.3.0",
-    "next": "^16.4.2",
+    "next": "^16.4.6",
     "openai": "^7.9.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "sharp": "^0.35.4",
-    "zod": "^4.4.3"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
@@ -41,15 +41,15 @@
     "@types/node": "^26.2.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
-    "@vitest/coverage-v8": "4.1.11",
+    "@vitest/coverage-v8": "4.1.12",
     "eslint": "^9.39.5",
-    "eslint-config-next": "^16.4.2",
+    "eslint-config-next": "^16.4.6",
     "fake-indexeddb": "6.2.5",
     "jsdom": "^30.0.1",
     "node-addon-api": "8.9.2",
     "node-gyp": "13.0.2",
     "typescript": "^6.0.3",
-    "vitest": "4.1.11"
+    "vitest": "4.1.12"
   },
   "overrides": {
     "uuid": "11.1.1"
