@@ -120,7 +120,7 @@ V0.1 支援 browser 可靠預覽的 JPEG、PNG、WebP，限制 10MB，client/ser
 > - 卡路里範圍按比例畫在 0 至最少 1500 kcal 的刻度條上。
 > - AI 相片辨識是主要入口（紅色），手動記餐是次要入口，但每個入口畫面都保留。
 > - 數字用自行託管的 Barlow Condensed（`public/fonts/`，CSP `font-src 'self'`），中文用系統黑體。
-> - 未決定：App icon（`public/icon.svg` 及 PNG）仍是舊配色，等 James 決定保留或重畫。
+> - App icon（2026-11-24，James 授權選定）：紅底上的掛牌式黃色價錢牌，有墨框、標籤及帶刻度的範圍條，取代舊的深綠圖示。
 
 ## 10. 可安裝但不離線假裝分析的 PWA
 
@@ -183,6 +183,8 @@ Compatibility：`dish → dish` 與 `ingredient → ingredient` 才可計入；`
 ## 26. PWA PNG icons（2026-09-08）
 
 iOS 主畫面需要 PNG `apple-touch-icon`。保留 SVG，另提供 192／512 PNG。Service worker 仍不 cache 相片或 API response。
+
+> 2026-11-24 更新：PNG 改為不透明滿版正方形。`icon-512.png` 同時用作 maskable，iOS 也會自行切圓角，透明圓角會在 iOS 變成黑邊，在 Android 被遮罩裁走。三個 PNG 由 `docs/design/app-icon/icon-full-bleed.svg` 經 `node scripts/render-icons.mjs` 產生，所有圖形留在 80% 安全圓內。
 
 ## 27. CSP 與現有 preview 共存（2026-09-08）
 

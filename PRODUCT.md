@@ -38,7 +38,7 @@ web
 
 - 名稱：KcalCue。語言與語氣：香港繁體中文、廣東話口語（例如「影低你嘅一餐」），平靜、個人日誌感。
 - 避免醫療報表、健身競賽或評斷身材的語氣（DECISIONS.md §9）。
-- App 圖示（`public/icon.svg` 及 PNG 版本）：James 尚未確認保留或重畫；改版期間不改動圖示檔，與新設計配色衝突時另行提出。
+- App 圖示（`public/icon.svg` 及 PNG 版本）：2026-11-24 由 James 授權選定，改為紅底掛牌式黃色價錢牌（墨框、標籤、帶刻度的範圍條）。母檔在 `docs/design/app-icon/icon-full-bleed.svg`，PNG 用 `node scripts/render-icons.mjs` 產生。
 
 ## Evidence on Hand
 

@@ -231,7 +231,7 @@ Density is counter-dense rather than dashboard-dense. Placards pack edge to edge
 
 AI photo recognition is the primary entry and wears the red; manual logging sits beside it in foam, secondary but always available. The world refuses the calorie-app default: no calorie ring counting down a goal, no pastel macro donuts, no cream-and-sage wellness cards. It replaces the warm-white, deep-green and coral palette that DECISIONS.md §9 described before its 2026-11-23 update; that section's fixed result order still binds.
 
-Open decisions: the app icon (public/icon.svg and its PNG versions, a deep-green #173f35 tile with cream and orange) predates this world and has not been confirmed by James, so it was deliberately left untouched and stays that way until he chooses keep or redraw. The subtitle lines under headings stay as written until James decides whether to remove them.
+App icon (decided 2026-11-24, James delegated the choice): a hanging Yolk price board in a Counter Ink frame, with a board label and a ticked range rail, on a Signboard Red tile. It replaced the deep-green #173f35 tile with cream and orange. Open decision: the subtitle lines under headings stay as written until James decides whether to remove them.
 
 **Key Characteristics:**
 - Signboard-red band and primary action over a stainless-steel ground.
@@ -447,4 +447,4 @@ Tests rely on these hooks; every restyle keeps them, along with every aria-label
 - **Don't** add new subtitle lines under headings on new surfaces; the existing ones are carried copy awaiting James's decision.
 - **Don't** round frames past 4px; circles are only for dots and the camera.
 - **Don't** let Signboard Red fill a reading surface.
-- **Don't** recolour, redraw or replace the app icon (public/icon.svg and its PNGs) until James confirms keep or redraw.
+- **Don't** edit the app icon PNGs by hand; change docs/design/app-icon/icon-full-bleed.svg (and public/icon.svg, its rounded copy) and re-render with node scripts/render-icons.mjs, keeping every mark inside the 80% maskable safe circle.

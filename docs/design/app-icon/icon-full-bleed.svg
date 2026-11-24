@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="KcalCue">
+  <!-- Full-bleed master for the PNG icons; launchers and iOS apply their own mask.
+       A hanging Yolk price board in a Counter Ink frame on Signboard Red, with a
+       board label and a range rail with ticks. Every mark stays inside the 80%
+       maskable safe circle (radius 204.8). Render with scripts/render-icons.mjs. -->
+  <rect width="512" height="512" fill="#c62a1f"/>
+  <path d="M256 104 L136 200 M256 104 L376 200" fill="none" stroke="#1e1b18" stroke-width="14" stroke-linecap="round"/>
+  <circle cx="256" cy="104" r="16" fill="#1e1b18"/>
+  <rect x="112" y="196" width="288" height="168" rx="10" fill="#ffd23f" stroke="#1e1b18" stroke-width="22"/>
+  <rect x="148" y="228" width="96" height="36" fill="#1e1b18"/>
+  <rect x="148" y="286" width="216" height="28" fill="#1e1b18" fill-opacity="0.2"/>
+  <rect x="148" y="286" width="136" height="28" fill="#1e1b18"/>
+  <path d="M150 324 V340 M256 324 V340 M362 324 V340" stroke="#1e1b18" stroke-width="8"/>
+</svg>
