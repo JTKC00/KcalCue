@@ -57,7 +57,14 @@ jobs:
               exit 1
             fi
           done
-          for path in src/app/page.tsx public/icon-192.png scripts/check-codecs.mjs scripts/smoke-container.mjs; do
+          # Every committed public asset ships to users, so each one must reach
+          # the image. A new asset that is not allowlisted fails here.
+          mapfile -t public_files < <(git ls-files public)
+          if [[ ${#public_files[@]} -eq 0 ]]; then
+            echo "::error::git ls-files public returned nothing"
+            exit 1
+          fi
+          for path in src/app/page.tsx scripts/check-codecs.mjs scripts/smoke-container.mjs "${public_files[@]}"; do
             if [[ ! -f "$context_dir/$path" ]]; then
               echo "::error::Missing build-context path: $path"
               exit 1
@@ -78,12 +85,29 @@ jobs:
           trap cleanup EXIT
           probe_dockerfile="$(mktemp)"
           printf '%s\n' 'FROM scratch' 'COPY . /context' 'CMD ["/bin/true"]' > "$probe_dockerfile"
+          # Cloud Build only receives what .gcloudignore lets gcloud upload, and
+          # then applies .dockerignore. Rebuild that upload set so the probe
+          # checks both filters in the order a real release applies them.
+          if ! command -v gcloud >/dev/null; then
+            echo "::error::gcloud CLI is required to reproduce the .gcloudignore upload set"
+            exit 1
+          fi
+          upload_dir="$(mktemp -d)"
+          gcloud meta list-files-for-upload > "$upload_dir.list"
+          if [[ ! -s "$upload_dir.list" ]]; then
+            echo "::error::gcloud meta list-files-for-upload returned nothing"
+            exit 1
+          fi
+          while IFS= read -r path; do
+            mkdir -p "$upload_dir/$(dirname "$path")"
+            cp -p "$path" "$upload_dir/$path"
+          done < "$upload_dir.list"
           # Same client Cloud Build uses. Newer GitHub Docker accepts nested
           # file exceptions whose parent directories stay ignored. The client
           # tars /work itself; the host daemon only receives that archive.
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
-            -v "$PWD:/work" \
+            -v "$upload_dir:/work" \
             -v "$probe_dockerfile:/probe.Dockerfile:ro" \
             --entrypoint docker \
             gcr.io/cloud-builders/docker@sha256:bbb3d633c5c2813b2ce5245852979e1d637768f4acfc504d8ece288f91e9b60f \
@@ -112,7 +136,12 @@ jobs:
                 ;;
             esac
           done < <(cd "$context_dir" && find src -type f)
-          for path in public/icon-192.png scripts/check-codecs.mjs scripts/smoke-container.mjs; do
+          mapfile -t public_files < <(git ls-files public)
+          if [[ ${#public_files[@]} -eq 0 ]]; then
+            echo "::error::git ls-files public returned nothing"
+            exit 1
+          fi
+          for path in scripts/check-codecs.mjs scripts/smoke-container.mjs "${public_files[@]}"; do
             if [[ ! -f "$context_dir/$path" ]]; then
               echo "::error::Cloud Build context missing: $path"
               exit 1
