@@ -474,19 +474,54 @@ it("confirms deletion through the in-app dialog without calling native window.co
 
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "刪除" })); });
   const dialog = await screen.findByRole("alertdialog");
+  const shell = document.querySelector(".journal-shell");
   expect(dialog).toHaveTextContent("刪除這餐？連線後會同步刪除。");
+  expect(shell).toHaveAttribute("inert");
+  expect(shell).toHaveAttribute("aria-hidden", "true");
   expect(nativeConfirm).not.toHaveBeenCalled();
 
-  await act(async () => { fireEvent.click(within(dialog).getByRole("button", { name: "取消" })); });
+  await act(async () => { fireEvent.keyDown(window, { key: "Escape" }); });
   expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  expect(shell).not.toHaveAttribute("inert");
+  expect(shell).not.toHaveAttribute("aria-hidden");
   expect(fixture.remove).not.toHaveBeenCalled();
   expect(screen.getByRole("heading", { name: "可刪除餐點" })).toBeVisible();
+
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "刪除" })); });
+  const secondDialog = await screen.findByRole("alertdialog");
+  await act(async () => { fireEvent.click(within(secondDialog).getByRole("button", { name: "取消" })); });
+  expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  expect(fixture.remove).not.toHaveBeenCalled();
 
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "刪除" })); });
   await confirmDialog("確認刪除");
   await screen.findByText(localAcknowledgement);
   expect(fixture.remove).toHaveBeenCalledOnce();
   expect(nativeConfirm).not.toHaveBeenCalled();
+});
+
+it("keeps an untouched saved meal clean even if background sync updates that record", async () => {
+  const meal = record("已儲存午餐");
+  state.remote = [meal];
+  await start();
+
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "查看／修正" })); });
+  await screen.findByRole("heading", { name: "修正餐點" });
+
+  // Another device updates the same meal while the user is only viewing it.
+  state = {
+    remote: [{ ...meal, version: meal.version + 1, journalNote: "另一部裝置更新" }],
+    jobs: [],
+    syncedAt: new Date().toISOString(),
+  };
+  await refresh();
+
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "今日" })); });
+  await screen.findByRole("heading", { name: "今日飲食" });
+  expect(screen.queryByText("有一份未儲存草稿")).not.toBeInTheDocument();
+
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "新增" })); });
+  await screen.findByRole("heading", { name: "新餐點草稿" });
 });
 
 it("does not leave an unsaved draft banner after viewing a saved meal without edits", async () => {

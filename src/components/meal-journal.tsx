@@ -23,6 +23,8 @@ import {
 import { PhotoPreparationError, preparePhoto } from "@/lib/meals/photo";
 import { copy as zhCopy, unitCopy } from "@/content/zh-HK";
 import { foodAnalysisSchema } from "@/lib/domain/food-analysis";
+import { assignEntrySource } from "@/lib/domain/editable-meal";
+import { readAnalysisProvenance } from "@/lib/domain/analysis-provenance";
 import { roundRange } from "@/lib/nutrition/calculation";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { NutritionService } from "@/lib/nutrition/service";
@@ -72,8 +74,30 @@ function commandFingerprint(draft: MealDraft) {
     pendingMutation: undefined,
   });
 }
-function savedMealEditFingerprint(meal: MealDraft) {
-  return JSON.stringify({
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((entry) => stableJson(entry)).join(",")}]`;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, entry]) => entry !== undefined)
+    .sort(([a], [b]) => a.localeCompare(b));
+  return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableJson(v)}`).join(",")}}`;
+}
+function stripDerivedItemFields(item: MealDraft["items"][number]) {
+  const rest = { ...item };
+  delete rest.nutritionMatch;
+  return rest;
+}
+function persistedMealFingerprint(meal: MealDraft): string {
+  const analysis = meal.analysis ?? null;
+  const items = assignEntrySource(meal.items, analysis).map(stripDerivedItemFields);
+  const originalItems = (
+    meal.originalItems?.length
+      ? meal.originalItems
+      : analysis
+        ? assignEntrySource(meal.items, analysis)
+        : []
+  ).map(stripDerivedItemFields);
+  return stableJson({
     id: meal.id,
     version: meal.version,
     mode: meal.mode,
@@ -81,25 +105,21 @@ function savedMealEditFingerprint(meal: MealDraft) {
     time: meal.time,
     timezone: meal.timezone,
     mealType: meal.mealType,
+    analysis,
+    analysisProvenance: analysis
+      ? readAnalysisProvenance(meal.analysisProvenance, meal.mode)
+      : null,
     calorieCorrection: meal.calorieCorrection ?? null,
     journalNote: normalizeJournalNote(meal.journalNote ?? ""),
-    items: meal.items.map((item) => ({
-      displayName: item.displayName,
-      normalizedName: item.normalizedName,
-      identityLevel: item.identityLevel,
-      portionMin: item.portionMin,
-      portionMax: item.portionMax,
-      unit: item.unit,
-      preparationMethod: item.preparationMethod ?? null,
-      visibleIngredients: item.visibleIngredients ?? [],
-      notes: item.notes ?? null,
-      userMilkTypeChoice: item.userMilkTypeChoice ?? null,
-      suspectedDuplicateMilk: item.suspectedDuplicateMilk === true,
-    })),
+    items,
+    originalItems,
   });
 }
-function isUntouchedSavedMeal(candidate: MealDraft | null, list: MealRecord[]): boolean {
-  if (!candidate || candidate.version === 0) return false;
+function isUntouchedSavedMeal(
+  candidate: MealDraft | null,
+  baseline: string | null,
+): boolean {
+  if (!candidate || candidate.version === 0 || !baseline) return false;
   if (
     candidate.photo ||
     candidate.removePhoto ||
@@ -108,9 +128,7 @@ function isUntouchedSavedMeal(candidate: MealDraft | null, list: MealRecord[]): 
   ) {
     return false;
   }
-  const saved = list.find((record) => record.id === candidate.id && record.version === candidate.version);
-  if (!saved) return false;
-  return savedMealEditFingerprint(candidate) === savedMealEditFingerprint(saved);
+  return persistedMealFingerprint(candidate) === baseline;
 }
 function blockedSaveText(code: string) {
   const detail = messages[code] ?? "同步未完成，修改仍保留於本機。";
@@ -255,6 +273,7 @@ export function MealJournal({
   const [preparing, setPreparing] = useState(false);
   const [photoFailure, setPhotoFailure] = useState<null | "retryable" | "too_large">(null);
   const [conflict, setConflict] = useState(false);
+  const [savedDraftBaseline, setSavedDraftBaseline] = useState<string | null>(null);
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
   const confirmResolver = useRef<((accepted: boolean) => void) | null>(null);
   const finishConfirm = useCallback((accepted: boolean) => {
@@ -292,10 +311,10 @@ export function MealJournal({
   useEffect(() => {
     syncErrorRef.current = Boolean(syncNotice);
   }, [syncNotice]);
-  const current = useRef({ userId, draft, records, syncedAt });
+  const current = useRef({ userId, draft, records, syncedAt, savedDraftBaseline });
   useEffect(() => {
-    current.current = { userId, draft, records, syncedAt };
-  }, [userId, draft, records, syncedAt]);
+    current.current = { userId, draft, records, syncedAt, savedDraftBaseline };
+  }, [userId, draft, records, syncedAt, savedDraftBaseline]);
   const writes = useRef<Promise<unknown>>(Promise.resolve());
   const queuedDraft = useRef<MealDraft | null>(null);
   const cacheEnabled = useRef(true);
@@ -365,6 +384,7 @@ export function MealJournal({
             commandFingerprint(activeDraft) === mutation.fingerprint;
           if (acknowledged) {
             setDraft(null);
+            setSavedDraftBaseline(null);
             setInitialDraft(undefined);
             window.history.pushState(null, "", "#today");
             setTab("today");
@@ -470,12 +490,19 @@ export function MealJournal({
       if (!isCurrentLoad()) return;
       loading = false;
       queuedDraft.current = local.draft;
-      current.current = { userId: id, ...local, records: visibleRecords, syncedAt: knownSyncedAt };
+      current.current = {
+        userId: id,
+        ...local,
+        records: visibleRecords,
+        syncedAt: knownSyncedAt,
+        savedDraftBaseline: null,
+      };
       cacheEnabled.current = true;
       setUserId(id);
       setEmail(address);
       setRecords(visibleRecords);
       setDraft(local.draft);
+      setSavedDraftBaseline(null);
       setSavedDrafts({ uid: id, items: saved });
       setInitialDraft(local.draft ?? undefined);
       setEditorKey((key) => key + 1);
@@ -566,10 +593,12 @@ export function MealJournal({
         draft: null,
         records: [],
         syncedAt: null,
+        savedDraftBaseline: null,
       };
       setReady(false);
       setEmail(null);
       setDraft(null);
+      setSavedDraftBaseline(null);
       setSavedDrafts({ uid: "guest", items: [] });
       setInitialDraft(undefined);
       setRecords([]);
@@ -601,8 +630,9 @@ export function MealJournal({
       if (next === "new") {
         setInitialDraft(current.current.draft ?? undefined);
         setEditorKey((key) => key + 1);
-      } else if (isUntouchedSavedMeal(current.current.draft, current.current.records)) {
+      } else if (isUntouchedSavedMeal(current.current.draft, current.current.savedDraftBaseline)) {
         setDraft(null);
+        setSavedDraftBaseline(null);
         setInitialDraft(undefined);
       }
       setTab(next);
@@ -650,7 +680,7 @@ export function MealJournal({
     };
   }, [refresh, cancelStatusProbe, finishConfirm]);
 
-  const activeUnsavedDraft = draft && !isUntouchedSavedMeal(draft, records) ? draft : null;
+  const activeUnsavedDraft = draft && !isUntouchedSavedMeal(draft, savedDraftBaseline) ? draft : null;
 
   useEffect(() => {
     if (!ready || !cacheEnabled.current) return;
@@ -682,7 +712,7 @@ export function MealJournal({
     const unload = (e: BeforeUnloadEvent) => {
       if (
         current.current.draft &&
-        !isUntouchedSavedMeal(current.current.draft, current.current.records) &&
+        !isUntouchedSavedMeal(current.current.draft, current.current.savedDraftBaseline) &&
         !allowUpdateReload.current
       ) {
         e.preventDefault();
@@ -706,20 +736,22 @@ export function MealJournal({
 
   function go(next: string) {
     // State is updated here; hashchange is reserved for browser back/forward.
-    if (next !== "new" && isUntouchedSavedMeal(current.current.draft, current.current.records)) {
+    if (next !== "new" && isUntouchedSavedMeal(current.current.draft, current.current.savedDraftBaseline)) {
       setDraft(null);
+      setSavedDraftBaseline(null);
       setInitialDraft(undefined);
     }
     window.history.pushState(null, "", `#${next}`);
     setTab(next);
     setAccount(false);
   }
-  function openDraft(next: MealDraft, isManual = false) {
+  function openDraft(next: MealDraft, isManual = false, savedBaseline: string | null = null) {
     photoGeneration.current++;
     preparedFile.current = null;
     setPreparing(false);
     setPhotoFailure(null);
     setDraft(next);
+    setSavedDraftBaseline(savedBaseline);
     setInitialDraft(next);
     setManual(isManual);
     setEditorKey((key) => key + 1);
@@ -919,6 +951,7 @@ export function MealJournal({
         return;
       }
       setDraft(null);
+      setSavedDraftBaseline(null);
       setInitialDraft(undefined);
       setNotice(proved
         ? ""
@@ -955,7 +988,8 @@ export function MealJournal({
       });
       if (!confirmed || !scope.isCurrent()) return;
     }
-    openDraft({ ...record, photoPath: null });
+    const opened: MealDraft = { ...record, photoPath: null };
+    openDraft(opened, false, record.version > 0 ? persistedMealFingerprint(opened) : null);
   }
   async function discard() {
     const scope = operationScope();
@@ -971,6 +1005,7 @@ export function MealJournal({
     photoGeneration.current++;
     preparedFile.current = null;
     setDraft(null);
+    setSavedDraftBaseline(null);
     setInitialDraft(undefined);
     await writes.current;
     if (!scope.isCurrent()) return;
@@ -989,7 +1024,10 @@ export function MealJournal({
     setNotice({ kind: "pending-sync", message: "刪除已保留於本機，連線時自動同步。" });
     void refresh();
     setRecords((value) => value.filter((r) => r.id !== record.id));
-    if (current.current.draft?.id === record.id) setDraft(null);
+    if (current.current.draft?.id === record.id) {
+      setDraft(null);
+      setSavedDraftBaseline(null);
+    }
   }
   async function deleting(record: MealRecord) {
     if (busyRef.current) return;
@@ -1042,6 +1080,7 @@ export function MealJournal({
       }, draftTabId());
       if (!scope.isCurrent()) return;
       setDraft(null);
+      setSavedDraftBaseline(null);
       setRecords([]);
       setNotice({ kind: "pending-sync", message: "刪除已保留於本機，連線時自動同步。" });
       void refresh();
@@ -1091,8 +1130,9 @@ export function MealJournal({
           await clearSyncState(scope.id);
           if (!scope.isCurrent()) throw new Error("account_changed");
           setDraft(null);
+          setSavedDraftBaseline(null);
           setRecords([]);
-          current.current = { ...current.current, draft: null, records: [] };
+          current.current = { ...current.current, draft: null, records: [], savedDraftBaseline: null };
           localStorage.setItem("kcalcue-logout", `${scope.id}:${Date.now()}`);
           const auth = firebaseAuth();
           if (auth) await signOut(auth);
@@ -1124,7 +1164,8 @@ export function MealJournal({
         destructive: true,
       });
       if (!confirmed || !scope.isCurrent()) return;
-      openDraft({ ...record, photoPath: null });
+      const opened: MealDraft = { ...record, photoPath: null };
+      openDraft(opened, false, record.version > 0 ? persistedMealFingerprint(opened) : null);
     } catch (error) {
       if (scope.isCurrent()) setNotice(errorText(error));
     }
@@ -1242,7 +1283,12 @@ export function MealJournal({
   );
 
   return (
-    <div className="journal-shell">
+    <>
+    <div
+      className="journal-shell"
+      inert={Boolean(confirmRequest)}
+      aria-hidden={confirmRequest ? true : undefined}
+    >
       <header className="journal-header">
         <a className="journal-brand" href="#today" aria-label="KcalCue 今日">
           <span>
@@ -1360,7 +1406,7 @@ export function MealJournal({
           await writes.current;
           if (!scope.isCurrent()) throw new Error("Account changed during update");
           const active = current.current;
-          if (active.draft && !isUntouchedSavedMeal(active.draft, active.records)) {
+          if (active.draft && !isUntouchedSavedMeal(active.draft, active.savedDraftBaseline)) {
             // Background cache writes report errors in the UI and settle the
             // queue. A PWA reload must confirm this draft is durable itself.
             await localMeals.write(active.userId, active, draftTabId());
@@ -1666,7 +1712,7 @@ export function MealJournal({
                           items: structuredClone(latestDraft.originalItems),
                           calorieCorrection: null,
                           calorieInput: undefined,
-                        });
+                        }, false, current.current.savedDraftBaseline);
                       });
                     }}
                   >
@@ -1968,7 +2014,8 @@ export function MealJournal({
           </button>
         ))}
       </nav>
-      <ConfirmDialog request={confirmRequest} onResolve={finishConfirm} />
     </div>
+    <ConfirmDialog request={confirmRequest} onResolve={finishConfirm} />
+    </>
   );
 }

@@ -19,6 +19,7 @@ export function ConfirmDialog({
 }) {
   const titleId = useId();
   const messageId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
 
@@ -27,6 +28,8 @@ export function ConfirmDialog({
     const previousFocus = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     cancelRef.current?.focus();
 
     const onKeyDown = (event: KeyboardEvent) => {
@@ -48,9 +51,18 @@ export function ConfirmDialog({
         }
       }
     };
+    const onFocusIn = (event: FocusEvent) => {
+      const target = event.target;
+      if (target instanceof Node && dialogRef.current && !dialogRef.current.contains(target)) {
+        cancelRef.current?.focus();
+      }
+    };
     window.addEventListener("keydown", onKeyDown);
+    document.addEventListener("focusin", onFocusIn);
     return () => {
+      document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("focusin", onFocusIn);
       if (previousFocus?.isConnected) previousFocus.focus();
     };
   }, [request, onResolve]);
@@ -65,6 +77,7 @@ export function ConfirmDialog({
       }}
     >
       <div
+        ref={dialogRef}
         className="confirm-dialog"
         role="alertdialog"
         aria-modal="true"
