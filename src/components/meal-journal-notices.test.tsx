@@ -58,8 +58,9 @@ let cache: LocalMeals;
 const emptyState = (): SyncState => ({ remote: [], jobs: [], syncedAt: null });
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>(finish => { resolve = finish; });
-  return { promise, resolve };
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((finish, fail) => { resolve = finish; reject = fail; });
+  return { promise, resolve, reject };
 }
 function record(name = "測試餐點"): MealRecord {
   return {
@@ -351,4 +352,109 @@ it("keeps a dismissed local acknowledgement closed when pending state refreshes"
   await refresh();
   expect(document.querySelector(".journal-notice")).not.toBeInTheDocument();
   expect(screen.getByText(/1 項修改待同步/)).toBeVisible();
+});
+
+it("clears the pending notice immediately when a coalesced refresh arrives during reconnection sync", async () => {
+  cache.draft = { ...newDraft(), items: createEditableFoodItems(demoFoodAnalysis.foods) };
+  await start();
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "繼續草稿" })); });
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "離線儲存餐點" })); });
+  await screen.findByText(localAcknowledgement);
+  await screen.findByText(/1 項修改待同步/);
+
+  Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ online: true })));
+  const firstSync = deferred<void>();
+  const followUpSync = deferred<void>();
+  fixture.sync
+    .mockImplementationOnce(async () => {
+      await firstSync.promise;
+      state = { remote: [{ ...state.jobs[0].record, version: 1 }], jobs: [], syncedAt: new Date().toISOString() };
+    })
+    .mockImplementationOnce(() => followUpSync.promise);
+
+  await act(async () => { window.dispatchEvent(new Event("online")); });
+  await waitFor(() => expect(fixture.sync).toHaveBeenCalledTimes(1));
+
+  // Another refresh trigger during the active sync must not drop its cleanup.
+  await act(async () => { window.dispatchEvent(new Event("kcalcue-sync")); });
+  await act(async () => { firstSync.resolve(); });
+
+  await waitFor(() => expect(document.querySelector(".journal-notice")).not.toBeInTheDocument());
+  expect(screen.queryByText(/項修改待同步/)).not.toBeInTheDocument();
+  expect(screen.getByText(/已同步/)).toBeVisible();
+  await waitFor(() => expect(fixture.sync).toHaveBeenCalledTimes(2));
+  await act(async () => { followUpSync.resolve(); });
+});
+
+it("does not let a late or failed status probe revert the status bar to offline after sync succeeds", async () => {
+  cache.draft = { ...newDraft(), items: createEditableFoodItems(demoFoodAnalysis.foods) };
+  await start();
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "繼續草稿" })); });
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "離線儲存餐點" })); });
+  await screen.findByText(/離線中 · 修改會保留，重連後自動同步/);
+  await screen.findByText(localAcknowledgement);
+
+  const statusProbe = deferred<Response>();
+  const signals: AbortSignal[] = [];
+  vi.stubGlobal("fetch", vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.signal) signals.push(init.signal);
+    return statusProbe.promise;
+  }));
+  Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+  fixture.sync.mockImplementationOnce(async () => {
+    state = { remote: [{ ...state.jobs[0].record, version: 1 }], jobs: [], syncedAt: new Date().toISOString() };
+  });
+
+  await act(async () => { window.dispatchEvent(new Event("online")); });
+  await waitFor(() => expect(document.querySelector(".journal-notice")).not.toBeInTheDocument());
+  expect(screen.getByText(/已同步/)).toBeVisible();
+  expect(signals[0]?.aborted).toBe(true);
+
+  await act(async () => { statusProbe.reject(new TypeError("probe timed out")); });
+  expect(screen.getByText(/已同步/)).toBeVisible();
+  expect(screen.queryByText(/離線中 · 修改會保留，重連後自動同步/)).not.toBeInTheDocument();
+});
+
+it("clears a prior sync error when a subsequent online save succeeds", async () => {
+  cache.draft = { ...newDraft(), items: createEditableFoodItems(demoFoodAnalysis.foods) };
+  Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ online: true })));
+  fixture.sync.mockRejectedValueOnce(new TypeError("network failed"));
+
+  await start();
+  await screen.findByText("未能完成操作，請檢查網絡後再試。已保留的修改不會被清除。");
+  expect(screen.getByText(/離線中 · 修改會保留，重連後自動同步/)).toBeVisible();
+
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "繼續草稿" })); });
+  const trailingRefresh = deferred<void>();
+  fixture.sync
+    .mockImplementationOnce(async () => {
+      const job = state.jobs[0];
+      state = { remote: [{ ...job.record, version: job.expectedVersion + 1 }], jobs: [], syncedAt: new Date().toISOString() };
+    })
+    .mockImplementationOnce(() => trailingRefresh.promise);
+
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "離線儲存餐點" })); });
+  await waitFor(() => expect(document.querySelector(".journal-notice")).not.toBeInTheDocument());
+  expect(screen.getByText(/已同步/)).toBeVisible();
+  await act(async () => { trailingRefresh.resolve(); });
+});
+
+it("clears a pending-logout notice once queued changes finish syncing", async () => {
+  state.remote = [record()];
+  await start(); await removeMeal();
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "帳戶與安裝" })); });
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "登出並清除本機資料" })); });
+  const logoutNotice = "仍有待同步或衝突的修改。請先連線完成同步或處理衝突，再登出。";
+  await screen.findByText(logoutNotice);
+
+  await refresh();
+  expect(screen.getByText(logoutNotice)).toBeVisible();
+
+  Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ online: true })));
+  state = { remote: [], jobs: [], syncedAt: new Date().toISOString() };
+  await refresh();
+  await waitFor(() => expect(document.querySelector(".journal-notice")).not.toBeInTheDocument());
 });
