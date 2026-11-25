@@ -255,10 +255,10 @@ describe("canonicalization", () => {
   });
 
   it.each([
-    ["橙汁", "orange juice"],
-    ["果汁", "fruit juice"],
-    ["椰汁", "coconut juice"],
-  ] as const)("does not classify %s as savory sauce", (displayName, normalizedName) => {
+    ["橙汁", "orange juice", true, "fruit-juice"],
+    ["果汁", "fruit juice", true, "fruit-juice"],
+    ["椰汁", "coconut juice", false, undefined],
+  ] as const)("does not classify %s as savory sauce", (displayName, normalizedName, expectedIncluded, expectedProfileId) => {
     const food = makeFood({ displayName, normalizedName });
     const identity = canonicalizeFood(food);
     const match = resolveNutritionMatch(food, localNutritionProfiles);
@@ -266,8 +266,8 @@ describe("canonicalization", () => {
     expect(identity.canonicalName).not.toBe("sauce");
     expect(identity.canonicalName).not.toBe("tomato-sauce");
     expect(match.profile?.id).not.toBe("savory-sauce");
-    expect(match.matchType).toBe("unresolved");
-    expect(match.includedInTotal).toBe(false);
+    expect(match.includedInTotal).toBe(expectedIncluded);
+    expect(match.profile?.id).toBe(expectedProfileId);
   });
 
   it.each([

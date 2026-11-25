@@ -12,6 +12,7 @@ import {
   contradictoryDairyMilkLabel,
   explicitLowFatMilk,
   isCompositeIdentity,
+  isUnsweetenedLemonTea,
   normalizeFoodName,
   photoGenericMilkNeedsConfirmation,
   profileBlockedByNegativeRule,
@@ -25,6 +26,7 @@ import {
   PHOTO_GENERIC_MILK_CONFIRMATION_REASON,
   PHOTO_MILK_OTHER_REASON,
   PLANT_MILK_CONTRADICTION_REASON,
+  UNSWEETENED_LEMON_TEA_UNCALCULATED_REASON,
 } from "./negative-rules";
 import { SUSPECTED_DUPLICATE_MILK_NOTICE } from "@/lib/domain/milk-dedupe";
 import { milkResolveSubject, type UserMilkTypeChoice } from "./photo-milk";
@@ -336,6 +338,15 @@ export function resolveNutritionMatch(
       confidence: "low",
       matchType: "unresolved",
       reasons: [CHOCOLATE_MILK_UNCALCULATED_REASON],
+      identity,
+    }, "INSUFFICIENT_COVERAGE");
+  }
+  if (isUnsweetenedLemonTea(subject)) {
+    return unmatched({
+      profile: null,
+      confidence: "low",
+      matchType: "unresolved",
+      reasons: [UNSWEETENED_LEMON_TEA_UNCALCULATED_REASON],
       identity,
     }, "INSUFFICIENT_COVERAGE");
   }

@@ -233,7 +233,6 @@ describe("generic fallback safety gate", () => {
   it.each([
     ["墨魚汁意大利飯", "squid ink risotto"],
     ["Carbonara", "carbonara"],
-    ["肉醬意粉", "spaghetti bolognese"],
     ["Laksa", "laksa"],
     ["Pizza", "pizza"],
   ] as const)("does not include %s via a generic starch or protein profile", (displayName, normalizedName) => {
@@ -279,6 +278,7 @@ describe("generic fallback safety gate", () => {
     ["凱撒雞沙律", "chicken caesar salad", "creamy-salad"],
     ["吞拿魚通粉沙律", "tuna macaroni salad", "creamy-salad"],
     ["蛋黃醬薯仔沙律", "potato salad with mayonnaise", "creamy-salad"],
+    ["肉醬意粉", "spaghetti bolognese", "template:bolognese"],
   ] as const)("allows the curated %s composite profile", (displayName, normalizedName, profileId) => {
     const match = provider.resolve(makeFood(displayName, normalizedName, {
       identityLevel: "dish",

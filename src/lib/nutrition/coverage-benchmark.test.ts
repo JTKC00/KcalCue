@@ -141,7 +141,11 @@ describe("nutrition coverage benchmark", () => {
     expect(ricePlate.profile?.composite).toBe(true);
     expect(ricePlate.identity.hasNutritionProfile).toBe(true);
 
-    const ingredient = benchmarkFoodEstimate("西蘭花", "西蘭花", "ingredient");
+    const broccoli = provider.resolve(benchmarkFoodEstimate("西蘭花", "西蘭花", "ingredient"));
+    expect(broccoli.includedInTotal).toBe(true);
+    expect(broccoli.profile?.id).toBe("broccoli-cooked");
+
+    const ingredient = benchmarkFoodEstimate("海參", "sea cucumber", "ingredient");
     const ingredientMatch = provider.resolve(ingredient);
     expect(ingredientMatch.coverageReason).toBe("INSUFFICIENT_COVERAGE");
     expect(ingredientMatch.reasons[0]).toBe("未有足夠可靠的營養參考資料可以配對。");
@@ -152,14 +156,22 @@ describe("nutrition coverage benchmark", () => {
     expect(soyMatch.includedInTotal).toBe(false);
     expect(soyMatch.profile).toBeNull();
 
-    const namedDish = benchmarkFoodEstimate("拉麵", "拉麵", "dish");
-    expect(provider.resolve(namedDish).coverageReason).toBe("DISH_KNOWN_NO_PROFILE");
+    const ramen = provider.resolve(benchmarkFoodEstimate("拉麵", "拉麵", "dish"));
+    expect(ramen.includedInTotal).toBe(true);
+    expect(ramen.profile?.id).toBe("template:ramen");
 
-    const wings = benchmarkFoodEstimate("雞翼", "chicken wings", "ingredient");
-    const wingsMatch = provider.resolve(wings);
-    expect(wingsMatch.includedInTotal).toBe(false);
-    expect(wingsMatch.coverageReason).toBe("AMBIGUOUS_MATCH");
-    expect(wingsMatch.reasons[0]).toBe("找到多個相近但不相同的營養資料，為免假裝精準，暫不自動配對。");
+    const setMeal = benchmarkFoodEstimate("茶餐廳常餐", "茶餐廳常餐", "dish");
+    expect(provider.resolve(setMeal).coverageReason).toBe("DISH_KNOWN_NO_PROFILE");
+
+    const wings = provider.resolve(benchmarkFoodEstimate("雞翼", "chicken wings", "ingredient"));
+    expect(wings.includedInTotal).toBe(true);
+    expect(wings.profile?.id).toBe("chicken-wings-cooked");
+
+    const genericChicken = benchmarkFoodEstimate("烤雞", "roasted chicken", "ingredient");
+    const genericChickenMatch = provider.resolve(genericChicken);
+    expect(genericChickenMatch.includedInTotal).toBe(false);
+    expect(genericChickenMatch.coverageReason).toBe("AMBIGUOUS_MATCH");
+    expect(genericChickenMatch.reasons[0]).toBe("找到多個相近但不相同的營養資料，為免假裝精準，暫不自動配對。");
 
     const banana = benchmarkFoodEstimate("香蕉", "banana", "ingredient");
     const bananaMl = provider.resolve({ ...banana, unit: "ml" });

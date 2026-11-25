@@ -116,6 +116,57 @@ export const NEGATIVE_MATCH_RULES: readonly NegativeMatchRule[] = [
     routeCanonicalName: null,
   },
   {
+    id: "unsweetened-lemon-tea-not-sweetened",
+    description: "無糖或走甜檸茶不得套用含糖檸檬茶的營養資料。",
+    kind: "block-profile",
+    patterns: [
+      "無糖",
+      "无糖",
+      "走甜",
+      "走糖",
+      "零糖",
+      "不加糖",
+      "無加糖",
+      "无加糖",
+      "unsweetened",
+      "sugar free",
+      "sugar-free",
+      "zero sugar",
+      "no sugar",
+      "without sugar",
+      "diet",
+    ],
+    blockCanonicalNames: ["iced-lemon-tea"],
+    blockProfileIds: ["iced-lemon-tea"],
+    routeCanonicalName: null,
+  },
+  {
+    id: "fried-fish-not-steamed-fish",
+    description: "油炸、裹粉或吉列魚柳不得套用清蒸白肉魚的營養資料，改走炸魚柳參考範圍。",
+    kind: "block-profile",
+    patterns: [
+      "炸魚",
+      "炸鱼",
+      "吉列魚",
+      "吉列鱼",
+      "裹粉",
+      "脆漿",
+      "脆浆",
+      "天婦羅",
+      "天妇罗",
+      "fried fish",
+      "deep fried fish",
+      "deep-fried fish",
+      "battered fish",
+      "breaded fish",
+      "tempura fish",
+      "fish katsu",
+    ],
+    blockCanonicalNames: ["white-fish"],
+    blockProfileIds: ["steamed-fish"],
+    routeCanonicalName: "fried-fish",
+  },
+  {
     id: "composite-not-single-ingredient",
     description: "組合菜不得拆成單一食材 profile。",
     kind: "composite-not-ingredient",
@@ -163,6 +214,9 @@ export const CHOCOLATE_MILK_UNCALCULATED_REASON =
 
 export const CREAM_MACARONI_UNCALCULATED_REASON =
   "忌廉通粉沒有沙律或凍食的說明。熱食、焗或忌廉汁不能用高脂沙律的範圍，因此不計算。";
+
+export const UNSWEETENED_LEMON_TEA_UNCALCULATED_REASON =
+  "無糖或走甜檸茶不能套用含糖檸檬茶的參考範圍；本地目錄未有對應的無糖檸茶資料，因此暫不計算。";
 
 export function negativeRuleById(id: string): NegativeMatchRule {
   const rule = NEGATIVE_MATCH_RULES.find((item) => item.id === id);

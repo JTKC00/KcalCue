@@ -236,6 +236,7 @@ describe("OpenAIFoodVisionProvider structured response handling", () => {
     expect(FOOD_VISION_SYSTEM_INSTRUCTION).toContain("A single carton or bottle is one food");
     expect(FOOD_VISION_SYSTEM_INSTRUCTION).toContain("set both portionMin and portionMax to null");
     expect(FOOD_VISION_SYSTEM_INSTRUCTION).toContain("return numeric portionMin and portionMax instead");
+    expect(FOOD_VISION_SYSTEM_INSTRUCTION).toContain("Return at most 12 entries in the foods array");
   });
 
   it("maps malformed JSON to an invalid_response error without a network call", async () => {
