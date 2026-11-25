@@ -127,6 +127,7 @@ export const foodAnalysisJsonSchema = {
     },
     foods: {
       type: "array",
+      description: "Up to 12 visible foods. When a table or hotpot has more than 12 items, group similar items together so the array length never exceeds 12.",
       items: {
         type: "object",
         properties: {

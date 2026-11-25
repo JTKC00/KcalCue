@@ -779,9 +779,9 @@ function formatPilotSections(report: NutritionCoverageReport): string[] {
   const followUp = pilot.dishes.filter((dish) => dish.needsFollowUp);
   const blocked = pilot.dishes.filter((dish) => !dish.complete);
   return [
-    "## 試點家族",
+    "## 食譜模板家族",
     "",
-    "五個家族按附錄 A 的菜數來選。菜數打平時，選香港日常菜單裡更常出現的一族。燒味飯和粥已經有 profile，而且不在這 65 個名稱裡，這次不改它們的總數。",
+    "模板涵蓋附錄 A 可誠實以單一組份範圍表達的菜式家族；火鍋與茶餐廳常餐因屬共用餐或多菜套餐，刻意維持不計算。燒味飯、雲吞麵、粥、煲仔飯、腸粉和港式奶茶維持既有 profile 數值不變。",
     "",
     "| 家族 | 基準菜數 | 納入基準 | 需要追問 | R>3 未完成 | 選擇原因 |",
     "|---|---:|---:|---:|---:|---|",

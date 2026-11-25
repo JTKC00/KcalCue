@@ -6,24 +6,24 @@
   "pipeline": "dish identity → canonicalizeFood → resolveNutritionMatch → calculateMealNutrition",
   "network": "none",
   "coverage": {
-    "complete": 36,
+    "complete": 62,
     "partial": 0,
     "insufficient": 0,
-    "none": 29
+    "none": 3
   },
   "reasons": {
     "UNKNOWN_DISH": 0,
-    "DISH_KNOWN_NO_PROFILE": 16,
+    "DISH_KNOWN_NO_PROFILE": 1,
     "COMPOSITE_UNSUPPORTED": 0,
     "TYPE_MISMATCH": 0,
     "UNIT_CONVERSION_MISSING": 0,
     "AMBIGUOUS_MATCH": 0,
-    "INSUFFICIENT_COVERAGE": 13
+    "INSUFFICIENT_COVERAGE": 2
   },
   "safeCoverageRate": {
-    "numerator": 36,
+    "numerator": 62,
     "denominator": 65,
-    "percent": "55.4%"
+    "percent": "95.4%"
   },
   "falseConfidentMatchRate": {
     "numerator": 0,
@@ -36,9 +36,9 @@
     "percent": "80.0%"
   },
   "profileCoverage": {
-    "numerator": 36,
+    "numerator": 51,
     "denominator": 65,
-    "percent": "55.4%"
+    "percent": "78.5%"
   },
   "pilot": {
     "gate": "N2",
@@ -93,6 +93,105 @@
         "id": "stir-fried-rice-noodles",
         "title": "炒河粉／炒米",
         "selectionReason": "附錄 A 有 2 道，與便當、丼、拌麵、壽司打平。乾炒牛河和星洲炒米比那幾族更常出現在香港日常菜單。便當、火鍋、壽司拼盤的變異更大，這次不做。",
+        "benchmarkDishes": 2,
+        "completeBenchmarkDishes": 2,
+        "followUpDishes": 0,
+        "blockedDishes": 0
+      },
+      {
+        "id": "bento",
+        "title": "便當",
+        "selectionReason": "附錄 A 有 2 道（午餐便當、日式便當），為香港上班族常見盒飯組合。",
+        "benchmarkDishes": 2,
+        "completeBenchmarkDishes": 2,
+        "followUpDishes": 0,
+        "blockedDishes": 0
+      },
+      {
+        "id": "donburi",
+        "title": "丼飯",
+        "selectionReason": "附錄 A 有 2 道（親子丼、牛丼），是日常高頻日式蓋飯。",
+        "benchmarkDishes": 2,
+        "completeBenchmarkDishes": 2,
+        "followUpDishes": 0,
+        "blockedDishes": 0
+      },
+      {
+        "id": "bibimbap",
+        "title": "石鍋拌飯",
+        "selectionReason": "附錄 A 的韓式拌飯，結構明確（白飯、肉、蛋、蔬菜、醬與油）。",
+        "benchmarkDishes": 1,
+        "completeBenchmarkDishes": 1,
+        "followUpDishes": 0,
+        "blockedDishes": 0
+      },
+      {
+        "id": "ramen",
+        "title": "拉麵",
+        "selectionReason": "附錄 A 的日式拉麵，香港非常常見，湯底油脂差異以油量範圍反映。",
+        "benchmarkDishes": 1,
+        "completeBenchmarkDishes": 1,
+        "followUpDishes": 0,
+        "blockedDishes": 0
+      },
+      {
+        "id": "dressed-noodles",
+        "title": "拌麵",
+        "selectionReason": "附錄 A 有 2 道（擔擔麵、炸醬麵），香港中式麵店常見。",
+        "benchmarkDishes": 2,
+        "completeBenchmarkDishes": 2,
+        "followUpDishes": 0,
+        "blockedDishes": 0
+      },
+      {
+        "id": "burger",
+        "title": "漢堡",
+        "selectionReason": "附錄 A 的西式快餐主食，麵包、肉扒、芝士及醬料結構清晰。",
+        "benchmarkDishes": 1,
+        "completeBenchmarkDishes": 1,
+        "followUpDishes": 0,
+        "blockedDishes": 0
+      },
+      {
+        "id": "sandwich",
+        "title": "三文治",
+        "selectionReason": "附錄 A 的茶餐廳及便利店常見輕食。",
+        "benchmarkDishes": 1,
+        "completeBenchmarkDishes": 1,
+        "followUpDishes": 0,
+        "blockedDishes": 0
+      },
+      {
+        "id": "pasta",
+        "title": "意粉",
+        "selectionReason": "附錄 A 的肉醬意粉，香港茶餐廳與西餐廳高頻菜式。",
+        "benchmarkDishes": 1,
+        "completeBenchmarkDishes": 1,
+        "followUpDishes": 0,
+        "blockedDishes": 0
+      },
+      {
+        "id": "fish-and-chips",
+        "title": "炸魚薯條",
+        "selectionReason": "附錄 A 的西式炸魚柳配薯條，原料直接對應 USDA SR Legacy。",
+        "benchmarkDishes": 1,
+        "completeBenchmarkDishes": 1,
+        "followUpDishes": 0,
+        "blockedDishes": 0
+      },
+      {
+        "id": "soup",
+        "title": "湯類",
+        "selectionReason": "附錄 A 的冬蔭功湯，以清湯到椰奶濃湯包絡。",
+        "benchmarkDishes": 1,
+        "completeBenchmarkDishes": 1,
+        "followUpDishes": 1,
+        "blockedDishes": 0
+      },
+      {
+        "id": "sushi",
+        "title": "壽司",
+        "selectionReason": "附錄 A 有 2 道（壽司、壽司拼盤），為常見日式主食。",
         "benchmarkDishes": 2,
         "completeBenchmarkDishes": 2,
         "followUpDishes": 0,
@@ -2712,12 +2811,1240 @@
           "insideRange": true,
           "note": "美國中餐館素菜撈麵用來核對炒粉麵的數量級。"
         }
+      },
+      {
+        "dishId": "lunch-bento",
+        "displayName": "午餐便當",
+        "familyId": "bento",
+        "familyTitle": "便當",
+        "inBenchmark": true,
+        "rangeRatio": 1.9403,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 97.1,
+          "max": 188.4
+        },
+        "servingCalories": {
+          "min": 427.3,
+          "max": 829
+        },
+        "feasibleGrams": {
+          "min": 380,
+          "max": 500
+        },
+        "components": [
+          {
+            "label": "熟白米",
+            "sourceIds": [
+              "fdc:168878"
+            ],
+            "grams": {
+              "min": 180,
+              "max": 260
+            }
+          },
+          {
+            "label": "主菜（烚雞肉到煎豬扒）",
+            "sourceIds": [
+              "fdc:171451",
+              "fdc:168292"
+            ],
+            "grams": {
+              "min": 80,
+              "max": 140
+            }
+          },
+          {
+            "label": "熟蔬菜（白菜仔到椰菜）",
+            "sourceIds": [
+              "fdc:168517",
+              "fdc:168514"
+            ],
+            "grams": {
+              "min": 50,
+              "max": 110
+            }
+          },
+          {
+            "label": "食油",
+            "sourceIds": [
+              "fdc:171411"
+            ],
+            "grams": {
+              "min": 4,
+              "max": 12
+            }
+          },
+          {
+            "label": "醬汁（豉油到海鮮醬）",
+            "sourceIds": [
+              "fdc:174277",
+              "fdc:172886"
+            ],
+            "grams": {
+              "min": 6,
+              "max": 16
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:167668",
+          "sourceName": "Restaurant, Chinese, fried rice, without meat",
+          "kcalPer100g": 174,
+          "insideRange": true,
+          "note": "美國中餐館無肉炒飯，只核對以飯為主的盒飯數量級。"
+        }
+      },
+      {
+        "dishId": "japanese-bento",
+        "displayName": "日式便當",
+        "familyId": "bento",
+        "familyTitle": "便當",
+        "inBenchmark": true,
+        "rangeRatio": 2.2258,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 89.9,
+          "max": 200.1
+        },
+        "servingCalories": {
+          "min": 395.6,
+          "max": 880.6
+        },
+        "feasibleGrams": {
+          "min": 380,
+          "max": 500
+        },
+        "components": [
+          {
+            "label": "熟白米",
+            "sourceIds": [
+              "fdc:168878"
+            ],
+            "grams": {
+              "min": 180,
+              "max": 250
+            }
+          },
+          {
+            "label": "主菜（烤魚到炸雞）",
+            "sourceIds": [
+              "fdc:173694",
+              "fdc:171448"
+            ],
+            "grams": {
+              "min": 80,
+              "max": 140
+            }
+          },
+          {
+            "label": "蛋（烚蛋到煎蛋）",
+            "sourceIds": [
+              "fdc:173424",
+              "fdc:173423"
+            ],
+            "grams": {
+              "min": 25,
+              "max": 55
+            }
+          },
+          {
+            "label": "熟蔬菜（椰菜到紅蘿蔔）",
+            "sourceIds": [
+              "fdc:168514",
+              "fdc:170394"
+            ],
+            "grams": {
+              "min": 45,
+              "max": 95
+            }
+          },
+          {
+            "label": "醬汁（豉油到海鮮醬）",
+            "sourceIds": [
+              "fdc:174277",
+              "fdc:172886"
+            ],
+            "grams": {
+              "min": 6,
+              "max": 16
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:167668",
+          "sourceName": "Restaurant, Chinese, fried rice, without meat",
+          "kcalPer100g": 174,
+          "insideRange": true,
+          "note": "美國中餐館無肉炒飯，只核對以飯為主的盒飯數量級。"
+        }
+      },
+      {
+        "dishId": "oyakodon",
+        "displayName": "親子丼",
+        "familyId": "donburi",
+        "familyTitle": "丼飯",
+        "inBenchmark": true,
+        "rangeRatio": 1.573,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 115.7,
+          "max": 182
+        },
+        "servingCalories": {
+          "min": 497.3,
+          "max": 782.5
+        },
+        "feasibleGrams": {
+          "min": 380,
+          "max": 480
+        },
+        "components": [
+          {
+            "label": "熟白米",
+            "sourceIds": [
+              "fdc:168878"
+            ],
+            "grams": {
+              "min": 200,
+              "max": 280
+            }
+          },
+          {
+            "label": "雞肉（去皮烚雞到連皮烚雞）",
+            "sourceIds": [
+              "fdc:171451",
+              "fdc:171051"
+            ],
+            "grams": {
+              "min": 80,
+              "max": 130
+            }
+          },
+          {
+            "label": "雞蛋（烚蛋到煎蛋）",
+            "sourceIds": [
+              "fdc:173424",
+              "fdc:173423"
+            ],
+            "grams": {
+              "min": 50,
+              "max": 90
+            }
+          },
+          {
+            "label": "高湯",
+            "sourceIds": [
+              "fdc:174536"
+            ],
+            "grams": {
+              "min": 25,
+              "max": 60
+            }
+          },
+          {
+            "label": "豉油",
+            "sourceIds": [
+              "fdc:174277"
+            ],
+            "grams": {
+              "min": 8,
+              "max": 16
+            }
+          },
+          {
+            "label": "糖",
+            "sourceIds": [
+              "fdc:169655"
+            ],
+            "grams": {
+              "min": 3,
+              "max": 8
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:168878",
+          "sourceName": "Rice, white, long-grain, regular, enriched, cooked",
+          "kcalPer100g": 130,
+          "insideRange": true,
+          "note": "熟白米作為底飯對照；加雞肉與蛋後密度應高於純白飯。"
+        }
+      },
+      {
+        "dishId": "gyudon",
+        "displayName": "牛丼",
+        "familyId": "donburi",
+        "familyTitle": "丼飯",
+        "inBenchmark": true,
+        "rangeRatio": 1.6983,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 111.7,
+          "max": 189.7
+        },
+        "servingCalories": {
+          "min": 480.4,
+          "max": 815.5
+        },
+        "feasibleGrams": {
+          "min": 380,
+          "max": 480
+        },
+        "components": [
+          {
+            "label": "熟白米",
+            "sourceIds": [
+              "fdc:168878"
+            ],
+            "grams": {
+              "min": 200,
+              "max": 280
+            }
+          },
+          {
+            "label": "牛肉（瘦炆牛肉到連脂炆牛肩）",
+            "sourceIds": [
+              "fdc:171817",
+              "fdc:168669"
+            ],
+            "grams": {
+              "min": 80,
+              "max": 130
+            }
+          },
+          {
+            "label": "高湯",
+            "sourceIds": [
+              "fdc:174536"
+            ],
+            "grams": {
+              "min": 30,
+              "max": 70
+            }
+          },
+          {
+            "label": "豉油",
+            "sourceIds": [
+              "fdc:174277"
+            ],
+            "grams": {
+              "min": 8,
+              "max": 16
+            }
+          },
+          {
+            "label": "糖",
+            "sourceIds": [
+              "fdc:169655"
+            ],
+            "grams": {
+              "min": 4,
+              "max": 10
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:167668",
+          "sourceName": "Restaurant, Chinese, fried rice, without meat",
+          "kcalPer100g": 174,
+          "insideRange": true,
+          "note": "無肉炒飯作為飯類主食的數量級對照。"
+        }
+      },
+      {
+        "dishId": "bibimbap",
+        "displayName": "石鍋拌飯",
+        "familyId": "bibimbap",
+        "familyTitle": "石鍋拌飯",
+        "inBenchmark": true,
+        "rangeRatio": 1.8005,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 111.3,
+          "max": 200.4
+        },
+        "servingCalories": {
+          "min": 534.1,
+          "max": 962.1
+        },
+        "feasibleGrams": {
+          "min": 420,
+          "max": 540
+        },
+        "components": [
+          {
+            "label": "熟白米",
+            "sourceIds": [
+              "fdc:168878"
+            ],
+            "grams": {
+              "min": 200,
+              "max": 280
+            }
+          },
+          {
+            "label": "牛肉（瘦牛肩到連脂牛肩）",
+            "sourceIds": [
+              "fdc:171817",
+              "fdc:168669"
+            ],
+            "grams": {
+              "min": 50,
+              "max": 100
+            }
+          },
+          {
+            "label": "煎蛋",
+            "sourceIds": [
+              "fdc:173423"
+            ],
+            "grams": {
+              "min": 45,
+              "max": 60
+            }
+          },
+          {
+            "label": "蔬菜（白菜仔到紅蘿蔔）",
+            "sourceIds": [
+              "fdc:168517",
+              "fdc:170394"
+            ],
+            "grams": {
+              "min": 80,
+              "max": 150
+            }
+          },
+          {
+            "label": "拌飯醬（燒烤醬到海鮮醬）",
+            "sourceIds": [
+              "fdc:174523",
+              "fdc:172886"
+            ],
+            "grams": {
+              "min": 15,
+              "max": 30
+            }
+          },
+          {
+            "label": "食油",
+            "sourceIds": [
+              "fdc:171411"
+            ],
+            "grams": {
+              "min": 4,
+              "max": 12
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:167668",
+          "sourceName": "Restaurant, Chinese, fried rice, without meat",
+          "kcalPer100g": 174,
+          "insideRange": true,
+          "note": "無肉炒飯只核對飯類混合菜式的數量級。"
+        }
+      },
+      {
+        "dishId": "ramen",
+        "displayName": "拉麵",
+        "familyId": "ramen",
+        "familyTitle": "拉麵",
+        "inBenchmark": true,
+        "rangeRatio": 1.8824,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 67.2,
+          "max": 126.5
+        },
+        "servingCalories": {
+          "min": 450.4,
+          "max": 847.4
+        },
+        "feasibleGrams": {
+          "min": 580,
+          "max": 760
+        },
+        "components": [
+          {
+            "label": "熟蛋麵",
+            "sourceIds": [
+              "fdc:169732"
+            ],
+            "grams": {
+              "min": 140,
+              "max": 200
+            }
+          },
+          {
+            "label": "湯底",
+            "sourceIds": [
+              "fdc:174536"
+            ],
+            "grams": {
+              "min": 320,
+              "max": 460
+            }
+          },
+          {
+            "label": "叉燒（烤豬肩）",
+            "sourceIds": [
+              "fdc:168257"
+            ],
+            "grams": {
+              "min": 45,
+              "max": 95
+            }
+          },
+          {
+            "label": "半熟／烚蛋",
+            "sourceIds": [
+              "fdc:173424"
+            ],
+            "grams": {
+              "min": 25,
+              "max": 55
+            }
+          },
+          {
+            "label": "湯面油脂",
+            "sourceIds": [
+              "fdc:171411"
+            ],
+            "grams": {
+              "min": 6,
+              "max": 18
+            }
+          },
+          {
+            "label": "蔬菜",
+            "sourceIds": [
+              "fdc:168517"
+            ],
+            "grams": {
+              "min": 15,
+              "max": 40
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:168083",
+          "sourceName": "Restaurant, Chinese, chicken chow mein",
+          "kcalPer100g": 85,
+          "insideRange": true,
+          "note": "中餐館雞炒麵作為有麵有肉的參考對照。"
+        }
+      },
+      {
+        "dishId": "dan-dan-noodles",
+        "displayName": "擔擔麵",
+        "familyId": "dressed-noodles",
+        "familyTitle": "拌麵",
+        "inBenchmark": true,
+        "rangeRatio": 1.8804,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 103.7,
+          "max": 195
+        },
+        "servingCalories": {
+          "min": 446.1,
+          "max": 838.6
+        },
+        "feasibleGrams": {
+          "min": 360,
+          "max": 500
+        },
+        "components": [
+          {
+            "label": "熟蛋麵",
+            "sourceIds": [
+              "fdc:169732"
+            ],
+            "grams": {
+              "min": 150,
+              "max": 220
+            }
+          },
+          {
+            "label": "湯底",
+            "sourceIds": [
+              "fdc:174536"
+            ],
+            "grams": {
+              "min": 100,
+              "max": 200
+            }
+          },
+          {
+            "label": "熟豬絞肉",
+            "sourceIds": [
+              "fdc:167903"
+            ],
+            "grams": {
+              "min": 35,
+              "max": 70
+            }
+          },
+          {
+            "label": "芝麻醬",
+            "sourceIds": [
+              "fdc:170189"
+            ],
+            "grams": {
+              "min": 15,
+              "max": 35
+            }
+          },
+          {
+            "label": "辣油／食油",
+            "sourceIds": [
+              "fdc:171411"
+            ],
+            "grams": {
+              "min": 4,
+              "max": 12
+            }
+          },
+          {
+            "label": "熟白菜仔",
+            "sourceIds": [
+              "fdc:168517"
+            ],
+            "grams": {
+              "min": 20,
+              "max": 50
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:167677",
+          "sourceName": "Restaurant, Chinese, vegetable lo mein, without meat",
+          "kcalPer100g": 121,
+          "insideRange": true,
+          "note": "美國中餐館素菜撈麵只核對拌麵的數量級。"
+        }
+      },
+      {
+        "dishId": "zhajiangmian",
+        "displayName": "炸醬麵",
+        "familyId": "dressed-noodles",
+        "familyTitle": "拌麵",
+        "inBenchmark": true,
+        "rangeRatio": 1.7389,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 128.3,
+          "max": 223.1
+        },
+        "servingCalories": {
+          "min": 487.4,
+          "max": 847.8
+        },
+        "feasibleGrams": {
+          "min": 320,
+          "max": 440
+        },
+        "components": [
+          {
+            "label": "熟蛋麵",
+            "sourceIds": [
+              "fdc:169732"
+            ],
+            "grams": {
+              "min": 180,
+              "max": 260
+            }
+          },
+          {
+            "label": "熟豬絞肉",
+            "sourceIds": [
+              "fdc:167903"
+            ],
+            "grams": {
+              "min": 50,
+              "max": 95
+            }
+          },
+          {
+            "label": "甜麵醬（海鮮醬代理）",
+            "sourceIds": [
+              "fdc:172886"
+            ],
+            "grams": {
+              "min": 20,
+              "max": 45
+            }
+          },
+          {
+            "label": "生青瓜絲",
+            "sourceIds": [
+              "fdc:168409"
+            ],
+            "grams": {
+              "min": 30,
+              "max": 65
+            }
+          },
+          {
+            "label": "食油",
+            "sourceIds": [
+              "fdc:171411"
+            ],
+            "grams": {
+              "min": 4,
+              "max": 12
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:167677",
+          "sourceName": "Restaurant, Chinese, vegetable lo mein, without meat",
+          "kcalPer100g": 121,
+          "insideRange": false,
+          "note": "美國中餐館素菜撈麵作為拌麵的數量級對照。"
+        }
+      },
+      {
+        "dishId": "hamburger",
+        "displayName": "漢堡",
+        "familyId": "burger",
+        "familyTitle": "漢堡",
+        "inBenchmark": true,
+        "rangeRatio": 2.1987,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 168.6,
+          "max": 370.7
+        },
+        "servingCalories": {
+          "min": 362.4,
+          "max": 797.1
+        },
+        "feasibleGrams": {
+          "min": 170,
+          "max": 260
+        },
+        "components": [
+          {
+            "label": "漢堡包",
+            "sourceIds": [
+              "fdc:172796"
+            ],
+            "grams": {
+              "min": 55,
+              "max": 85
+            }
+          },
+          {
+            "label": "熟牛肉漢堡扒",
+            "sourceIds": [
+              "fdc:171797"
+            ],
+            "grams": {
+              "min": 75,
+              "max": 130
+            }
+          },
+          {
+            "label": "芝士（可選）",
+            "sourceIds": [
+              "fdc:167735",
+              "fdc:170899"
+            ],
+            "grams": {
+              "min": 0,
+              "max": 25
+            }
+          },
+          {
+            "label": "生菜／番茄",
+            "sourceIds": [
+              "fdc:169248",
+              "fdc:170457"
+            ],
+            "grams": {
+              "min": 15,
+              "max": 45
+            }
+          },
+          {
+            "label": "醬料（茄汁到蛋黃醬）",
+            "sourceIds": [
+              "fdc:170054",
+              "fdc:171009"
+            ],
+            "grams": {
+              "min": 8,
+              "max": 22
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:170693",
+          "sourceName": "Fast foods, hamburger; single, regular patty; plain",
+          "kcalPer100g": 297,
+          "insideRange": true,
+          "note": "USDA 快餐原味漢堡（297 kcal／100 g）核對數量級。"
+        }
+      },
+      {
+        "dishId": "sandwich",
+        "displayName": "三文治",
+        "familyId": "sandwich",
+        "familyTitle": "三文治",
+        "inBenchmark": true,
+        "rangeRatio": 2.263,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 158.2,
+          "max": 358
+        },
+        "servingCalories": {
+          "min": 261.1,
+          "max": 590.7
+        },
+        "feasibleGrams": {
+          "min": 130,
+          "max": 200
+        },
+        "components": [
+          {
+            "label": "白方包",
+            "sourceIds": [
+              "fdc:174924"
+            ],
+            "grams": {
+              "min": 65,
+              "max": 95
+            }
+          },
+          {
+            "label": "餡料（火腿到午餐肉）",
+            "sourceIds": [
+              "fdc:173864",
+              "fdc:174571"
+            ],
+            "grams": {
+              "min": 35,
+              "max": 70
+            }
+          },
+          {
+            "label": "塗醬（蛋黃醬到牛油）",
+            "sourceIds": [
+              "fdc:171009",
+              "fdc:173430"
+            ],
+            "grams": {
+              "min": 4,
+              "max": 14
+            }
+          },
+          {
+            "label": "生菜／番茄",
+            "sourceIds": [
+              "fdc:169248",
+              "fdc:170457"
+            ],
+            "grams": {
+              "min": 10,
+              "max": 40
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:174924",
+          "sourceName": "Bread, white, commercially prepared (includes soft bread crumbs)",
+          "kcalPer100g": 266,
+          "insideRange": true,
+          "note": "白方包（266 kcal／100 g）作為三文治主體的數量級對照。"
+        }
+      },
+      {
+        "dishId": "bolognese",
+        "displayName": "肉醬意粉",
+        "familyId": "pasta",
+        "familyTitle": "意粉",
+        "inBenchmark": true,
+        "rangeRatio": 1.7725,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 120,
+          "max": 212.7
+        },
+        "servingCalories": {
+          "min": 480.2,
+          "max": 850.9
+        },
+        "feasibleGrams": {
+          "min": 340,
+          "max": 460
+        },
+        "components": [
+          {
+            "label": "熟意粉",
+            "sourceIds": [
+              "fdc:169737"
+            ],
+            "grams": {
+              "min": 180,
+              "max": 260
+            }
+          },
+          {
+            "label": "番茄醬",
+            "sourceIds": [
+              "fdc:170054"
+            ],
+            "grams": {
+              "min": 80,
+              "max": 140
+            }
+          },
+          {
+            "label": "熟牛絞肉",
+            "sourceIds": [
+              "fdc:171797"
+            ],
+            "grams": {
+              "min": 50,
+              "max": 95
+            }
+          },
+          {
+            "label": "食油",
+            "sourceIds": [
+              "fdc:171411"
+            ],
+            "grams": {
+              "min": 4,
+              "max": 12
+            }
+          },
+          {
+            "label": "芝士（可選）",
+            "sourceIds": [
+              "fdc:167735",
+              "fdc:170899"
+            ],
+            "grams": {
+              "min": 0,
+              "max": 15
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:169737",
+          "sourceName": "Pasta, cooked, enriched, without added salt",
+          "kcalPer100g": 158,
+          "insideRange": true,
+          "note": "淨熟意粉（158 kcal／100 g）作為主體澱粉對照。"
+        }
+      },
+      {
+        "dishId": "fish-and-chips",
+        "displayName": "魚柳薯條",
+        "familyId": "fish-and-chips",
+        "familyTitle": "炸魚薯條",
+        "inBenchmark": true,
+        "rangeRatio": 1.4791,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 226.9,
+          "max": 335.6
+        },
+        "servingCalories": {
+          "min": 816.9,
+          "max": 1208
+        },
+        "feasibleGrams": {
+          "min": 300,
+          "max": 420
+        },
+        "components": [
+          {
+            "label": "炸魚柳",
+            "sourceIds": [
+              "fdc:171957"
+            ],
+            "grams": {
+              "min": 130,
+              "max": 200
+            }
+          },
+          {
+            "label": "炸薯條",
+            "sourceIds": [
+              "fdc:170698"
+            ],
+            "grams": {
+              "min": 140,
+              "max": 220
+            }
+          },
+          {
+            "label": "額外炸油／蘸醬空間",
+            "sourceIds": [
+              "fdc:171411"
+            ],
+            "grams": {
+              "min": 4,
+              "max": 12
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:169024",
+          "sourceName": "DENNY'S, fish fillet, battered or breaded, fried",
+          "kcalPer100g": 234,
+          "insideRange": true,
+          "note": "USDA 脆漿炸魚柳（234 kcal／100 g）作為主料對照。"
+        }
+      },
+      {
+        "dishId": "tom-yum-soup",
+        "displayName": "冬蔭功湯",
+        "familyId": "soup",
+        "familyTitle": "湯類",
+        "inBenchmark": true,
+        "rangeRatio": 2.6415,
+        "needsFollowUp": true,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 21.2,
+          "max": 56
+        },
+        "servingCalories": {
+          "min": 88.9,
+          "max": 235.3
+        },
+        "feasibleGrams": {
+          "min": 360,
+          "max": 480
+        },
+        "components": [
+          {
+            "label": "清湯",
+            "sourceIds": [
+              "fdc:174536"
+            ],
+            "grams": {
+              "min": 250,
+              "max": 360
+            }
+          },
+          {
+            "label": "熟蝦",
+            "sourceIds": [
+              "fdc:175180"
+            ],
+            "grams": {
+              "min": 45,
+              "max": 85
+            }
+          },
+          {
+            "label": "熟白蘑菇",
+            "sourceIds": [
+              "fdc:169252"
+            ],
+            "grams": {
+              "min": 25,
+              "max": 55
+            }
+          },
+          {
+            "label": "番茄",
+            "sourceIds": [
+              "fdc:170457"
+            ],
+            "grams": {
+              "min": 20,
+              "max": 45
+            }
+          },
+          {
+            "label": "椰奶（清湯為 0 到濃湯 30 g）",
+            "sourceIds": [
+              "fdc:170173"
+            ],
+            "grams": {
+              "min": 0,
+              "max": 30
+            }
+          },
+          {
+            "label": "辣油／食油",
+            "sourceIds": [
+              "fdc:171411"
+            ],
+            "grams": {
+              "min": 2,
+              "max": 6
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:174536",
+          "sourceName": "Soup, chicken broth, ready-to-serve",
+          "kcalPer100g": 6,
+          "insideRange": false,
+          "note": "清雞湯（6 kcal／100 g）作為純清湯下限對照。"
+        }
+      },
+      {
+        "dishId": "sushi",
+        "displayName": "壽司",
+        "familyId": "sushi",
+        "familyTitle": "壽司",
+        "inBenchmark": true,
+        "rangeRatio": 2.0464,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 99.2,
+          "max": 203
+        },
+        "servingCalories": {
+          "min": 36.7,
+          "max": 75.1
+        },
+        "feasibleGrams": {
+          "min": 30,
+          "max": 44
+        },
+        "components": [
+          {
+            "label": "熟白米",
+            "sourceIds": [
+              "fdc:168878"
+            ],
+            "grams": {
+              "min": 18,
+              "max": 26
+            }
+          },
+          {
+            "label": "魚生／熟蝦（熟蝦到生三文魚）",
+            "sourceIds": [
+              "fdc:175180",
+              "fdc:175167"
+            ],
+            "grams": {
+              "min": 10,
+              "max": 18
+            }
+          },
+          {
+            "label": "壽司醋糖",
+            "sourceIds": [
+              "fdc:169655"
+            ],
+            "grams": {
+              "min": 0.5,
+              "max": 1.5
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:168878",
+          "sourceName": "Rice, white, long-grain, regular, enriched, cooked",
+          "kcalPer100g": 130,
+          "insideRange": true,
+          "note": "熟白米（130 kcal／100 g）作為壽司飯主體對照。"
+        }
+      },
+      {
+        "dishId": "sushi-platter",
+        "displayName": "壽司拼盤",
+        "familyId": "sushi",
+        "familyTitle": "壽司",
+        "inBenchmark": true,
+        "rangeRatio": 2.1932,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 93.7,
+          "max": 205.5
+        },
+        "servingCalories": {
+          "min": 309.3,
+          "max": 678.3
+        },
+        "feasibleGrams": {
+          "min": 260,
+          "max": 400
+        },
+        "components": [
+          {
+            "label": "熟白米",
+            "sourceIds": [
+              "fdc:168878"
+            ],
+            "grams": {
+              "min": 160,
+              "max": 240
+            }
+          },
+          {
+            "label": "魚生／熟蝦（熟蝦到生三文魚）",
+            "sourceIds": [
+              "fdc:175180",
+              "fdc:175167"
+            ],
+            "grams": {
+              "min": 85,
+              "max": 150
+            }
+          },
+          {
+            "label": "配料（青瓜到牛油果）",
+            "sourceIds": [
+              "fdc:168409",
+              "fdc:171705"
+            ],
+            "grams": {
+              "min": 10,
+              "max": 35
+            }
+          },
+          {
+            "label": "壽司醋糖",
+            "sourceIds": [
+              "fdc:169655"
+            ],
+            "grams": {
+              "min": 4,
+              "max": 12
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:168878",
+          "sourceName": "Rice, white, long-grain, regular, enriched, cooked",
+          "kcalPer100g": 130,
+          "insideRange": true,
+          "note": "熟白米（130 kcal／100 g）作為壽司飯主體對照。"
+        }
       }
     ],
     "rangeDistribution": {
-      "upTo2": 34,
-      "above2To2_5": 1,
-      "above2_5To3": 1,
+      "upTo2": 43,
+      "above2To2_5": 6,
+      "above2_5To3": 2,
       "above3": 0
     },
     "preservedProfiles": [
@@ -2809,38 +4136,38 @@
       "identityLevel": "dish",
       "canonicalName": "lunch-bento",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:lunch-bento",
+      "profileCanonicalName": "lunch-bento",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "lunch-bento",
       "familyId": "bento",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "日式便當",
       "identityLevel": "dish",
       "canonicalName": "japanese-bento",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:japanese-bento",
+      "profileCanonicalName": "japanese-bento",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "japanese-bento",
       "familyId": "bento",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "燒鵝飯",
@@ -3113,57 +4440,57 @@
       "identityLevel": "dish",
       "canonicalName": "oyakodon",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:oyakodon",
+      "profileCanonicalName": "oyakodon",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "oyakodon",
       "familyId": "donburi",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "牛丼",
       "identityLevel": "dish",
       "canonicalName": "gyudon",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:gyudon",
+      "profileCanonicalName": "gyudon",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "gyudon",
       "familyId": "donburi",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "石鍋拌飯",
       "identityLevel": "dish",
       "canonicalName": "bibimbap",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:bibimbap",
+      "profileCanonicalName": "bibimbap",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "bibimbap",
       "familyId": "bibimbap",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "乾炒牛河",
@@ -3284,76 +4611,76 @@
       "identityLevel": "dish",
       "canonicalName": "tom-yum-soup",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:tom-yum-soup",
+      "profileCanonicalName": "tom-yum-soup",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "tom-yum-soup",
       "familyId": "soup",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "拉麵",
       "identityLevel": "dish",
       "canonicalName": "ramen",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:ramen",
+      "profileCanonicalName": "ramen",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "ramen",
       "familyId": "ramen",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "擔擔麵",
       "identityLevel": "dish",
       "canonicalName": "dan-dan-noodles",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:dan-dan-noodles",
+      "profileCanonicalName": "dan-dan-noodles",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "dan-dan-noodles",
       "familyId": "dressed-noodles",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "炸醬麵",
       "identityLevel": "dish",
       "canonicalName": "zhajiangmian",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:zhajiangmian",
+      "profileCanonicalName": "zhajiangmian",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "zhajiangmian",
       "familyId": "dressed-noodles",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "陽春麵",
@@ -3626,38 +4953,38 @@
       "identityLevel": "dish",
       "canonicalName": "sushi-platter",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:sushi-platter",
+      "profileCanonicalName": "sushi-platter",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "sushi-platter",
       "familyId": "sushi",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "壽司",
       "identityLevel": "dish",
       "canonicalName": "sushi",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:sushi",
+      "profileCanonicalName": "sushi",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "sushi",
       "familyId": "sushi",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "火鍋",
@@ -3683,90 +5010,90 @@
       "identityLevel": "dish",
       "canonicalName": "hamburger",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:hamburger",
+      "profileCanonicalName": "hamburger",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "hamburger",
       "familyId": "burger",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "三文治",
       "identityLevel": "dish",
       "canonicalName": "sandwich",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:sandwich",
+      "profileCanonicalName": "sandwich",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "sandwich",
       "familyId": "sandwich",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "肉醬意粉",
       "identityLevel": "dish",
       "canonicalName": "bolognese",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:bolognese",
+      "profileCanonicalName": "bolognese",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "bolognese",
       "familyId": "pasta",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "魚柳薯條",
       "identityLevel": "dish",
       "canonicalName": "fish-and-chips",
       "compositeIdentity": true,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "DISH_KNOWN_NO_PROFILE",
-      "userFacingReason": "找到相近的基礎食材資料，但不足以代表整道菜，因此未納入總數。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "template:fish-and-chips",
+      "profileCanonicalName": "fish-and-chips",
+      "profileComposite": true,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": "fish-and-chips",
       "familyId": "fish-and-chips",
       "knownIdentity": true,
-      "hasNutritionProfile": false
+      "hasNutritionProfile": true
     },
     {
       "name": "果汁",
       "identityLevel": "ingredient",
-      "canonicalName": "unknown",
+      "canonicalName": "fruit-juice",
       "compositeIdentity": false,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "INSUFFICIENT_COVERAGE",
-      "userFacingReason": "未有足夠可靠的營養參考資料可以配對。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "fruit-juice",
+      "profileCanonicalName": "fruit-juice",
+      "profileComposite": false,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": null,
       "familyId": null,
@@ -3776,16 +5103,16 @@
     {
       "name": "凍檸茶",
       "identityLevel": "ingredient",
-      "canonicalName": "unknown",
+      "canonicalName": "iced-lemon-tea",
       "compositeIdentity": false,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "INSUFFICIENT_COVERAGE",
-      "userFacingReason": "未有足夠可靠的營養參考資料可以配對。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "iced-lemon-tea",
+      "profileCanonicalName": "iced-lemon-tea",
+      "profileComposite": false,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": null,
       "familyId": null,
@@ -3795,16 +5122,16 @@
     {
       "name": "油條",
       "identityLevel": "ingredient",
-      "canonicalName": "unknown",
+      "canonicalName": "youtiao",
       "compositeIdentity": false,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "INSUFFICIENT_COVERAGE",
-      "userFacingReason": "未有足夠可靠的營養參考資料可以配對。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "youtiao",
+      "profileCanonicalName": "youtiao",
+      "profileComposite": false,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": null,
       "familyId": null,
@@ -3814,16 +5141,16 @@
     {
       "name": "西蘭花",
       "identityLevel": "ingredient",
-      "canonicalName": "unknown",
+      "canonicalName": "broccoli",
       "compositeIdentity": false,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "INSUFFICIENT_COVERAGE",
-      "userFacingReason": "未有足夠可靠的營養參考資料可以配對。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "broccoli-cooked",
+      "profileCanonicalName": "broccoli",
+      "profileComposite": false,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": null,
       "familyId": null,
@@ -3833,16 +5160,16 @@
     {
       "name": "牛油果",
       "identityLevel": "ingredient",
-      "canonicalName": "unknown",
+      "canonicalName": "avocado",
       "compositeIdentity": false,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "INSUFFICIENT_COVERAGE",
-      "userFacingReason": "未有足夠可靠的營養參考資料可以配對。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "avocado-raw",
+      "profileCanonicalName": "avocado",
+      "profileComposite": false,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": null,
       "familyId": null,
@@ -3852,16 +5179,16 @@
     {
       "name": "蝦仁",
       "identityLevel": "ingredient",
-      "canonicalName": "unknown",
+      "canonicalName": "shrimp",
       "compositeIdentity": false,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "INSUFFICIENT_COVERAGE",
-      "userFacingReason": "未有足夠可靠的營養參考資料可以配對。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "shrimp-cooked",
+      "profileCanonicalName": "shrimp",
+      "profileComposite": false,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": null,
       "familyId": null,
@@ -3871,16 +5198,16 @@
     {
       "name": "蒸魚",
       "identityLevel": "ingredient",
-      "canonicalName": "unknown",
+      "canonicalName": "white-fish",
       "compositeIdentity": false,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "INSUFFICIENT_COVERAGE",
-      "userFacingReason": "未有足夠可靠的營養參考資料可以配對。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "steamed-fish",
+      "profileCanonicalName": "white-fish",
+      "profileComposite": false,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": null,
       "familyId": null,
@@ -3890,16 +5217,16 @@
     {
       "name": "雞翼",
       "identityLevel": "ingredient",
-      "canonicalName": "unknown",
+      "canonicalName": "chicken-wings",
       "compositeIdentity": false,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "INSUFFICIENT_COVERAGE",
-      "userFacingReason": "未有足夠可靠的營養參考資料可以配對。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "chicken-wings-cooked",
+      "profileCanonicalName": "chicken-wings",
+      "profileComposite": false,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": null,
       "familyId": null,
@@ -3909,16 +5236,16 @@
     {
       "name": "午餐肉",
       "identityLevel": "ingredient",
-      "canonicalName": "unknown",
+      "canonicalName": "luncheon-meat",
       "compositeIdentity": false,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "INSUFFICIENT_COVERAGE",
-      "userFacingReason": "未有足夠可靠的營養參考資料可以配對。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "luncheon-meat",
+      "profileCanonicalName": "luncheon-meat",
+      "profileComposite": false,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": null,
       "familyId": null,
@@ -3928,16 +5255,16 @@
     {
       "name": "芝士",
       "identityLevel": "ingredient",
-      "canonicalName": "unknown",
+      "canonicalName": "cheese",
       "compositeIdentity": false,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "INSUFFICIENT_COVERAGE",
-      "userFacingReason": "未有足夠可靠的營養參考資料可以配對。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "cheese",
+      "profileCanonicalName": "cheese",
+      "profileComposite": false,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": null,
       "familyId": null,
@@ -3985,16 +5312,16 @@
     {
       "name": "乳酪",
       "identityLevel": "ingredient",
-      "canonicalName": "unknown",
+      "canonicalName": "yogurt",
       "compositeIdentity": false,
-      "coverage": "none",
-      "includedInTotal": false,
-      "matchType": "unresolved",
-      "profileId": null,
-      "profileCanonicalName": null,
-      "profileComposite": null,
-      "coverageReason": "INSUFFICIENT_COVERAGE",
-      "userFacingReason": "未有足夠可靠的營養參考資料可以配對。",
+      "coverage": "complete",
+      "includedInTotal": true,
+      "matchType": "exact_canonical",
+      "profileId": "yogurt",
+      "profileCanonicalName": "yogurt",
+      "profileComposite": false,
+      "coverageReason": null,
+      "userFacingReason": "名稱與參考資料的標準名稱一致。",
       "falseConfidentMatch": false,
       "dishId": null,
       "familyId": null,

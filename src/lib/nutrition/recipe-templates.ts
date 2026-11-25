@@ -25,6 +25,17 @@ export const PILOT_FAMILY_IDS = [
   "dim-sum",
   "cha-chaan-teng-breakfast",
   "stir-fried-rice-noodles",
+  "bento",
+  "donburi",
+  "bibimbap",
+  "ramen",
+  "dressed-noodles",
+  "burger",
+  "sandwich",
+  "pasta",
+  "fish-and-chips",
+  "soup",
+  "sushi",
 ] as const;
 
 export type PilotFamilyId = (typeof PILOT_FAMILY_IDS)[number];
@@ -345,6 +356,187 @@ const families: readonly FamilyInput[] = [
         part("vegetable", "熟椰菜", "cabbage", g(25, 50)),
         part("oil", "食油", "oil", g(8, 16)),
       ], "咖喱粉份量很小，沒有單獨列。顏色不當成熱量。", "vegetableLoMein", "美國中餐館素菜撈麵用來核對炒粉麵的數量級。"),
+    ],
+  },
+  {
+    id: "bento",
+    title: "便當",
+    selectionReason: "附錄 A 有 2 道（午餐便當、日式便當），為香港上班族常見盒飯組合。",
+    dishes: [
+      dish("lunch-bento", g(380, 500), "bowl", [
+        part("rice", "熟白米", "rice", g(180, 260)),
+        part("protein", "主菜（烚雞肉到煎豬扒）", "chickenStewedMeat", g(80, 140), "porkChop"),
+        part("vegetable", "熟蔬菜（白菜仔到椰菜）", "pakChoi", g(50, 110), "cabbage"),
+        part("oil", "食油", "oil", g(4, 12)),
+        part("sauce", "醬汁（豉油到海鮮醬）", "soySauce", g(6, 16), "hoisin"),
+      ], "便當配菜變化較大，蛋白質用烚雞肉到煎豬扒包絡，只作盒飯參考範圍。", "friedRiceMeatless", "美國中餐館無肉炒飯，只核對以飯為主的盒飯數量級。"),
+      dish("japanese-bento", g(380, 500), "bowl", [
+        part("rice", "熟白米", "rice", g(180, 250)),
+        part("protein", "主菜（烤魚到炸雞）", "seaBass", g(80, 140), "chickenFried"),
+        part("egg", "蛋（烚蛋到煎蛋）", "boiledEgg", g(25, 55), "friedEgg"),
+        part("vegetable", "熟蔬菜（椰菜到紅蘿蔔）", "cabbage", g(45, 95), "carrotBoiled"),
+        part("sauce", "醬汁（豉油到海鮮醬）", "soySauce", g(6, 16), "hoisin"),
+      ], "日式便當主菜從烤魚到唐揚炸雞差異大，配菜以熟蔬菜和蛋類包絡。", "friedRiceMeatless", "美國中餐館無肉炒飯，只核對以飯為主的盒飯數量級。"),
+    ],
+  },
+  {
+    id: "donburi",
+    title: "丼飯",
+    selectionReason: "附錄 A 有 2 道（親子丼、牛丼），是日常高頻日式蓋飯。",
+    dishes: [
+      dish("oyakodon", g(380, 480), "bowl", [
+        part("rice", "熟白米", "rice", g(200, 280)),
+        part("chicken", "雞肉（去皮烚雞到連皮烚雞）", "chickenStewedMeat", g(80, 130), "chickenStewedSkin"),
+        part("egg", "雞蛋（烚蛋到煎蛋）", "boiledEgg", g(50, 90), "friedEgg"),
+        part("broth", "高湯", "broth", g(25, 60)),
+        part("sauce", "豉油", "soySauce", g(8, 16)),
+        part("sugar", "糖", "sugar", g(3, 8)),
+      ], "親子丼以白飯、雞肉、蛋及甜醬油高湯代表，高湯用清雞湯代理。", "whiteRice", "熟白米作為底飯對照；加雞肉與蛋後密度應高於純白飯。"),
+      dish("gyudon", g(380, 480), "bowl", [
+        part("rice", "熟白米", "rice", g(200, 280)),
+        part("beef", "牛肉（瘦炆牛肉到連脂炆牛肩）", "beefLean", g(80, 130), "beefChuck"),
+        part("broth", "高湯", "broth", g(30, 70)),
+        part("sauce", "豉油", "soySauce", g(8, 16)),
+        part("sugar", "糖", "sugar", g(4, 10)),
+      ], "牛丼的肥牛比例差異以瘦牛肩到連脂牛肩包絡。", "friedRiceMeatless", "無肉炒飯作為飯類主食的數量級對照。"),
+    ],
+  },
+  {
+    id: "bibimbap",
+    title: "石鍋拌飯",
+    selectionReason: "附錄 A 的韓式拌飯，結構明確（白飯、肉、蛋、蔬菜、醬與油）。",
+    dishes: [
+      dish("bibimbap", g(420, 540), "bowl", [
+        part("rice", "熟白米", "rice", g(200, 280)),
+        part("beef", "牛肉（瘦牛肩到連脂牛肩）", "beefLean", g(50, 100), "beefChuck"),
+        part("egg", "煎蛋", "friedEgg", g(45, 60)),
+        part("vegetable", "蔬菜（白菜仔到紅蘿蔔）", "pakChoi", g(80, 150), "carrotBoiled"),
+        part("sauce", "拌飯醬（燒烤醬到海鮮醬）", "barbecueSauce", g(15, 30), "hoisin"),
+        part("oil", "食油", "oil", g(4, 12)),
+      ], "SR Legacy 沒有韓式辣醬，用燒烤醬到海鮮醬包絡甜鹹醬料，另計麻油／鍋底油。", "friedRiceMeatless", "無肉炒飯只核對飯類混合菜式的數量級。"),
+    ],
+  },
+  {
+    id: "ramen",
+    title: "拉麵",
+    selectionReason: "附錄 A 的日式拉麵，香港非常常見，湯底油脂差異以油量範圍反映。",
+    dishes: [
+      dish("ramen", g(580, 760), "bowl", [
+        part("noodles", "熟蛋麵", "eggNoodles", g(140, 200)),
+        part("broth", "湯底", "broth", g(320, 460)),
+        part("pork", "叉燒（烤豬肩）", "porkShoulder", g(45, 95)),
+        part("egg", "半熟／烚蛋", "boiledEgg", g(25, 55)),
+        part("oil", "湯面油脂", "oil", g(6, 18)),
+        part("vegetable", "蔬菜", "pakChoi", g(15, 40)),
+      ], "清湯醬油拉麵與濃豚骨拉麵油脂差距大，以湯底油量 6–18 g 包絡，不代表某間拉麵店配方。", "chickenChowMein", "中餐館雞炒麵作為有麵有肉的參考對照。"),
+    ],
+  },
+  {
+    id: "dressed-noodles",
+    title: "拌麵",
+    selectionReason: "附錄 A 有 2 道（擔擔麵、炸醬麵），香港中式麵店常見。",
+    dishes: [
+      dish("dan-dan-noodles", g(360, 500), "bowl", [
+        part("noodles", "熟蛋麵", "eggNoodles", g(150, 220)),
+        part("broth", "湯底", "broth", g(100, 200)),
+        part("pork", "熟豬絞肉", "groundPork", g(35, 70)),
+        part("paste", "芝麻醬", "tahini", g(15, 35)),
+        part("oil", "辣油／食油", "oil", g(4, 12)),
+        part("vegetable", "熟白菜仔", "pakChoi", g(20, 50)),
+      ], "擔擔麵的麻醬與紅油比例差異大，以芝麻醬 15–35 g 加食油反映。", "vegetableLoMein", "美國中餐館素菜撈麵只核對拌麵的數量級。"),
+      dish("zhajiangmian", g(320, 440), "bowl", [
+        part("noodles", "熟蛋麵", "eggNoodles", g(180, 260)),
+        part("pork", "熟豬絞肉", "groundPork", g(50, 95)),
+        part("sauce", "甜麵醬（海鮮醬代理）", "hoisin", g(20, 45)),
+        part("vegetable", "生青瓜絲", "cucumberRaw", g(30, 65)),
+        part("oil", "食油", "oil", g(4, 12)),
+      ], "SR Legacy 沒有京式黃醬／甜麵醬，以海鮮醬代理肉醬醬料。", "vegetableLoMein", "美國中餐館素菜撈麵作為拌麵的數量級對照。"),
+    ],
+  },
+  {
+    id: "burger",
+    title: "漢堡",
+    selectionReason: "附錄 A 的西式快餐主食，麵包、肉扒、芝士及醬料結構清晰。",
+    dishes: [
+      dish("hamburger", g(170, 260), "piece", [
+        part("bun", "漢堡包", "hamburgerRoll", g(55, 85)),
+        part("patty", "熟牛肉漢堡扒", "groundBeef", g(75, 130)),
+        part("cheese", "芝士（可選）", "mozzarellaCheese", g(0, 25), "cheddarCheese"),
+        part("vegetable", "生菜／番茄", "lettuceRaw", g(15, 45), "tomatoRaw"),
+        part("spread", "醬料（茄汁到蛋黃醬）", "tomatoSauce", g(8, 22), "mayonnaise"),
+      ], "單層漢堡，醬料以茄汁到蛋黃醬包絡、芝士為可選配料，不是某間連鎖店化驗值。", "hamburgerPlain", "USDA 快餐原味漢堡（297 kcal／100 g）核對數量級。"),
+    ],
+  },
+  {
+    id: "sandwich",
+    title: "三文治",
+    selectionReason: "附錄 A 的茶餐廳及便利店常見輕食。",
+    dishes: [
+      dish("sandwich", g(130, 200), "piece", [
+        part("bread", "白方包", "bread", g(65, 95)),
+        part("filling", "餡料（火腿到午餐肉）", "ham", g(35, 70), "luncheonMeat"),
+        part("spread", "塗醬（蛋黃醬到牛油）", "mayonnaise", g(4, 14), "butter"),
+        part("vegetable", "生菜／番茄", "lettuceRaw", g(10, 40), "tomatoRaw"),
+      ], "三文治餡料多變，以火腿到午餐肉及薄牛油／蛋黃醬包絡，不代表雙層厚餡三文治。", "whiteBread", "白方包（266 kcal／100 g）作為三文治主體的數量級對照。"),
+    ],
+  },
+  {
+    id: "pasta",
+    title: "意粉",
+    selectionReason: "附錄 A 的肉醬意粉，香港茶餐廳與西餐廳高頻菜式。",
+    dishes: [
+      dish("bolognese", g(340, 460), "bowl", [
+        part("pasta", "熟意粉", "pasta", g(180, 260)),
+        part("sauce", "番茄醬", "tomatoSauce", g(80, 140)),
+        part("beef", "熟牛絞肉", "groundBeef", g(50, 95)),
+        part("oil", "食油", "oil", g(4, 12)),
+        part("cheese", "芝士（可選）", "mozzarellaCheese", g(0, 15), "cheddarCheese"),
+      ], "番茄肉醬意粉以熟意粉、罐裝番茄醬、熟牛絞肉及少量食油與可選芝士構成。", "pastaPlain", "淨熟意粉（158 kcal／100 g）作為主體澱粉對照。"),
+    ],
+  },
+  {
+    id: "fish-and-chips",
+    title: "炸魚薯條",
+    selectionReason: "附錄 A 的西式炸魚柳配薯條，原料直接對應 USDA SR Legacy。",
+    dishes: [
+      dish("fish-and-chips", g(300, 420), "bowl", [
+        part("fish", "炸魚柳", "friedFish", g(130, 200)),
+        part("fries", "炸薯條", "frenchFries", g(140, 220)),
+        part("oil", "額外炸油／蘸醬空間", "oil", g(4, 12)),
+      ], "脆漿炸魚柳加炸薯條，不含額外大量他他醬。", "breadedFish", "USDA 脆漿炸魚柳（234 kcal／100 g）作為主料對照。"),
+    ],
+  },
+  {
+    id: "soup",
+    title: "湯類",
+    selectionReason: "附錄 A 的冬蔭功湯，以清湯到椰奶濃湯包絡。",
+    dishes: [
+      dish("tom-yum-soup", g(360, 480), "bowl", [
+        part("broth", "清湯", "broth", g(250, 360)),
+        part("shrimp", "熟蝦", "shrimp", g(45, 85)),
+        part("mushroom", "熟白蘑菇", "whiteMushroom", g(25, 55)),
+        part("tomato", "番茄", "tomatoRaw", g(20, 45)),
+        part("cream", "椰奶（清湯為 0 到濃湯 30 g）", "coconutMilk", g(0, 30)),
+        part("oil", "辣油／食油", "oil", g(2, 6)),
+      ], "冬蔭功清湯與加椰奶／花奶版本熱量差異明顯，以椰奶 0–30 g 包絡並標記追問。", "chickenBroth", "清雞湯（6 kcal／100 g）作為純清湯下限對照。"),
+    ],
+  },
+  {
+    id: "sushi",
+    title: "壽司",
+    selectionReason: "附錄 A 有 2 道（壽司、壽司拼盤），為常見日式主食。",
+    dishes: [
+      dish("sushi", g(30, 44), "piece", [
+        part("rice", "熟白米", "rice", g(18, 26)),
+        part("topping", "魚生／熟蝦（熟蝦到生三文魚）", "shrimp", g(10, 18), "salmonRaw"),
+        part("sugar", "壽司醋糖", "sugar", g(0.5, 1.5)),
+      ], "一件握壽司，配料以熟蝦到生三文魚包絡，不含大量蛋黃醬或炸物卷。", "whiteRice", "熟白米（130 kcal／100 g）作為壽司飯主體對照。"),
+      dish("sushi-platter", g(260, 400), "bowl", [
+        part("rice", "熟白米", "rice", g(160, 240)),
+        part("topping", "魚生／熟蝦（熟蝦到生三文魚）", "shrimp", g(85, 150), "salmonRaw"),
+        part("accent", "配料（青瓜到牛油果）", "cucumberRaw", g(10, 35), "avocado"),
+        part("sugar", "壽司醋糖", "sugar", g(4, 12)),
+      ], "一般單人壽司拼盤（約 8–12 件），不含炸天婦羅卷或厚醬炙燒卷。", "whiteRice", "熟白米（130 kcal／100 g）作為壽司飯主體對照。"),
     ],
   },
 ];

@@ -180,4 +180,42 @@ describe("curated dish identities", () => {
     expect(setMeal.reasons[0]).toContain("不套用早餐模板");
     expect(setMeal.profile?.id).not.toBe("template:macaroni-soup-breakfast");
   });
+
+  it("matches modified HK dish names while blocking unsafe partial hits", () => {
+    for (const [displayName, normalizedName, expectedProfileId] of [
+      ["洋蔥豬扒飯", "onion pork chop rice", "template:pork-chop-rice"],
+      ["蟹籽燒賣", "crab roe siu mai", "template:siu-mai"],
+      ["酥皮蛋撻", "puff pastry egg tart", "template:egg-tart"],
+      ["牛肉漢堡", "beef burger", "template:hamburger"],
+      ["三文魚壽司", "salmon sushi", "template:sushi"],
+      ["豚骨拉麵", "tonkotsu ramen", "template:ramen"],
+    ] as const) {
+      const match = provider.resolve(food(displayName, normalizedName));
+      expect(match.includedInTotal, displayName).toBe(true);
+      expect(match.profile?.id, displayName).toBe(expectedProfileId);
+      expect(match.profile?.composite, displayName).toBe(true);
+    }
+
+    const mushroomClearSoup = provider.resolve(food("蘑菇清湯", "clear mushroom soup", "ingredient"));
+    expect(mushroomClearSoup.includedInTotal).toBe(true);
+    expect(mushroomClearSoup.profile?.id).toBe("clear-soup");
+
+    const creamMushroomSoup = provider.resolve(food("忌廉蘑菇湯", "cream of mushroom soup", "ingredient"));
+    expect(creamMushroomSoup.includedInTotal).toBe(false);
+    expect(creamMushroomSoup.profile).toBeNull();
+
+    const setWithMacaroni = provider.resolve(food("茶餐廳常餐（火腿通粉）", "cha chaan teng set with ham macaroni"));
+    expect(setWithMacaroni.includedInTotal).toBe(false);
+    expect(setWithMacaroni.identity.dishId).toBe("cha-chaan-teng-set");
+
+    const stirFriedHoFun = provider.resolve(food("炒河粉", "stir-fried ho fun"));
+    expect(stirFriedHoFun.profile?.id).not.toBe("template:ho-fun");
+
+    const tartCrust = provider.resolve(food("蛋撻皮", "egg tart crust", "ingredient"));
+    expect(tartCrust.profile?.id).not.toBe("template:egg-tart");
+
+    const mixedDishes = provider.resolve(food("叉燒飯拼燒鵝飯", "char siu and roast goose rice"));
+    expect(mixedDishes.includedInTotal).toBe(false);
+    expect(mixedDishes.coverageReason).toBe("AMBIGUOUS_MATCH");
+  });
 });
