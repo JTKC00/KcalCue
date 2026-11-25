@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createEditableFoodItems } from "@/lib/domain/editable-meal";
@@ -164,7 +164,6 @@ beforeEach(() => {
   localStorage.clear(); history.replaceState(null, "", "/");
   Object.defineProperty(navigator, "onLine", { configurable: true, value: false });
   Object.defineProperty(navigator, "locks", { configurable: true, value: { request: async (_name: string, operation: () => Promise<unknown>) => operation() } });
-  vi.spyOn(window, "confirm").mockReturnValue(true);
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
@@ -569,6 +568,8 @@ it("rejects a pre-delete refresh snapshot and follows up with the current snapsh
   await screen.findByRole("heading", { name: "meal-a" });
   await waitFor(() => expect(fixture.state).toHaveBeenCalledTimes(2));
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "刪除" })); });
+  const dialog = await screen.findByRole("alertdialog");
+  await act(async () => { fireEvent.click(within(dialog).getByRole("button", { name: "確認刪除" })); });
   expect(screen.queryByRole("heading", { name: "meal-a" })).not.toBeInTheDocument();
   await act(async () => { oldRead.resolve(original); });
   await waitFor(() => expect(fixture.state).toHaveBeenCalledTimes(3));
@@ -710,4 +711,42 @@ it("replaces an unsaved analysis baseline only when a new analysis arrives", asy
   await waitFor(() => expect(caches.get("a")?.draft?.items[0].portionMin).toBe(nextItems[0].portionMin! + 1));
   expect(caches.get("a")?.draft?.originalItems).toEqual(nextItems);
   expect(caches.get("a")?.draft?.analysisProvenance).toEqual(nextProvenance);
+});
+
+it("retains a saved meal draft when only originalPortionMin/Max preset baseline changes", async () => {
+  const baseItem = createEditableFoodItems([demoFoodAnalysis.foods[0]])[0];
+  const savedItem = {
+    ...baseItem,
+    portionMin: 125,
+    portionMax: 225,
+    originalPortionMin: 100,
+    originalPortionMax: 150,
+  };
+  const meal: MealRecord = {
+    ...record("a", "白飯"),
+    items: [savedItem],
+    originalItems: [baseItem],
+  };
+  states.set("a", { ...emptySync(), remote: [meal] });
+
+  render(<MealJournal initialProviderMode="live" />);
+  await signIn("a");
+  await screen.findByRole("heading", { name: "白飯" });
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "查看／修正" })); });
+  await screen.findByTestId("editor-meal");
+  expect(caches.get("a")?.draft ?? null).toBeNull();
+
+  // Manual portion edit that returns to 125–225 but moves the preset baseline to 125–225.
+  await act(async () => {
+    fixture.draftChange!({
+      items: [{ ...savedItem, originalPortionMin: 125, originalPortionMax: 225 }],
+      analysis: null,
+      analysisProvenance: null,
+      mode: meal.mode,
+    });
+  });
+
+  await waitFor(() => expect(caches.get("a")?.draft?.items[0]?.originalPortionMin).toBe(125));
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "今日" })); });
+  expect(screen.getByText("有一份未儲存草稿")).toBeVisible();
 });

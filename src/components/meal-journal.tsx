@@ -23,6 +23,8 @@ import {
 import { PhotoPreparationError, preparePhoto } from "@/lib/meals/photo";
 import { copy as zhCopy, unitCopy } from "@/content/zh-HK";
 import { foodAnalysisSchema } from "@/lib/domain/food-analysis";
+import { assignEntrySource } from "@/lib/domain/editable-meal";
+import { readAnalysisProvenance } from "@/lib/domain/analysis-provenance";
 import { roundRange } from "@/lib/nutrition/calculation";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { NutritionService } from "@/lib/nutrition/service";
@@ -34,6 +36,7 @@ import { dayCalories, mealCalories, sameCalorieBasis, type MealCalorieSummary } 
 import { MAX_JOURNAL_NOTE_CODE_POINTS, journalNoteCodePoints, normalizeJournalNote } from "@/lib/meals/journal-note";
 import { CameraIcon, CloseIcon, HistoryIcon, HomeIcon, JournalIcon, PlusIcon, UserIcon } from "./icons";
 import { RangeRail } from "./range-rail";
+import { ConfirmDialog, type ConfirmRequest } from "./confirm-dialog";
 
 const repository = new MealRepository();
 const messages: Record<string, string> = {
@@ -70,6 +73,62 @@ function commandFingerprint(draft: MealDraft) {
     photo: undefined,
     pendingMutation: undefined,
   });
+}
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((entry) => stableJson(entry)).join(",")}]`;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, entry]) => entry !== undefined)
+    .sort(([a], [b]) => a.localeCompare(b));
+  return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableJson(v)}`).join(",")}}`;
+}
+function stripDerivedItemFields(item: MealDraft["items"][number]) {
+  const rest = { ...item };
+  delete rest.nutritionMatch;
+  return rest;
+}
+function persistedMealFingerprint(meal: MealDraft): string {
+  const analysis = meal.analysis ?? null;
+  const items = assignEntrySource(meal.items, analysis).map(stripDerivedItemFields);
+  const originalItems = (
+    meal.originalItems?.length
+      ? meal.originalItems
+      : analysis
+        ? assignEntrySource(meal.items, analysis)
+        : []
+  ).map(stripDerivedItemFields);
+  return stableJson({
+    id: meal.id,
+    version: meal.version,
+    mode: meal.mode,
+    date: meal.date,
+    time: meal.time,
+    timezone: meal.timezone,
+    mealType: meal.mealType,
+    analysis,
+    analysisProvenance: analysis
+      ? readAnalysisProvenance(meal.analysisProvenance, meal.mode)
+      : null,
+    calorieCorrection: meal.calorieCorrection ?? null,
+    journalNote: normalizeJournalNote(meal.journalNote ?? ""),
+    items,
+    originalItems,
+  });
+}
+function isUntouchedSavedMeal(
+  candidate: MealDraft | null,
+  baseline: string | null,
+): boolean {
+  if (!candidate || candidate.version === 0 || !baseline) return false;
+  if (
+    candidate.photo ||
+    candidate.removePhoto ||
+    candidate.pendingMutation ||
+    candidate.calorieInput !== undefined
+  ) {
+    return false;
+  }
+  return persistedMealFingerprint(candidate) === baseline;
 }
 function blockedSaveText(code: string) {
   const detail = messages[code] ?? "同步未完成，修改仍保留於本機。";
@@ -214,6 +273,22 @@ export function MealJournal({
   const [preparing, setPreparing] = useState(false);
   const [photoFailure, setPhotoFailure] = useState<null | "retryable" | "too_large">(null);
   const [conflict, setConflict] = useState(false);
+  const [savedDraftBaseline, setSavedDraftBaseline] = useState<string | null>(null);
+  const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
+  const confirmResolver = useRef<((accepted: boolean) => void) | null>(null);
+  const finishConfirm = useCallback((accepted: boolean) => {
+    const resolve = confirmResolver.current;
+    confirmResolver.current = null;
+    setConfirmRequest(null);
+    resolve?.(accepted);
+  }, []);
+  const askConfirm = useCallback((request: ConfirmRequest): Promise<boolean> => {
+    confirmResolver.current?.(false);
+    return new Promise<boolean>((resolve) => {
+      confirmResolver.current = resolve;
+      setConfirmRequest(request);
+    });
+  }, []);
   const [pending, setPending] = useState<PendingMeal[]>([]);
   const [syncing, setSyncing] = useState(false);
   const syncingRef = useRef(false);
@@ -236,10 +311,10 @@ export function MealJournal({
   useEffect(() => {
     syncErrorRef.current = Boolean(syncNotice);
   }, [syncNotice]);
-  const current = useRef({ userId, draft, records, syncedAt });
+  const current = useRef({ userId, draft, records, syncedAt, savedDraftBaseline });
   useEffect(() => {
-    current.current = { userId, draft, records, syncedAt };
-  }, [userId, draft, records, syncedAt]);
+    current.current = { userId, draft, records, syncedAt, savedDraftBaseline };
+  }, [userId, draft, records, syncedAt, savedDraftBaseline]);
   const writes = useRef<Promise<unknown>>(Promise.resolve());
   const queuedDraft = useRef<MealDraft | null>(null);
   const cacheEnabled = useRef(true);
@@ -309,6 +384,7 @@ export function MealJournal({
             commandFingerprint(activeDraft) === mutation.fingerprint;
           if (acknowledged) {
             setDraft(null);
+            setSavedDraftBaseline(null);
             setInitialDraft(undefined);
             window.history.pushState(null, "", "#today");
             setTab("today");
@@ -414,12 +490,19 @@ export function MealJournal({
       if (!isCurrentLoad()) return;
       loading = false;
       queuedDraft.current = local.draft;
-      current.current = { userId: id, ...local, records: visibleRecords, syncedAt: knownSyncedAt };
+      current.current = {
+        userId: id,
+        ...local,
+        records: visibleRecords,
+        syncedAt: knownSyncedAt,
+        savedDraftBaseline: null,
+      };
       cacheEnabled.current = true;
       setUserId(id);
       setEmail(address);
       setRecords(visibleRecords);
       setDraft(local.draft);
+      setSavedDraftBaseline(null);
       setSavedDrafts({ uid: id, items: saved });
       setInitialDraft(local.draft ?? undefined);
       setEditorKey((key) => key + 1);
@@ -444,6 +527,7 @@ export function MealJournal({
           accountGeneration.current++;
           setAuthEpoch((epoch) => epoch + 1);
           refreshGeneration.current++;
+          if (nextId !== current.current.userId) finishConfirm(false);
           if (!loading && user?.uid === current.current.userId) {
             setEmail(user.email);
             void refresh();
@@ -502,16 +586,19 @@ export function MealJournal({
       accountGeneration.current++;
       cacheEnabled.current = false;
       refreshGeneration.current++;
+      finishConfirm(false);
       clearVolatilePhoto();
       current.current = {
         userId: "guest",
         draft: null,
         records: [],
         syncedAt: null,
+        savedDraftBaseline: null,
       };
       setReady(false);
       setEmail(null);
       setDraft(null);
+      setSavedDraftBaseline(null);
       setSavedDrafts({ uid: "guest", items: [] });
       setInitialDraft(undefined);
       setRecords([]);
@@ -543,6 +630,10 @@ export function MealJournal({
       if (next === "new") {
         setInitialDraft(current.current.draft ?? undefined);
         setEditorKey((key) => key + 1);
+      } else if (isUntouchedSavedMeal(current.current.draft, current.current.savedDraftBaseline)) {
+        setDraft(null);
+        setSavedDraftBaseline(null);
+        setInitialDraft(undefined);
       }
       setTab(next);
     };
@@ -572,6 +663,7 @@ export function MealJournal({
     return () => {
       active = false;
       cancelStatusProbe();
+      finishConfirm(false);
       accountEpoch.current++;
       refreshEpoch.current++;
       refreshRequested.current = false;
@@ -586,7 +678,9 @@ export function MealJournal({
       window.removeEventListener("storage", signedOutElsewhere);
       document.removeEventListener("visibilitychange", foreground);
     };
-  }, [refresh, cancelStatusProbe]);
+  }, [refresh, cancelStatusProbe, finishConfirm]);
+
+  const activeUnsavedDraft = draft && !isUntouchedSavedMeal(draft, savedDraftBaseline) ? draft : null;
 
   useEffect(() => {
     if (!ready || !cacheEnabled.current) return;
@@ -599,9 +693,9 @@ export function MealJournal({
       );
   }, [ready, records, syncedAt, userId]);
   useEffect(() => {
-    if (!ready || !cacheEnabled.current || queuedDraft.current === draft) return;
-    queuedDraft.current = draft;
-    const state = { records, draft, syncedAt };
+    if (!ready || !cacheEnabled.current || queuedDraft.current === activeUnsavedDraft) return;
+    queuedDraft.current = activeUnsavedDraft;
+    const state = { records, draft: activeUnsavedDraft, syncedAt };
     writes.current = writes.current
       .catch(() => {})
       .then(async () => {
@@ -613,10 +707,14 @@ export function MealJournal({
       .catch(() =>
         setNotice("本機空間不足或儲存不可用，草稿未能保留。請先儲存到雲端。"),
       );
-  }, [ready, draft, userId, records, syncedAt]);
+  }, [ready, activeUnsavedDraft, userId, records, syncedAt]);
   useEffect(() => {
     const unload = (e: BeforeUnloadEvent) => {
-      if (current.current.draft && !allowUpdateReload.current) {
+      if (
+        current.current.draft &&
+        !isUntouchedSavedMeal(current.current.draft, current.current.savedDraftBaseline) &&
+        !allowUpdateReload.current
+      ) {
         e.preventDefault();
         e.returnValue = "";
       }
@@ -638,16 +736,22 @@ export function MealJournal({
 
   function go(next: string) {
     // State is updated here; hashchange is reserved for browser back/forward.
+    if (next !== "new" && isUntouchedSavedMeal(current.current.draft, current.current.savedDraftBaseline)) {
+      setDraft(null);
+      setSavedDraftBaseline(null);
+      setInitialDraft(undefined);
+    }
     window.history.pushState(null, "", `#${next}`);
     setTab(next);
     setAccount(false);
   }
-  function openDraft(next: MealDraft, isManual = false) {
+  function openDraft(next: MealDraft, isManual = false, savedBaseline: string | null = null) {
     photoGeneration.current++;
     preparedFile.current = null;
     setPreparing(false);
     setPhotoFailure(null);
     setDraft(next);
+    setSavedDraftBaseline(savedBaseline);
     setInitialDraft(next);
     setManual(isManual);
     setEditorKey((key) => key + 1);
@@ -655,15 +759,22 @@ export function MealJournal({
     go("new");
   }
   function start(isManual = false) {
-    if (draft) {
-      openDraft(draft, !draft.items.length && isManual);
+    if (activeUnsavedDraft) {
+      openDraft(activeUnsavedDraft, !activeUnsavedDraft.items.length && isManual);
       return;
     }
     openDraft(newDraft(), isManual);
   }
   async function recoverDraft(source: SavedDraftSummary) {
-    if (draft && !confirm("開啟另一份草稿？目前草稿會另外保留，可稍後恢復。")) return;
     const scope = operationScope();
+    if (activeUnsavedDraft) {
+      const confirmed = await askConfirm({
+        title: "開啟另一份草稿",
+        message: "開啟另一份草稿？目前草稿會另外保留，可稍後恢復。",
+        confirmLabel: "開啟草稿",
+      });
+      if (!confirmed || !scope.isCurrent()) return;
+    }
     try {
       await writes.current;
       if (!scope.isCurrent()) return;
@@ -840,6 +951,7 @@ export function MealJournal({
         return;
       }
       setDraft(null);
+      setSavedDraftBaseline(null);
       setInitialDraft(undefined);
       setNotice(proved
         ? ""
@@ -866,43 +978,70 @@ export function MealJournal({
     }
   }
   async function edit(record: MealRecord) {
-    if (
-      draft &&
-      draft.id !== record.id &&
-      !confirm("已有另一份草稿。放棄它並開啟這餐？")
-    )
-      return;
-    openDraft({ ...record, photoPath: null });
+    const scope = operationScope();
+    if (activeUnsavedDraft && activeUnsavedDraft.id !== record.id) {
+      const confirmed = await askConfirm({
+        title: "放棄目前草稿",
+        message: "已有另一份草稿。放棄它並開啟這餐？",
+        confirmLabel: "放棄並開啟",
+        destructive: true,
+      });
+      if (!confirmed || !scope.isCurrent()) return;
+    }
+    const opened: MealDraft = { ...record, photoPath: null };
+    openDraft(opened, false, record.version > 0 ? persistedMealFingerprint(opened) : null);
   }
   async function discard() {
-    if (!confirm("放棄這份草稿？已儲存的記錄不會改變。")) return;
     const scope = operationScope();
+    if (activeUnsavedDraft) {
+      const confirmed = await askConfirm({
+        title: "放棄草稿",
+        message: "放棄這份草稿？已儲存的記錄不會改變。",
+        confirmLabel: "確認放棄",
+        destructive: true,
+      });
+      if (!confirmed || !scope.isCurrent()) return;
+    }
     photoGeneration.current++;
     preparedFile.current = null;
     setDraft(null);
+    setSavedDraftBaseline(null);
     setInitialDraft(undefined);
     await writes.current;
     if (!scope.isCurrent()) return;
-    await localMeals.write(userId, { records, draft: null, syncedAt }, draftTabId());
+    await localMeals.write(
+      scope.id,
+      { records: current.current.records, draft: null, syncedAt: current.current.syncedAt },
+      draftTabId(),
+    );
     if (!scope.isCurrent()) return;
     go("today");
   }
-  async function remove(record: MealRecord, ask = true) {
-    if (ask && !confirm("刪除這餐？連線後會同步刪除。")) return;
+  async function remove(record: MealRecord) {
     const scope = operationScope();
     await repository.delete(record);
     if (!scope.isCurrent()) return;
     setNotice({ kind: "pending-sync", message: "刪除已保留於本機，連線時自動同步。" });
     void refresh();
     setRecords((value) => value.filter((r) => r.id !== record.id));
-    if (draft?.id === record.id) setDraft(null);
+    if (current.current.draft?.id === record.id) {
+      setDraft(null);
+      setSavedDraftBaseline(null);
+    }
   }
   async function deleting(record: MealRecord) {
     if (busyRef.current) return;
+    const scope = operationScope();
+    const confirmed = await askConfirm({
+      title: "刪除餐點",
+      message: "刪除這餐？連線後會同步刪除。",
+      confirmLabel: "確認刪除",
+      destructive: true,
+    });
+    if (!confirmed || busyRef.current || !scope.isCurrent()) return;
     busyRef.current = true;
     setBusy(true);
     refreshGeneration.current++;
-    const scope = operationScope();
     try {
       await remove(record);
     } catch (error) {
@@ -914,21 +1053,23 @@ export function MealJournal({
     }
   }
   async function clearAll() {
-    if (
-      busyRef.current ||
-      !confirm(
+    if (busyRef.current) return;
+    const scope = operationScope();
+    const confirmed = await askConfirm({
+      title: "清除全部記錄",
+      message:
         "刪除本機可見的全部餐點及此分頁草稿？連線後會自動同步刪除。其他裝置尚未同步的新增記錄不包含在內。",
-      )
-    )
-      return;
+      confirmLabel: "確認清除",
+      destructive: true,
+    });
+    if (!confirmed || busyRef.current || !scope.isCurrent()) return;
     busyRef.current = true;
     setBusy(true);
     refreshGeneration.current++;
-    const scope = operationScope();
     try {
       for (const record of await repository.list(scope.id)) {
         if (!scope.isCurrent()) return;
-        await remove(record, false);
+        await remove(record);
       }
       await writes.current;
       if (!scope.isCurrent()) return;
@@ -939,6 +1080,7 @@ export function MealJournal({
       }, draftTabId());
       if (!scope.isCurrent()) return;
       setDraft(null);
+      setSavedDraftBaseline(null);
       setRecords([]);
       setNotice({ kind: "pending-sync", message: "刪除已保留於本機，連線時自動同步。" });
       void refresh();
@@ -951,14 +1093,18 @@ export function MealJournal({
     }
   }
   async function logout() {
-    if (
-      busyRef.current ||
-      (draft &&
-        !confirm("登出會清除這個帳戶的本機草稿、照片及快取。仍要登出？"))
-    )
-      return;
+    if (busyRef.current) return;
     const scope = operationScope();
-    if ((await repository.state(userId)).jobs.length) {
+    if (activeUnsavedDraft) {
+      const confirmed = await askConfirm({
+        title: "確認登出",
+        message: "登出會清除這個帳戶的本機草稿、照片及快取。仍要登出？",
+        confirmLabel: "確認登出",
+        destructive: true,
+      });
+      if (!confirmed || busyRef.current || !scope.isCurrent()) return;
+    }
+    if ((await repository.state(scope.id)).jobs.length) {
       if (!scope.isCurrent()) return;
       setNotice({
         kind: "pending-logout",
@@ -966,27 +1112,28 @@ export function MealJournal({
       });
       return;
     }
-    if (!scope.isCurrent()) return;
+    if (busyRef.current || !scope.isCurrent()) return;
     busyRef.current = true;
     setBusy(true);
     cacheEnabled.current = false;
     refreshGeneration.current++;
     photoGeneration.current++;
     try {
-      await navigator.locks.request(`kcalcue-sync-${userId}`, () =>
-        navigator.locks.request(`kcalcue-account-${userId}`, async () => {
+      await navigator.locks.request(`kcalcue-sync-${scope.id}`, () =>
+        navigator.locks.request(`kcalcue-account-${scope.id}`, async () => {
           if (!scope.isCurrent()) throw new Error("account_changed");
-          if ((await repository.state(userId)).jobs.length)
+          if ((await repository.state(scope.id)).jobs.length)
             throw new Error("pending_sync");
           await writes.current;
           if (!scope.isCurrent()) throw new Error("account_changed");
-          await localMeals.clear(userId);
-          await clearSyncState(userId);
+          await localMeals.clear(scope.id);
+          await clearSyncState(scope.id);
           if (!scope.isCurrent()) throw new Error("account_changed");
           setDraft(null);
+          setSavedDraftBaseline(null);
           setRecords([]);
-          current.current = { ...current.current, draft: null, records: [] };
-          localStorage.setItem("kcalcue-logout", `${userId}:${Date.now()}`);
+          current.current = { ...current.current, draft: null, records: [], savedDraftBaseline: null };
+          localStorage.setItem("kcalcue-logout", `${scope.id}:${Date.now()}`);
           const auth = firebaseAuth();
           if (auth) await signOut(auth);
         }),
@@ -1005,13 +1152,20 @@ export function MealJournal({
     try {
       const next = (await repository.state(scope.id)).remote;
       if (!scope.isCurrent()) return;
-      const record = next.find((r) => r.id === draft?.id);
+      const record = next.find((r) => r.id === current.current.draft?.id);
       if (!record) {
         setNotice("這餐已被刪除。你可保留目前草稿，或放棄它。");
         return;
       }
-      if (confirm("載入最新記錄會取代目前的未儲存修改，是否繼續？"))
-        await edit(record);
+      const confirmed = await askConfirm({
+        title: "載入最新記錄",
+        message: "載入最新記錄會取代目前的未儲存修改，是否繼續？",
+        confirmLabel: "確認載入",
+        destructive: true,
+      });
+      if (!confirmed || !scope.isCurrent()) return;
+      const opened: MealDraft = { ...record, photoPath: null };
+      openDraft(opened, false, record.version > 0 ? persistedMealFingerprint(opened) : null);
     } catch (error) {
       if (scope.isCurrent()) setNotice(errorText(error));
     }
@@ -1022,9 +1176,25 @@ export function MealJournal({
     const scope = operationScope();
     if (job.record.userId !== scope.id) return;
     const last = [...pending].reverse().find((other) => other.record.id === job.record.id)!;
-    if (preserve
-      ? draft && !confirm("取代目前草稿並將這份修改保留為新餐點？")
-      : !confirm("放棄這餐尚未同步的修改／刪除，使用雲端版本？")) return;
+    if (preserve) {
+      if (activeUnsavedDraft) {
+        const confirmed = await askConfirm({
+          title: "取代目前草稿",
+          message: "取代目前草稿並將這份修改保留為新餐點？",
+          confirmLabel: "確認取代",
+          destructive: true,
+        });
+        if (!confirmed || busyRef.current || !scope.isCurrent()) return;
+      }
+    } else {
+      const confirmed = await askConfirm({
+        title: "放棄待同步修改",
+        message: "放棄這餐尚未同步的修改／刪除，使用雲端版本？",
+        confirmLabel: "確認放棄",
+        destructive: true,
+      });
+      if (!confirmed || busyRef.current || !scope.isCurrent()) return;
+    }
     busyRef.current = true;
     setBusy(true);
     refreshGeneration.current++;
@@ -1113,7 +1283,12 @@ export function MealJournal({
   );
 
   return (
-    <div className="journal-shell">
+    <>
+    <div
+      className="journal-shell"
+      inert={Boolean(confirmRequest)}
+      aria-hidden={confirmRequest ? true : undefined}
+    >
       <header className="journal-header">
         <a className="journal-brand" href="#today" aria-label="KcalCue 今日">
           <span>
@@ -1231,7 +1406,7 @@ export function MealJournal({
           await writes.current;
           if (!scope.isCurrent()) throw new Error("Account changed during update");
           const active = current.current;
-          if (active.draft) {
+          if (active.draft && !isUntouchedSavedMeal(active.draft, active.savedDraftBaseline)) {
             // Background cache writes report errors in the UI and settle the
             // queue. A PWA reload must confirm this draft is durable itself.
             await localMeals.write(active.userId, active, draftTabId());
@@ -1365,10 +1540,17 @@ export function MealJournal({
                     void discard();
                   }}
                   onNewMeal={() => {
-                    if (busyRef.current ||
-                        !confirm("放棄這份草稿並開啟另一餐？已儲存的記錄不會改變。"))
-                      return;
-                    openDraft(newDraft(), true);
+                    if (busyRef.current) return;
+                    const scope = operationScope();
+                    void askConfirm({
+                      title: "記另一餐",
+                      message: "放棄這份草稿並開啟另一餐？已儲存的記錄不會改變。",
+                      confirmLabel: "確認開啟",
+                      destructive: true,
+                    }).then((confirmed) => {
+                      if (!confirmed || busyRef.current || !scope.isCurrent()) return;
+                      openDraft(newDraft(), true);
+                    });
                   }}
                 />
               </fieldset>
@@ -1515,13 +1697,23 @@ export function MealJournal({
                     className="button button-secondary"
                     disabled={busy}
                     onClick={() => {
-                      if (confirm("還原到原始估算？目前修改會被取代。"))
+                      if (busyRef.current) return;
+                      const scope = operationScope();
+                      void askConfirm({
+                        title: "還原原始估算",
+                        message: "還原到原始估算？目前修改會被取代。",
+                        confirmLabel: "確認還原",
+                        destructive: true,
+                      }).then((confirmed) => {
+                        const latestDraft = current.current.draft;
+                        if (!confirmed || busyRef.current || !scope.isCurrent() || !latestDraft) return;
                         openDraft({
-                          ...draft,
-                          items: structuredClone(draft.originalItems),
+                          ...latestDraft,
+                          items: structuredClone(latestDraft.originalItems),
                           calorieCorrection: null,
                           calorieInput: undefined,
-                        });
+                        }, false, current.current.savedDraftBaseline);
+                      });
                     }}
                   >
                     還原原始估算
@@ -1576,7 +1768,7 @@ export function MealJournal({
             </div>
           </section>
           {tab === "history" && entryActions}
-          {draft && (
+          {activeUnsavedDraft && (
             <section className="journal-card draft-banner">
               <span className="draft-banner-icon" aria-hidden="true"><JournalIcon /></span>
               <div>
@@ -1585,7 +1777,7 @@ export function MealJournal({
               </div>
               <button
                 className="button button-secondary"
-                onClick={() => openDraft(draft)}
+                onClick={() => openDraft(activeUnsavedDraft)}
               >
                 繼續草稿
               </button>
@@ -1823,5 +2015,7 @@ export function MealJournal({
         ))}
       </nav>
     </div>
+    <ConfirmDialog request={confirmRequest} onResolve={finishConfirm} />
+    </>
   );
 }
