@@ -870,7 +870,8 @@ export function blocksUsdaLiveLookup(
   if (food.uncertaintyReasons?.includes(PHOTO_MILK_OTHER_REASON)) return true;
   return contradictoryDairyMilkLabel(food, context)
     || photoGenericMilkNeedsConfirmation(food, context)
-    || chocolateMilkName(food);
+    || chocolateMilkName(food)
+    || isUnsweetenedLemonTea(food);
 }
 
 const LOW_FAT_MILK_LABELS = [
@@ -1094,6 +1095,8 @@ const LEMON_TEA_NAME_RE = /檸茶|柠茶|檸檬茶|柠檬茶|(?:^|\s)lemon\s+tea
 const WHITE_FISH_NAME_RE =
   /魚|鱼|(?:^|\s)(?:fish|sea\s+bass|cod|tilapia|pollock|halibut|haddock)(?:$|\s)/;
 const NON_WHITE_FISH_RE = /三文魚|三文鱼|吞拿魚|吞拿鱼|(?:^|\s)(?:salmon|tuna)(?:$|\s)/;
+const PROCESSED_FISH_PRODUCT_RE =
+  /魚蛋|鱼蛋|魚丸|鱼丸|魚餅|鱼饼|魚皮|鱼皮|魚片頭|鱼片头|魚餃|鱼饺|魚豆腐|鱼豆腐|魚鬆|鱼松|魚腐|鱼腐|魚肉燒賣|鱼肉烧卖|魚腸|鱼肠|魚糕|鱼糕|魚露|鱼露|魚膠|鱼胶|魚翅|鱼翅|魚子|鱼子|魚籽|鱼籽|魚滑|鱼滑|(?:^|\s)(?:fish\s+(?:balls?|cakes?|skins?|paste|tofu|dumplings?|sausages?|floss|sauce|roe|maw|sticks?|fingers?|crackers?|chips?|siu\s+mai)|fishballs?|fishcakes?|surimi|kamaboko)(?:$|\s)/;
 const DEEP_FRIED_OR_BATTERED_CUE_RE =
   /油炸|炸|脆漿|脆浆|裹粉|吉列|天婦羅|天妇罗|(?:^|\s)(?:deep\s+fried|battered|breaded|katsu|tempura)(?:$|\s)|(?:^|\s)fried\s+(?:[a-z]+\s+)?fish(?:$|\s)/;
 const NON_CLEAR_BROTH_CUE_RE =
@@ -1157,7 +1160,14 @@ export function isUnsweetenedLemonTea(food: ContradictionFood): boolean {
 
 export function hasFriedBatteredFishEvidence(food: ContradictionFood): boolean {
   const names = normalizeFoodName(`${food.displayName} ${food.normalizedName}`);
-  if (!WHITE_FISH_NAME_RE.test(names) || NON_WHITE_FISH_RE.test(names)) return false;
+  if (
+    !WHITE_FISH_NAME_RE.test(names) ||
+    NON_WHITE_FISH_RE.test(names) ||
+    PROCESSED_FISH_PRODUCT_RE.test(names) ||
+    isDishComponentOnly(food)
+  ) {
+    return false;
+  }
   const evidence = normalizeFoodName(
     [food.displayName, food.normalizedName, food.preparationMethod ?? "", food.notes ?? ""].join(" "),
   ).replace(/(?:^|\s)(?:pan|stir)\s+fried(?=$|\s)/g, " ");
@@ -1172,6 +1182,9 @@ function collectIdentityHits(text: string, food: FoodEstimate): IdentityHit[] {
   const blockSoupNoodles = hasStirFryNoodleContradiction(food);
   const blockSweetLemonTea = isUnsweetenedLemonTea(food);
   const friedFish = hasFriedBatteredFishEvidence(food);
+  const processedFish = PROCESSED_FISH_PRODUCT_RE.test(
+    normalizeFoodName(`${food.displayName} ${food.normalizedName}`),
+  );
   const blockClearSoup = NON_CLEAR_BROTH_CUE_RE.test(text);
 
   for (const rule of IDENTITY_RULES) {
@@ -1181,7 +1194,7 @@ function collectIdentityHits(text: string, food: FoodEstimate): IdentityHit[] {
     if (rule.canonicalName === "cucumber" && blockCucumber) continue;
     if (rule.canonicalName === "iced-lemon-tea" && blockSweetLemonTea) continue;
     if (rule.canonicalName === "fried-fish" && !friedFish) continue;
-    if (rule.canonicalName === "white-fish" && friedFish) continue;
+    if (rule.canonicalName === "white-fish" && (friedFish || processedFish)) continue;
     if (rule.canonicalName === "clear-soup" && blockClearSoup) continue;
     const matchedKey = findLongestMatch(text, rule.keys, {
       singleCjkKeyMustBeStandalone: true,
