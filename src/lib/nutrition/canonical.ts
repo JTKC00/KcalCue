@@ -162,6 +162,30 @@ const IDENTITY_RULES: TermRule[] = [
   { keys: ["pork chop", "pork", "豬扒", "豬肉"], canonicalName: "pork", category: "pork", kind: "generic_ingredient" },
   { keys: ["salmon", "三文魚"], canonicalName: "salmon", category: "seafood", kind: "specific_food" },
   { keys: ["cooked shrimp", "shrimp", "prawns", "prawn", "蝦仁", "虾仁", "鮮蝦", "大蝦", "蝦"], canonicalName: "shrimp", category: "seafood", kind: "specific_food" },
+  {
+    keys: [
+      "deep-fried fish",
+      "deep fried fish",
+      "battered fish",
+      "breaded fish",
+      "fried fish fillet",
+      "fried fish",
+      "crispy fried fish",
+      "fish katsu",
+      "tempura fish",
+      "裹粉炸魚",
+      "脆炸魚柳",
+      "吉列魚柳",
+      "炸魚柳",
+      "炸鱼柳",
+      "炸魚塊",
+      "炸魚",
+      "炸鱼",
+    ],
+    canonicalName: "fried-fish",
+    category: "seafood",
+    kind: "specific_food",
+  },
   { keys: ["steamed fish", "white fish", "sea bass", "fish fillet", "蒸魚", "蒸鱼", "清蒸魚", "魚柳", "白肉魚"], canonicalName: "white-fish", category: "seafood", kind: "specific_food" },
   { keys: ["brown rice", "red rice", "紅米飯", "紅米", "糙米", "紫米"], canonicalName: "rice", category: "rice", kind: "specific_food", qualifiers: ["wholegrain"] },
   { keys: ["white rice", "cooked white rice", "白米飯", "白飯", "米飯"], canonicalName: "rice", category: "rice", kind: "specific_food" },
@@ -602,6 +626,7 @@ function familyOf(canonicalName: string): IdentityFamily {
     case "salmon":
     case "shrimp":
     case "white-fish":
+    case "fried-fish":
     case "egg":
     case "tofu":
       return "protein";
@@ -1043,17 +1068,134 @@ export function contradictoryDairyMilkLabel(
   return plantMilkProductName(text);
 }
 
+const DISH_COMPONENT_SUFFIX_RE =
+  /(?:皮|醬|酱|汁|醋|油|湯底|汤底|醬料|酱料|餅底|饼底|調味粉|调味粉|湯粉|汤粉|味粉|咖喱粉|咖哩粉)$|(?:^|\s)(?:sauce|oil|vinegar|wrapper|wrappers|crust|broth|base|soup\s+base|skin|pastry|shell|stock|seasoning|powder|glaze|dip)$/;
+const STIR_FRY_NAME_CUE_RE =
+  /炒|(?:^|\s)(?:fried|stir\s+fried|stirfried|pan\s+fried|dry\s+fried|chow|yakisoba)(?:$|\s)/;
+const STIR_FRY_PREP_CUE_RE =
+  /炒|(?:^|\s)(?:stir\s+fried|stirfried|dry\s+fried)(?:$|\s)/;
+const SOUP_NOODLE_DISH_IDS = new Set([
+  "cart-noodles",
+  "beef-brisket-noodles",
+  "luncheon-meat-egg-noodles",
+  "plain-noodle-soup",
+  "beef-noodle-soup",
+  "rice-vermicelli",
+  "ho-fun",
+  "shrimp-wonton-noodle-soup",
+  "wonton-noodle-soup",
+  "hong-kong-noodle-soup",
+  "ramen",
+  "macaroni-soup-breakfast",
+]);
+const SOUP_NOODLE_CANONICALS = new Set(["ramen", "noodle-soup"]);
+const CONTAINER_BLOCKER_DISH_IDS = new Set(["cha-chaan-teng-set", "hotpot"]);
+const LEMON_TEA_NAME_RE = /檸茶|柠茶|檸檬茶|柠檬茶|(?:^|\s)lemon\s+tea(?:$|\s)/;
+const WHITE_FISH_NAME_RE =
+  /魚|鱼|(?:^|\s)(?:fish|sea\s+bass|cod|tilapia|pollock|halibut|haddock)(?:$|\s)/;
+const NON_WHITE_FISH_RE = /三文魚|三文鱼|吞拿魚|吞拿鱼|(?:^|\s)(?:salmon|tuna)(?:$|\s)/;
+const DEEP_FRIED_OR_BATTERED_CUE_RE =
+  /油炸|炸|脆漿|脆浆|裹粉|吉列|天婦羅|天妇罗|(?:^|\s)(?:deep\s+fried|battered|breaded|katsu|tempura)(?:$|\s)|(?:^|\s)fried\s+(?:[a-z]+\s+)?fish(?:$|\s)/;
+const NON_CLEAR_BROTH_CUE_RE =
+  /拉麵|拉面|豚骨|火鍋|火锅|麻辣|沙嗲|忌廉|濃湯|浓汤|羅宋|罗宋|(?:^|\s)(?:ramen|tonkotsu|hotpot|hot\s+pot|cream|creamy|chowder|bisque|borscht)(?:$|\s)/;
+const RICE_PLATE_CONTRADICTION_RE =
+  /咖喱|咖哩|炒飯|炒饭|焗|燴|烩|煲仔|意大利飯|意大利饭|(?:^|\s)(?:curry|fried\s+rice|baked\s+rice|braised\s+rice|claypot|clay\s+pot|risotto)(?:$|\s)/;
+
+type ContradictionFood = {
+  displayName: string;
+  normalizedName: string;
+  preparationMethod?: string;
+  notes?: string;
+  visibleIngredients?: readonly string[];
+  uncertaintyReasons?: readonly string[];
+};
+
+function hasDishComponentSuffix(name: string): boolean {
+  const normalized = normalizeFoodName(name);
+  if (!normalized) return false;
+  if (
+    /(?:^|\s)(?:with|in)\s+[a-z0-9\s]+$/.test(normalized) &&
+    /(?:^|\s)(?:sauce|broth|stock|gravy|oil|glaze)$/.test(normalized)
+  ) {
+    return false;
+  }
+  return DISH_COMPONENT_SUFFIX_RE.test(normalized);
+}
+
+function isDishComponentOnly(food: Pick<ContradictionFood, "displayName" | "normalizedName">): boolean {
+  return hasDishComponentSuffix(food.displayName) || hasDishComponentSuffix(food.normalizedName);
+}
+
+function hasStirFryNoodleContradiction(
+  food: Pick<ContradictionFood, "displayName" | "normalizedName" | "preparationMethod">,
+): boolean {
+  const names = normalizeFoodName(`${food.displayName} ${food.normalizedName}`);
+  if (STIR_FRY_NAME_CUE_RE.test(names)) return true;
+  const prep = normalizeFoodName(food.preparationMethod ?? "");
+  return Boolean(prep && STIR_FRY_PREP_CUE_RE.test(prep));
+}
+
+export function isUnsweetenedLemonTea(food: ContradictionFood): boolean {
+  const names = normalizeFoodName(`${food.displayName} ${food.normalizedName}`);
+  if (!LEMON_TEA_NAME_RE.test(names)) return false;
+  const rule = NEGATIVE_MATCH_RULES.find((item) => item.id === "unsweetened-lemon-tea-not-sweetened");
+  if (!rule) return false;
+  const evidence = normalizeFoodName(
+    dropUnknownMilkOrPlantClauses(
+      [
+        food.displayName,
+        food.normalizedName,
+        food.preparationMethod ?? "",
+        food.notes ?? "",
+        ...(food.visibleIngredients ?? []),
+        ...(food.uncertaintyReasons ?? []),
+      ].join(" "),
+    ),
+  );
+  return ruleMatchesName(rule, evidence);
+}
+
+export function hasFriedBatteredFishEvidence(food: ContradictionFood): boolean {
+  const names = normalizeFoodName(`${food.displayName} ${food.normalizedName}`);
+  if (!WHITE_FISH_NAME_RE.test(names) || NON_WHITE_FISH_RE.test(names)) return false;
+  const evidence = normalizeFoodName(
+    [food.displayName, food.normalizedName, food.preparationMethod ?? "", food.notes ?? ""].join(" "),
+  ).replace(/(?:^|\s)(?:pan|stir)\s+fried(?=$|\s)/g, " ");
+  return DEEP_FRIED_OR_BATTERED_CUE_RE.test(evidence);
+}
+
 function collectIdentityHits(text: string, food: FoodEstimate): IdentityHit[] {
   const hits: IdentityHit[] = [];
   const blockDairyMilk = blocksDairyMilkIdentity(food) || lowFatMilkEvidence(food) || chocolateMilkName(food);
   const blockCucumber = /(?:^|\s)sea\s+cucumbers?(?:$|\s)|海參|海参/.test(text);
+  const blockWholeDishes = isDishComponentOnly(food);
+  const blockSoupNoodles = hasStirFryNoodleContradiction(food);
+  const blockSweetLemonTea = isUnsweetenedLemonTea(food);
+  const friedFish = hasFriedBatteredFishEvidence(food);
+  const blockClearSoup = NON_CLEAR_BROTH_CUE_RE.test(text);
+
   for (const rule of IDENTITY_RULES) {
+    if (blockWholeDishes && (rule.kind === "named_dish" || rule.kind === "dish_class")) continue;
+    if (blockSoupNoodles && SOUP_NOODLE_CANONICALS.has(rule.canonicalName)) continue;
     if (rule.canonicalName === "milk" && blockDairyMilk) continue;
     if (rule.canonicalName === "cucumber" && blockCucumber) continue;
+    if (rule.canonicalName === "iced-lemon-tea" && blockSweetLemonTea) continue;
+    if (rule.canonicalName === "fried-fish" && !friedFish) continue;
+    if (rule.canonicalName === "white-fish" && friedFish) continue;
+    if (rule.canonicalName === "clear-soup" && blockClearSoup) continue;
     const matchedKey = findLongestMatch(text, rule.keys, {
       singleCjkKeyMustBeStandalone: true,
     });
     if (matchedKey) hits.push({ ...rule, matchedKey });
+  }
+  if (friedFish && !hits.some((hit) => hit.canonicalName === "fried-fish")) {
+    hits.push({
+      keys: [],
+      matchedKey: "fried fish",
+      canonicalName: "fried-fish",
+      category: "seafood",
+      kind: "specific_food",
+    });
   }
   return hits;
 }
@@ -1199,17 +1341,74 @@ function isChineseField(name: string): boolean {
   return /[\u4e00-\u9fff]/.test(name);
 }
 
+function curatedDishContradicted(
+  identity: DishIdentity,
+  food: ContradictionFood,
+): boolean {
+  if (isDishComponentOnly(food)) return true;
+  if (SOUP_NOODLE_DISH_IDS.has(identity.id) && hasStirFryNoodleContradiction(food)) return true;
+  if (identity.id === "creamy-macaroni-salad" && isHotCreamMacaroni(food as FoodEstimate)) return true;
+  const names = normalizeFoodName(`${food.displayName} ${food.normalizedName}`);
+  if (
+    (identity.familyId === "rice-plate" || identity.familyId === "siu-mei-rice") &&
+    RICE_PLATE_CONTRADICTION_RE.test(names)
+  ) {
+    return true;
+  }
+  if (
+    identity.familyId === "salad" &&
+    SALAD_WORD.test(names) &&
+    matchingSaladDressingRule(names)?.routeCanonicalName === null
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function findContainerDishBlocker(
+  food: Pick<ContradictionFood, "displayName" | "normalizedName">,
+): DishIdentity | null {
+  if (isDishComponentOnly(food)) return null;
+  for (const field of [food.displayName, food.normalizedName]) {
+    const normalized = normalizeFoodName(field);
+    if (!normalized) continue;
+    for (const identity of DISH_IDENTITIES) {
+      if (!CONTAINER_BLOCKER_DISH_IDS.has(identity.id)) continue;
+      const matched = identity.aliases.some((alias) => {
+        const needle = normalizeFoodName(alias.text);
+        if (!needle) return false;
+        return textContainsKey(normalized, needle, { singleCjkKeyMustBeStandalone: true });
+      });
+      if (matched) return identity;
+    }
+  }
+  return null;
+}
+
 /**
- * Exact alias match. A Chinese name is decided before the English name.
- * English cannot replace a more specific Chinese identity. Unrelated
- * Chinese and English identities are ambiguous instead of a guess.
+ * Exact alias match. Contradictory evidence (component suffixes, container
+ * blockers, stir-fry vs soup-noodle, multi-dish names) always takes precedence
+ * over a simplified exact alias on the other field.
  */
-export function resolveCuratedDishIdentity(food: {
-  displayName: string;
-  normalizedName: string;
-}): CuratedDishResolution {
-  const displayHits = uniqueIdentities(exactDishHits(food.displayName));
-  const normalizedHits = uniqueIdentities(exactDishHits(food.normalizedName));
+export function resolveCuratedDishIdentity(food: ContradictionFood): CuratedDishResolution {
+  if (isDishComponentOnly(food)) return { status: "none" };
+
+  const blocker = findContainerDishBlocker(food);
+  if (blocker) return { status: "matched", identity: blocker };
+
+  const displayContained = containedDishHits(food.displayName, food);
+  const normalizedContained = containedDishHits(food.normalizedName, food);
+  if (
+    uniqueIdentities(displayContained.map((hit) => hit.identity)).length > 1 ||
+    uniqueIdentities(normalizedContained.map((hit) => hit.identity)).length > 1
+  ) {
+    return { status: "ambiguous" };
+  }
+
+  const displayHits = uniqueIdentities(exactDishHits(food.displayName))
+    .filter((identity) => !curatedDishContradicted(identity, food));
+  const normalizedHits = uniqueIdentities(exactDishHits(food.normalizedName))
+    .filter((identity) => !curatedDishContradicted(identity, food));
   const sameName = normalizeFoodName(food.displayName) === normalizeFoodName(food.normalizedName);
 
   if (sameName) {
@@ -1247,41 +1446,40 @@ export function resolveCuratedDishIdentity(food: {
     }
     return { status: "ambiguous" };
   }
-  if (english.length === 1 && english[0]) return { status: "matched", identity: english[0] };
+  if (english.length === 1 && english[0]) {
+    const chineseContained = uniqueIdentities([
+      ...(isChineseField(food.displayName) ? displayContained.map((hit) => hit.identity) : []),
+      ...(isChineseField(food.normalizedName) ? normalizedContained.map((hit) => hit.identity) : []),
+    ]);
+    if (chineseContained.length === 1 && chineseContained[0] && chineseContained[0].id !== english[0].id) {
+      if (
+        chineseIsMoreSpecific(chineseContained[0], english[0]) ||
+        english[0].familyId === chineseContained[0].id
+      ) {
+        return { status: "matched", identity: chineseContained[0] };
+      }
+      return { status: "ambiguous" };
+    }
+    return { status: "matched", identity: english[0] };
+  }
   if (english.length > 1) return { status: "ambiguous" };
   return { status: "none" };
 }
-
-const DISH_COMPONENT_SUFFIX_RE =
-  /(?:皮|醬|酱|汁|醋|油|粉|湯底|汤底)$|(?:^|\s)(?:sauce|oil|vinegar|wrapper|crust|broth|base|skin)$/;
-const STIR_FRY_CUE_RE = /炒|(?:^|\s)(?:fried|stir\s+fried|stirfried|chow|dry\s+fried)(?:$|\s)/;
-const SOUP_NOODLE_DISH_IDS = new Set([
-  "cart-noodles",
-  "beef-brisket-noodles",
-  "luncheon-meat-egg-noodles",
-  "plain-noodle-soup",
-  "beef-noodle-soup",
-  "rice-vermicelli",
-  "ho-fun",
-  "shrimp-wonton-noodle-soup",
-  "wonton-noodle-soup",
-  "hong-kong-noodle-soup",
-  "ramen",
-  "macaroni-soup-breakfast",
-]);
 
 interface ContainedDishMatch {
   identity: DishIdentity;
   matchedAlias: string;
 }
 
-function containedDishHits(name: string): ContainedDishMatch[] {
+function containedDishHits(
+  name: string,
+  food: ContradictionFood,
+): ContainedDishMatch[] {
   const normalized = normalizeFoodName(name);
-  if (!normalized || DISH_COMPONENT_SUFFIX_RE.test(normalized)) return [];
-  const hasStirFry = STIR_FRY_CUE_RE.test(normalized);
+  if (!normalized || isDishComponentOnly(food)) return [];
   const raw: ContainedDishMatch[] = [];
   for (const identity of DISH_IDENTITIES) {
-    if (hasStirFry && SOUP_NOODLE_DISH_IDS.has(identity.id)) continue;
+    if (curatedDishContradicted(identity, food)) continue;
     let bestAlias: string | null = null;
     for (const alias of identity.aliases) {
       const needle = normalizeFoodName(alias.text);
@@ -1309,21 +1507,16 @@ function containedDishHits(name: string): ContainedDishMatch[] {
  * Modifier-tolerant curated dish lookup (e.g. 洋蔥豬扒飯, 蟹籽燒賣, 芝士漢堡).
  * Runs only after exact dish identity and explicit negative/named-dish rules.
  */
-function resolveContainedCuratedDishIdentity(food: {
-  displayName: string;
-  normalizedName: string;
-}): CuratedDishResolution {
-  const displayHits = containedDishHits(food.displayName);
-  const normalizedHits = containedDishHits(food.normalizedName);
+function resolveContainedCuratedDishIdentity(food: ContradictionFood): CuratedDishResolution {
+  if (isDishComponentOnly(food)) return { status: "none" };
+
+  const blocker = findContainerDishBlocker(food);
+  if (blocker) return { status: "matched", identity: blocker };
+
+  const displayHits = containedDishHits(food.displayName, food);
+  const normalizedHits = containedDishHits(food.normalizedName, food);
   const all = [...displayHits, ...normalizedHits];
   if (all.length === 0) return { status: "none" };
-
-  // Unprofiled container dishes (hotpot, cha-chaan-teng-set) stay uncalculated
-  // even when a side dish is named in parentheses.
-  const blocker = all.find(
-    (hit) => hit.identity.id === "cha-chaan-teng-set" || hit.identity.id === "hotpot",
-  );
-  if (blocker) return { status: "matched", identity: blocker.identity };
 
   const chinese = uniqueIdentities([
     ...(isChineseField(food.displayName) ? displayHits.map((hit) => hit.identity) : []),
@@ -1398,10 +1591,7 @@ export function canonicalizeFood(food: FoodEstimate): CanonicalFoodIdentity {
       qualifiers: ["composite", "ambiguous"],
     };
   }
-  if (
-    curated.status === "matched" &&
-    !(curated.identity.id === "creamy-macaroni-salad" && isHotCreamMacaroni(food))
-  ) {
+  if (curated.status === "matched") {
     return identityFromDish(curated.identity, preparation);
   }
 
@@ -1456,7 +1646,9 @@ export function canonicalizeFood(food: FoodEstimate): CanonicalFoodIdentity {
   const hasCurry = identityHits.some((rule) =>
     ["curry", "curry-rice"].includes(rule.canonicalName),
   );
-  const hasRice = identityHits.some((rule) => rule.canonicalName === "rice");
+  const hasRice =
+    identityHits.some((rule) => rule.canonicalName === "rice") ||
+    /飯|饭|(?:^|\s)rice(?:$|\s)/.test(text);
   const hasCurryRiceDish =
     identityHits.some((rule) => rule.canonicalName === "curry-rice") ||
     (hasCurry && hasRice);
@@ -1601,7 +1793,11 @@ export function profileBlockedByNegativeRule(
     }
     const described = rule.id === "plant-milk-not-whole-milk"
       ? blocksDairyMilkIdentity(food) || lowFatMilkEvidence(food)
-      : ruleMatchesName(rule, name);
+      : rule.id === "unsweetened-lemon-tea-not-sweetened"
+        ? isUnsweetenedLemonTea(food)
+        : rule.id === "fried-fish-not-steamed-fish"
+          ? hasFriedBatteredFishEvidence(food)
+          : ruleMatchesName(rule, name);
     if (!described) continue;
     if (
       rule.blockProfileIds.includes(profile.id) ||
