@@ -58,7 +58,7 @@ function errorText(error: unknown) {
 }
 type JournalNotice =
   | string
-  | { kind: "pending-sync" | "blocked-save"; message: string };
+  | { kind: "pending-sync" | "blocked-save" | "pending-logout"; message: string };
 function commandFingerprint(draft: MealDraft) {
   const next = { ...draft, photoPath: null, photo: undefined, calorieInput: undefined };
   return JSON.stringify({
@@ -221,10 +221,21 @@ export function MealJournal({
   const retryRequested = useRef(false);
   const accountGeneration = useRef(0);
   const pendingRef = useRef(0);
+  const syncErrorRef = useRef(false);
   const lastAttempt = useRef(0);
+  const statusProbeGeneration = useRef(0);
+  const statusProbeController = useRef<AbortController | null>(null);
+  const cancelStatusProbe = useCallback(() => {
+    statusProbeGeneration.current++;
+    statusProbeController.current?.abort();
+    statusProbeController.current = null;
+  }, []);
   useEffect(() => {
     pendingRef.current = pending.filter((job) => !job.error).length;
   }, [pending]);
+  useEffect(() => {
+    syncErrorRef.current = Boolean(syncNotice);
+  }, [syncNotice]);
   const current = useRef({ userId, draft, records, syncedAt });
   useEffect(() => {
     current.current = { userId, draft, records, syncedAt };
@@ -243,14 +254,14 @@ export function MealJournal({
 
   const refresh = useCallback(async function refreshMeals(retry = false) {
     const id = current.current.userId;
-    const generation = ++refreshGeneration.current;
-    const accountVersion = accountGeneration.current;
     if (id === "guest") return;
     retryRequested.current ||= retry;
     if (syncingRef.current || busyRef.current) {
       refreshRequested.current = true;
       return;
     }
+    const generation = ++refreshGeneration.current;
+    const accountVersion = accountGeneration.current;
     refreshRequested.current = false;
     const retryPending = retryRequested.current;
     retryRequested.current = false;
@@ -265,7 +276,8 @@ export function MealJournal({
     try {
       if (navigator.onLine) {
         await repository.sync(id, retryPending);
-        if (isCurrent()) {
+        if (isCurrent() && navigator.onLine) {
+          cancelStatusProbe();
           setOnline(true);
           setSyncNotice("");
         }
@@ -273,7 +285,10 @@ export function MealJournal({
     } catch (error) {
       if (isCurrent()) {
         setSyncNotice(errorText(error));
-        if (error instanceof TypeError) setOnline(false);
+        if (error instanceof TypeError) {
+          cancelStatusProbe();
+          setOnline(false);
+        }
       }
     } finally {
       try {
@@ -311,6 +326,9 @@ export function MealJournal({
                 ? ""
                 : pendingSyncNotice(state.jobs.length);
             }
+            if (value.kind === "pending-logout") {
+              return state.jobs.length === 0 ? "" : value;
+            }
             return state.jobs.length === 0 ? "" : pendingSyncNotice(state.jobs.length);
           });
           const saved = await localMeals.listDrafts(id).catch(() => null);
@@ -319,11 +337,12 @@ export function MealJournal({
       } catch {
         if (isCurrent()) setSyncNotice("本機儲存不可用，請勿關閉頁面。");
       }
+      lastAttempt.current = Date.now();
       syncingRef.current = false;
       setSyncing(false);
       if (refreshRequested.current && !busyRef.current) void refreshMeals();
     }
-  }, []);
+  }, [cancelStatusProbe]);
 
   useEffect(() => {
     let active = true;
@@ -440,17 +459,29 @@ export function MealJournal({
     }
     const connection = () => {
       lastAttempt.current = Date.now();
+      cancelStatusProbe();
       setOnline(navigator.onLine);
       if (navigator.onLine) {
+        const probeId = statusProbeGeneration.current;
+        const controller = new AbortController();
+        statusProbeController.current = controller;
+        const timeout = setTimeout(() => controller.abort(), 5_000);
         void fetch("/api/status", {
           cache: "no-store",
-          signal: AbortSignal.timeout(5000),
+          signal: controller.signal,
         })
           .then((response) => {
-            if (active) setOnline(response.ok);
+            if (active && statusProbeGeneration.current === probeId)
+              setOnline(response.ok);
           })
           .catch(() => {
-            if (active) setOnline(false);
+            if (active && statusProbeGeneration.current === probeId)
+              setOnline(false);
+          })
+          .finally(() => {
+            clearTimeout(timeout);
+            if (statusProbeController.current === controller)
+              statusProbeController.current = null;
           });
         void refresh();
       }
@@ -522,8 +553,10 @@ export function MealJournal({
       if (document.visibilityState === "visible") setToday(localDate());
       if (
         document.visibilityState === "visible" &&
+        !syncingRef.current &&
+        !busyRef.current &&
         Date.now() - lastAttempt.current >=
-          (pendingRef.current ? 5_000 : 30_000)
+          (pendingRef.current || syncErrorRef.current ? 5_000 : 30_000)
       )
         connection();
     }, 1_000);
@@ -538,6 +571,7 @@ export function MealJournal({
     window.addEventListener("storage", signedOutElsewhere);
     return () => {
       active = false;
+      cancelStatusProbe();
       accountEpoch.current++;
       refreshEpoch.current++;
       refreshRequested.current = false;
@@ -552,7 +586,7 @@ export function MealJournal({
       window.removeEventListener("storage", signedOutElsewhere);
       document.removeEventListener("visibilitychange", foreground);
     };
-  }, [refresh]);
+  }, [refresh, cancelStatusProbe]);
 
   useEffect(() => {
     if (!ready || !cacheEnabled.current) return;
@@ -766,10 +800,18 @@ export function MealJournal({
       if (navigator.onLine) {
         try {
           await repository.sync(id);
+          if (scope.isCurrent() && navigator.onLine) {
+            cancelStatusProbe();
+            setOnline(true);
+            setSyncNotice("");
+          }
         } catch (error) {
           if (scope.isCurrent()) {
             setSyncNotice(errorText(error));
-            if (error instanceof TypeError) setOnline(false);
+            if (error instanceof TypeError) {
+              cancelStatusProbe();
+              setOnline(false);
+            }
           }
         }
       }
@@ -918,7 +960,10 @@ export function MealJournal({
     const scope = operationScope();
     if ((await repository.state(userId)).jobs.length) {
       if (!scope.isCurrent()) return;
-      setNotice("仍有待同步或衝突的修改。請先連線完成同步或處理衝突，再登出。");
+      setNotice({
+        kind: "pending-logout",
+        message: "仍有待同步或衝突的修改。請先連線完成同步或處理衝突，再登出。",
+      });
       return;
     }
     if (!scope.isCurrent()) return;
