@@ -509,9 +509,9 @@ test("a stale tab cannot replace the latest draft and its fork stays recoverable
   await expect(recovered.getByRole("region", { name: "其他未儲存草稿" })).toContainText("白飯");
   await recovered.getByRole("button", { name: "AI 相片辨識", exact: true }).click();
   await expect(recovered.getByRole("combobox", { name: "食物名稱", exact: true })).toHaveValue("香蕉");
-  recovered.once("dialog", (dialog) => dialog.accept());
   await recovered.getByRole("region", { name: "其他未儲存草稿" })
     .getByRole("button", { name: "恢復草稿" }).first().click();
+  await recovered.getByRole("alertdialog").getByRole("button", { name: "開啟草稿", exact: true }).click();
   await expect(recovered.getByRole("combobox", { name: "食物名稱", exact: true })).toHaveValue("白飯");
   const afterRecovery = await context.newPage();
   await afterRecovery.goto("/");
@@ -590,8 +590,8 @@ test("whole-meal user calories survive reload without inventing nutrition, and c
   await page.reload();
   await expect(total).toHaveText("未知");
   await expect(page.locator(".meal-calories")).toHaveText("卡路里未知");
-  page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "刪除", exact: true }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "確認刪除", exact: true }).click();
   await expect.poll(() => backend.records.size).toBe(0);
   await expect(page.getByRole("heading", { name: "今日未有記錄", exact: true })).toBeVisible();
   await expect(todaySummary).toContainText("今日餐數0餐");
@@ -723,13 +723,13 @@ test("another meal from History starts a fresh draft without changing the saved 
   await page.getByRole("button", { name: "歷史", exact: true }).click();
   await page.getByRole("button", { name: "查看／修正", exact: true }).click();
   await expect(page.getByRole("heading", { name: "修正餐點", exact: true })).toBeVisible();
-  page.once("dialog", (dialog) => dialog.dismiss());
   await page.getByRole("button", { name: "記另一餐", exact: true }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "取消", exact: true }).click();
   await expect(page.getByRole("heading", { name: "修正餐點", exact: true })).toBeVisible();
   expect(backend.records.size).toBe(1);
 
-  page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "記另一餐", exact: true }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "確認開啟", exact: true }).click();
   await expect(page.getByRole("heading", { name: "新餐點草稿", exact: true })).toBeVisible();
   await page.getByRole("combobox", { name: "食物名稱", exact: true }).fill("香蕉");
   await page.getByRole("button", { name: "儲存餐點", exact: true }).click();
@@ -871,8 +871,8 @@ test("offline creation, edit and deletion survive reload and synchronize on reco
     .toBe(2);
   await expect(page.getByText(/項修改待同步/)).not.toBeVisible();
   await backend.setOffline(context, true);
-  page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "刪除", exact: true }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "確認刪除", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "今日未有記錄", exact: true }),
   ).toBeVisible();
@@ -956,8 +956,8 @@ test("a stale offline delete cannot erase another device's newer meal", async ({
   await second.reload();
   await first.evaluate(async () => { await navigator.serviceWorker.ready; });
   await backend.setOffline(contexts[0], true);
-  first.once("dialog", (dialog) => dialog.accept());
   await first.getByRole("button", { name: "刪除", exact: true }).click();
+  await first.getByRole("alertdialog").getByRole("button", { name: "確認刪除", exact: true }).click();
   await expect(first.getByRole("heading", { name: "今日未有記錄", exact: true })).toBeVisible();
 
   await second.getByRole("button", { name: "查看／修正", exact: true }).click();
@@ -967,8 +967,8 @@ test("a stale offline delete cannot erase another device's newer meal", async ({
   await backend.setOffline(contexts[0], false);
   await expect(first.getByRole("button", { name: "放棄待同步修改", exact: true })).toBeVisible();
   expect([...backend.records.values()][0].calorieCorrection).toEqual({ kcal: 700, source: "user" });
-  first.once("dialog", (dialog) => dialog.accept());
   await first.getByRole("button", { name: "放棄待同步修改", exact: true }).click();
+  await first.getByRole("alertdialog").getByRole("button", { name: "確認放棄", exact: true }).click();
   await expect(first.locator(".meal-calories")).toHaveText("手動記錄：700 kcal");
   await first.reload();
   await expect(first.locator(".meal-row")).toHaveCount(1);
@@ -1216,8 +1216,8 @@ test("real photo preview with mocked analysis supports correction, reload, histo
   expect([...backend.records.values()][0]).toMatchObject({ items: [{ portionMin: 150, portionMax: 220 }] });
   await expect(todayCalories).toHaveText(editedRange);
   expect(analyses).toBe(1);
-  page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "刪除", exact: true }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "確認刪除", exact: true }).click();
   await expect.poll(() => backend.records.size).toBe(0);
   // Confirmed deletion must clear the local-pending acknowledgement before
   // reload; reloading alone would hide a stale in-memory notice.

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createEditableFoodItems } from "@/lib/domain/editable-meal";
@@ -164,7 +164,6 @@ beforeEach(() => {
   localStorage.clear(); history.replaceState(null, "", "/");
   Object.defineProperty(navigator, "onLine", { configurable: true, value: false });
   Object.defineProperty(navigator, "locks", { configurable: true, value: { request: async (_name: string, operation: () => Promise<unknown>) => operation() } });
-  vi.spyOn(window, "confirm").mockReturnValue(true);
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
@@ -569,6 +568,8 @@ it("rejects a pre-delete refresh snapshot and follows up with the current snapsh
   await screen.findByRole("heading", { name: "meal-a" });
   await waitFor(() => expect(fixture.state).toHaveBeenCalledTimes(2));
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "刪除" })); });
+  const dialog = await screen.findByRole("alertdialog");
+  await act(async () => { fireEvent.click(within(dialog).getByRole("button", { name: "確認刪除" })); });
   expect(screen.queryByRole("heading", { name: "meal-a" })).not.toBeInTheDocument();
   await act(async () => { oldRead.resolve(original); });
   await waitFor(() => expect(fixture.state).toHaveBeenCalledTimes(3));

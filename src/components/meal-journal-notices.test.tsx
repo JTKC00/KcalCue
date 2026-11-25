@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createEditableFoodItems } from "@/lib/domain/editable-meal";
@@ -79,8 +79,13 @@ async function refresh() {
   await act(async () => { window.dispatchEvent(new Event("kcalcue-sync")); });
   await waitFor(() => expect(fixture.state).toHaveBeenCalledTimes(calls + 1));
 }
+async function confirmDialog(buttonName: string) {
+  const dialog = await screen.findByRole("alertdialog");
+  await act(async () => { fireEvent.click(within(dialog).getByRole("button", { name: buttonName })); });
+}
 async function removeMeal() {
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "刪除" })); });
+  await confirmDialog("確認刪除");
   await screen.findByText(localAcknowledgement);
   await screen.findByText(/1 項修改待同步/);
 }
@@ -110,7 +115,6 @@ beforeEach(() => {
   localStorage.clear(); history.replaceState(null, "", "/");
   Object.defineProperty(navigator, "onLine", { configurable: true, value: false });
   vi.stubGlobal("fetch", vi.fn(() => { throw new Error("No network allowed in notice tests"); }));
-  vi.spyOn(window, "confirm").mockReturnValue(true);
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
@@ -260,6 +264,7 @@ it("preserves an operation error when no pending jobs exist", async () => {
   fixture.remove.mockRejectedValueOnce(new Error("Local delete failed"));
   await start();
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "刪除" })); });
+  await confirmDialog("確認刪除");
   const message = "未能完成操作，請檢查網絡後再試。已保留的修改不會被清除。";
   await screen.findByText(message);
   await refresh();
@@ -284,6 +289,7 @@ it("keeps clear-all acknowledgement until every delete job is gone", async () =>
   await start();
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "帳戶與安裝" })); });
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "清除全部記錄" })); });
+  await confirmDialog("確認清除");
   await screen.findByText(localAcknowledgement);
   await screen.findByText(/2 項修改待同步/);
   expect(fixture.remove).toHaveBeenCalledTimes(2);
@@ -303,6 +309,7 @@ it("does not let a stale empty snapshot clear a newer pending delete notice", as
   fixture.state.mockResolvedValueOnce(original).mockImplementationOnce(() => oldRead.promise).mockImplementationOnce(() => newRead.promise);
   await start();
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "刪除" })); });
+  await confirmDialog("確認刪除");
   await screen.findByText(deleteNotice);
   await act(async () => { oldRead.resolve(original); });
   await waitFor(() => expect(fixture.state).toHaveBeenCalledTimes(3));
@@ -332,6 +339,7 @@ it("does not let A's delayed empty snapshot clear B's newer local acknowledgemen
   await act(async () => { fixture.callback!({ uid: "notice-b", email: "b@example.com" }); });
   await screen.findByRole("heading", { name: "B 的餐點" });
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "刪除" })); });
+  await confirmDialog("確認刪除");
   await screen.findByText(deleteNotice);
   expect(bState.jobs).toHaveLength(1);
   await act(async () => { oldA.resolve(emptyState()); });
@@ -457,4 +465,52 @@ it("clears a pending-logout notice once queued changes finish syncing", async ()
   state = { remote: [], jobs: [], syncedAt: new Date().toISOString() };
   await refresh();
   await waitFor(() => expect(document.querySelector(".journal-notice")).not.toBeInTheDocument());
+});
+
+it("confirms deletion through the in-app dialog without calling native window.confirm", async () => {
+  const nativeConfirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+  state.remote = [record("可刪除餐點")];
+  await start();
+
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "刪除" })); });
+  const dialog = await screen.findByRole("alertdialog");
+  expect(dialog).toHaveTextContent("刪除這餐？連線後會同步刪除。");
+  expect(nativeConfirm).not.toHaveBeenCalled();
+
+  await act(async () => { fireEvent.click(within(dialog).getByRole("button", { name: "取消" })); });
+  expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  expect(fixture.remove).not.toHaveBeenCalled();
+  expect(screen.getByRole("heading", { name: "可刪除餐點" })).toBeVisible();
+
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "刪除" })); });
+  await confirmDialog("確認刪除");
+  await screen.findByText(localAcknowledgement);
+  expect(fixture.remove).toHaveBeenCalledOnce();
+  expect(nativeConfirm).not.toHaveBeenCalled();
+});
+
+it("does not leave an unsaved draft banner after viewing a saved meal without edits", async () => {
+  const meal = record("已儲存午餐");
+  state.remote = [meal];
+  await start();
+
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "查看／修正" })); });
+  await screen.findByRole("heading", { name: "修正餐點" });
+  expect(fixture.write).not.toHaveBeenCalled();
+
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "今日" })); });
+  await screen.findByRole("heading", { name: "今日飲食" });
+  expect(screen.queryByText("有一份未儲存草稿")).not.toBeInTheDocument();
+
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "新增" })); });
+  await screen.findByRole("heading", { name: "新餐點草稿" });
+
+  // Editing a saved meal still retains the draft banner and asks before discarding.
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "放棄修改" })); });
+  await confirmDialog("確認放棄");
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "查看／修正" })); });
+  const note = screen.getByLabelText("餐點備註（選填）");
+  fireEvent.change(note, { target: { value: "有修改過" } });
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "今日" })); });
+  expect(screen.getByText("有一份未儲存草稿")).toBeVisible();
 });
