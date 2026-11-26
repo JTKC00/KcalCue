@@ -168,6 +168,13 @@ const families: readonly FamilyInput[] = [
         part("sauce", "燒烤醬", "barbecueSauce", g(8, 16)),
         part("vegetable", "熟白菜仔", "pakChoi", g(15, 35)),
       ], "雞扒用麵糊炸雞連皮。", "friedRiceMeatless", "美國中餐館無肉炒飯，只核對以飯為主的碟的數量級。"),
+      dish("chicken-rice", g(360, 450), "bowl", [
+        part("rice", "熟白米", "rice", g(230, 300)),
+        part("protein", "雞肉（去皮烚雞到連皮烤雞）", "chickenStewedMeat", g(80, 130), "chickenRoastedSkin"),
+        part("sauce", "醬汁（豉油到海鮮醬）", "soySauce", g(6, 16), "hoisin"),
+        part("oil", "食油", "oil", g(2, 8)),
+        part("vegetable", "熟白菜仔", "pakChoi", g(15, 45)),
+      ], "雞肉飯未指明部位與煮法時，以去皮烚雞肉到連皮烤雞包絡。", "friedRiceMeatless", "美國中餐館無肉炒飯，只核對以飯為主的碟的數量級。"),
       dish("fried-egg-rice", g(320, 400), "bowl", [
         part("rice", "熟白米", "rice", g(240, 320)),
         part("egg", "煎蛋", "friedEgg", g(50, 100)),

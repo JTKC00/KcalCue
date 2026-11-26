@@ -915,6 +915,89 @@
         }
       },
       {
+        "dishId": "chicken-rice",
+        "displayName": "雞肉飯",
+        "familyId": "rice-plate",
+        "familyTitle": "碟頭飯／碗頭飯",
+        "inBenchmark": false,
+        "rangeRatio": 1.6797,
+        "needsFollowUp": false,
+        "complete": true,
+        "caloriesPer100g": {
+          "min": 115.2,
+          "max": 193.5
+        },
+        "servingCalories": {
+          "min": 466.5,
+          "max": 783.7
+        },
+        "feasibleGrams": {
+          "min": 360,
+          "max": 450
+        },
+        "components": [
+          {
+            "label": "熟白米",
+            "sourceIds": [
+              "fdc:168878"
+            ],
+            "grams": {
+              "min": 230,
+              "max": 300
+            }
+          },
+          {
+            "label": "雞肉（去皮烚雞到連皮烤雞）",
+            "sourceIds": [
+              "fdc:171451",
+              "fdc:171450"
+            ],
+            "grams": {
+              "min": 80,
+              "max": 130
+            }
+          },
+          {
+            "label": "醬汁（豉油到海鮮醬）",
+            "sourceIds": [
+              "fdc:174277",
+              "fdc:172886"
+            ],
+            "grams": {
+              "min": 6,
+              "max": 16
+            }
+          },
+          {
+            "label": "食油",
+            "sourceIds": [
+              "fdc:171411"
+            ],
+            "grams": {
+              "min": 2,
+              "max": 8
+            }
+          },
+          {
+            "label": "熟白菜仔",
+            "sourceIds": [
+              "fdc:168517"
+            ],
+            "grams": {
+              "min": 15,
+              "max": 45
+            }
+          }
+        ],
+        "sanity": {
+          "sourceId": "fdc:167668",
+          "sourceName": "Restaurant, Chinese, fried rice, without meat",
+          "kcalPer100g": 174,
+          "insideRange": true,
+          "note": "美國中餐館無肉炒飯，只核對以飯為主的碟的數量級。"
+        }
+      },
+      {
         "dishId": "fried-egg-rice",
         "displayName": "煎蛋飯",
         "familyId": "rice-plate",
@@ -4042,7 +4125,7 @@
       }
     ],
     "rangeDistribution": {
-      "upTo2": 43,
+      "upTo2": 44,
       "above2To2_5": 6,
       "above2_5To3": 2,
       "above3": 0
