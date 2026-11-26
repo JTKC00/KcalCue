@@ -109,9 +109,9 @@ const IDENTITY_RULES: TermRule[] = [
   { keys: ["claypot rice", "clay pot rice", "煲仔飯"], canonicalName: "claypot-rice", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
   { keys: ["donburi", "丼飯", "丼"], canonicalName: "donburi", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
   { keys: ["bibimbap", "石鍋拌飯", "拌飯"], canonicalName: "bibimbap", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
-  { keys: ["chow mein", "lo mein", "fried noodles", "stir-fried noodles", "stir fried noodles", "炒麵", "撈麵"], canonicalName: "fried-noodles", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
+  { keys: ["chow mein", "lo mein", "fried noodles", "stir-fried noodles", "stir fried noodles", "fried udon", "stir-fried udon", "stir fried udon", "yaki udon", "yakiudon", "炒麵", "撈麵", "炒烏冬", "乾炒烏冬", "干炒烏冬"], canonicalName: "fried-noodles", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
   { keys: ["wonton noodles", "wonton noodle soup", "wonton mein", "雲吞麵", "餛飩麵"], canonicalName: "noodle-soup", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
-  { keys: ["noodle soup", "湯麵"], canonicalName: "noodle-soup", category: "mixed", kind: "dish_class", qualifiers: ["composite"] },
+  { keys: ["noodle soup", "soup noodles", "noodles in soup", "noodles in broth", "湯麵", "清湯麵"], canonicalName: "noodle-soup", category: "mixed", kind: "dish_class", qualifiers: ["composite"] },
   { keys: ["rice noodle roll", "rice rolls", "cheung fun", "腸粉"], canonicalName: "rice-noodle-roll", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
   { keys: ["century egg pork congee", "pork congee", "皮蛋瘦肉粥"], canonicalName: "congee", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
   { keys: ["congee", "rice porridge", "白粥", "粥"], canonicalName: "congee", category: "mixed", kind: "dish_class", qualifiers: ["composite"] },
@@ -119,7 +119,7 @@ const IDENTITY_RULES: TermRule[] = [
   { keys: ["carbonara", "spaghetti carbonara"], canonicalName: "carbonara", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
   { keys: ["bolognese", "spaghetti bolognese", "肉醬意粉", "肉醬意大利粉", "肉醬麵", "肉醬"], canonicalName: "bolognese", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
   { keys: ["ramen", "拉麵"], canonicalName: "ramen", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
-  { keys: ["laksa"], canonicalName: "laksa", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
+  { keys: ["laksa", "喇沙", "叻沙"], canonicalName: "laksa", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
   { keys: ["pasta with sauce", "spaghetti", "pasta", "意粉", "意大利粉"], canonicalName: "pasta", category: "mixed", kind: "dish_class", qualifiers: ["composite"] },
   { keys: ["beef curry", "咖喱牛腩", "咖哩牛腩", "咖喱", "咖哩", "curry"], canonicalName: "curry", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
   { keys: ["stew", "stewed", "燉"], canonicalName: "stew", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
@@ -506,6 +506,9 @@ function standaloneCjkRemainder(haystack: string): string {
   return remainder;
 }
 
+const RICE_ADJUNCT_FOLLOW_PATTERN =
+  "(?:noodles?|vermicelli|rolls?|porridge|soups?|broth|congee|paper|cakes?|flour|wine)";
+
 function textContainsKey(
   haystack: string,
   key: string,
@@ -517,7 +520,11 @@ function textContainsKey(
 
   const hasCjk = /[\u4e00-\u9fff]/.test(needle);
   if (!hasCjk) {
-    const matched = new RegExp(`(?:^|\\s)${escapeRegExp(needle)}(?:$|\\s)`).test(haystack);
+    const pattern =
+      needle === "rice" || needle.endsWith(" rice")
+        ? `(?:^|\\s)${escapeRegExp(needle)}(?!\\s+${RICE_ADJUNCT_FOLLOW_PATTERN}(?:$|\\s))(?:$|\\s)`
+        : `(?:^|\\s)${escapeRegExp(needle)}(?:$|\\s)`;
+    const matched = new RegExp(pattern).test(haystack);
     if (!matched) return false;
     if (options.skipLongerAliasShadow) return true;
     return !longerEnglishAliasShadows(haystack, needle);
@@ -1071,10 +1078,12 @@ export function contradictoryDairyMilkLabel(
 
 const DISH_COMPONENT_SUFFIX_RE =
   /(?:皮|醬|酱|汁|醋|油|湯底|汤底|醬料|酱料|餅底|饼底|調味粉|调味粉|湯粉|汤粉|味粉|咖喱粉|咖哩粉)$|(?:^|\s)(?:sauce|oil|vinegar|wrapper|wrappers|crust|broth|base|soup\s+base|skin|pastry|shell|stock|seasoning|powder|glaze|dip)$/;
-const STIR_FRY_NAME_CUE_RE =
-  /炒|(?:^|\s)(?:fried|stir\s+fried|stirfried|pan\s+fried|dry\s+fried|chow|yakisoba)(?:$|\s)/;
-const STIR_FRY_PREP_CUE_RE =
-  /炒|(?:^|\s)(?:stir\s+fried|stirfried|dry\s+fried)(?:$|\s)/;
+const STIR_FRY_OR_DRY_NOODLE_NAME_CUE_RE =
+  /炒|撈|捞|焗|乾拌|干拌|涼拌|凉拌|拌烏冬|拌乌冬|拌烏龍|拌乌龙|拌麵|拌面|拌米線|拌米线|拌河粉|拌拉麵|拌拉面|走湯|走汤|無湯|无汤|免湯|免汤|冷烏冬|冷乌冬|冷麵|冷面|沾麵|沾面|(?:^|\s)(?:fried|stir\s+fried|stirfried|pan\s+fried|dry\s+fried|baked|gratin|dry|tossed|brothless|no\s+soup|no\s+broth|without\s+soup|without\s+broth|chow|lo\s+mein|yakisoba|yaki\s+udon|yakiudon|zaru|bukkake|tsukemen|dipping|mazesoba|abura\s+soba|cold\s+udon|cold\s+noodles?)(?:$|\s)/;
+const STIR_FRY_OR_DRY_NOODLE_PREP_CUE_RE =
+  /炒|焗|乾拌|干拌|涼拌|凉拌|拌|乾撈|干捞|撈|捞|無湯|无汤|走湯|走汤|免湯|免汤|(?:^|\s)(?:stir\s+fried|stirfried|dry\s+fried|baked|gratin|dry|tossed|brothless|no\s+soup|no\s+broth|without\s+soup|without\s+broth)(?:$|\s)/;
+const DRY_NOODLE_NOTE_CUE_RE =
+  /乾拌|干拌|涼拌|凉拌|走湯|走汤|無湯|无汤|免湯|免汤|(?:^|\s)(?:dry\s+tossed|brothless|no\s+soup|no\s+broth|without\s+soup|without\s+broth)(?:$|\s)/;
 const SOUP_NOODLE_DISH_IDS = new Set([
   "cart-noodles",
   "beef-brisket-noodles",
@@ -1086,10 +1095,21 @@ const SOUP_NOODLE_DISH_IDS = new Set([
   "shrimp-wonton-noodle-soup",
   "wonton-noodle-soup",
   "hong-kong-noodle-soup",
+  "udon-noodle-soup",
   "ramen",
   "macaroni-soup-breakfast",
 ]);
 const SOUP_NOODLE_CANONICALS = new Set(["ramen", "noodle-soup"]);
+const RICH_BROTH_NOODLE_CONTRADICTION_RE =
+  /咖喱|咖哩|喇沙|叻沙|忌廉|白汁|(?:^|\s)(?:curry|laksa|cream|creamy|carbonara)(?:$|\s)/;
+const GENERIC_DISH_UMBRELLA_CANONICALS = new Set([
+  "donburi",
+  "pasta",
+  "noodle-soup",
+  "congee",
+  "sandwich",
+  "siu-mei-rice",
+]);
 const CONTAINER_BLOCKER_DISH_IDS = new Set(["cha-chaan-teng-set", "hotpot"]);
 const LEMON_TEA_NAME_RE = /檸茶|柠茶|檸檬茶|柠檬茶|(?:^|\s)lemon\s+tea(?:$|\s)/;
 const WHITE_FISH_NAME_RE =
@@ -1102,7 +1122,7 @@ const DEEP_FRIED_OR_BATTERED_CUE_RE =
 const NON_CLEAR_BROTH_CUE_RE =
   /拉麵|拉面|豚骨|火鍋|火锅|麻辣|沙嗲|忌廉|濃湯|浓汤|羅宋|罗宋|(?:^|\s)(?:ramen|tonkotsu|hotpot|hot\s+pot|cream|creamy|chowder|bisque|borscht)(?:$|\s)/;
 const RICE_PLATE_CONTRADICTION_RE =
-  /咖喱|咖哩|炒飯|炒饭|焗|燴|烩|煲仔|意大利飯|意大利饭|(?:^|\s)(?:curry|fried\s+rice|baked\s+rice|braised\s+rice|claypot|clay\s+pot|risotto)(?:$|\s)/;
+  /咖喱|咖哩|炒飯|炒饭|焗|燴|烩|煲仔|泡飯|泡饭|湯飯|汤饭|意大利飯|意大利饭|(?:^|\s)(?:curry|fried\s+rice|baked(?:\s+[a-z]+)*\s+rice|braised\s+rice|claypot|clay\s+pot|risotto)(?:$|\s)/;
 
 type ContradictionFood = {
   displayName: string;
@@ -1130,12 +1150,14 @@ function isDishComponentOnly(food: Pick<ContradictionFood, "displayName" | "norm
 }
 
 function hasStirFryNoodleContradiction(
-  food: Pick<ContradictionFood, "displayName" | "normalizedName" | "preparationMethod">,
+  food: Pick<ContradictionFood, "displayName" | "normalizedName" | "preparationMethod" | "notes">,
 ): boolean {
   const names = normalizeFoodName(`${food.displayName} ${food.normalizedName}`);
-  if (STIR_FRY_NAME_CUE_RE.test(names)) return true;
+  if (STIR_FRY_OR_DRY_NOODLE_NAME_CUE_RE.test(names)) return true;
   const prep = normalizeFoodName(food.preparationMethod ?? "");
-  return Boolean(prep && STIR_FRY_PREP_CUE_RE.test(prep));
+  if (prep && STIR_FRY_OR_DRY_NOODLE_PREP_CUE_RE.test(prep)) return true;
+  const notes = normalizeFoodName(food.notes ?? "");
+  return Boolean(notes && DRY_NOODLE_NOTE_CUE_RE.test(notes));
 }
 
 export function isUnsweetenedLemonTea(food: ContradictionFood): boolean {
@@ -1178,13 +1200,13 @@ function collectIdentityHits(text: string, food: FoodEstimate): IdentityHit[] {
   const hits: IdentityHit[] = [];
   const blockDairyMilk = blocksDairyMilkIdentity(food) || lowFatMilkEvidence(food) || chocolateMilkName(food);
   const blockCucumber = /(?:^|\s)sea\s+cucumbers?(?:$|\s)|海參|海参/.test(text);
+  const dishNames = normalizeFoodName(`${food.displayName} ${food.normalizedName}`);
   const blockWholeDishes = isDishComponentOnly(food);
-  const blockSoupNoodles = hasStirFryNoodleContradiction(food);
+  const blockSoupNoodles =
+    hasStirFryNoodleContradiction(food) || RICH_BROTH_NOODLE_CONTRADICTION_RE.test(dishNames);
   const blockSweetLemonTea = isUnsweetenedLemonTea(food);
   const friedFish = hasFriedBatteredFishEvidence(food);
-  const processedFish = PROCESSED_FISH_PRODUCT_RE.test(
-    normalizeFoodName(`${food.displayName} ${food.normalizedName}`),
-  );
+  const processedFish = PROCESSED_FISH_PRODUCT_RE.test(dishNames);
   const blockClearSoup = NON_CLEAR_BROTH_CUE_RE.test(text);
 
   for (const rule of IDENTITY_RULES) {
@@ -1334,19 +1356,135 @@ function uniqueIdentities(hits: DishIdentity[]): DishIdentity[] {
   return [...new Map(hits.map((hit) => [hit.id, hit])).values()];
 }
 
-function containsAsTokenPhrase(longer: string, shorter: string): boolean {
-  if (!shorter || longer === shorter) return false;
-  return longer.startsWith(`${shorter} `) || longer.endsWith(` ${shorter}`);
+function orderedTokenSubsequenceWithSameHead(longer: string, shorter: string): boolean {
+  const lTokens = longer.split(" ").filter(Boolean);
+  const sTokens = shorter.split(" ").filter(Boolean);
+  if (sTokens.length < 2 || lTokens.length <= sTokens.length) return false;
+  if (lTokens[lTokens.length - 1] !== sTokens[sTokens.length - 1]) return false;
+  let idx = 0;
+  for (const token of lTokens) {
+    if (token === sTokens[idx]) idx += 1;
+    if (idx === sTokens.length) return true;
+  }
+  return false;
 }
 
-/** The Chinese dish's English alias properly extends the other identity's alias. */
-function chineseIsMoreSpecific(chinese: DishIdentity, english: DishIdentity): boolean {
-  const chineseEnglish = chinese.aliases
+function containsAsTokenPhrase(longer: string, shorter: string): boolean {
+  if (!shorter || longer === shorter) return false;
+  return (
+    longer.startsWith(`${shorter} `) ||
+    longer.endsWith(` ${shorter}`) ||
+    orderedTokenSubsequenceWithSameHead(longer, shorter)
+  );
+}
+
+function isUmbrellaParentOf(umbrella: DishIdentity, specific: DishIdentity): boolean {
+  if (umbrella.id === specific.id) return false;
+  if (
+    umbrella.id === "hong-kong-noodle-soup" &&
+    SOUP_NOODLE_DISH_IDS.has(specific.id) &&
+    specific.id !== "macaroni-soup-breakfast"
+  ) {
+    return true;
+  }
+  if (
+    umbrella.id === "rice-plate" &&
+    (specific.familyId === "rice-plate" || specific.familyId === "siu-mei-rice")
+  ) {
+    return true;
+  }
+  if (
+    umbrella.id === "chicken-rice" &&
+    (specific.id === "soy-sauce-chicken-rice" ||
+      specific.id === "white-cut-chicken-rice" ||
+      specific.id === "hainanese-chicken-rice" ||
+      specific.id === "chicken-chop-rice")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+const MULTI_DISH_JOINER_RE =
+  /拼|加|配|及|與|和|同|\+|&|(?:^|\s)(?:and|plus|or|with)(?:$|\s)/;
+const CJK_UMBRELLA_CLASS_SUFFIXES = new Set([
+  "湯麵",
+  "汤面",
+  "碟頭飯",
+  "碟头饭",
+  "碗頭飯",
+  "碗头饭",
+]);
+
+function countPhraseOccurrences(haystack: string, needle: string): number {
+  if (!needle) return 0;
+  let count = 0;
+  let index = 0;
+  while (true) {
+    const found = haystack.indexOf(needle, index);
+    if (found === -1) break;
+    count += 1;
+    index = found + Math.max(1, needle.length);
+  }
+  return count;
+}
+
+function aliasAbsorbedByLongerMatch(
+  haystack: string,
+  longerAlias: string,
+  shorterAlias: string,
+): boolean {
+  if (longerAlias.length <= shorterAlias.length) return false;
+  if (!textContainsKey(longerAlias, shorterAlias, { skipLongerAliasShadow: true })) return false;
+  const remainder = haystack.split(longerAlias).join(" ").replace(/\s+/g, " ").trim();
+  if (!remainder) return true;
+  return !textContainsKey(remainder, shorterAlias, {
+    singleCjkKeyMustBeStandalone: true,
+    skipLongerAliasShadow: true,
+  });
+}
+
+function describesSameDishMention(
+  haystack: string,
+  specificAlias: string,
+  umbrellaAlias: string,
+): boolean {
+  if (!specificAlias || !umbrellaAlias || MULTI_DISH_JOINER_RE.test(haystack)) return false;
+  if (
+    countPhraseOccurrences(haystack, umbrellaAlias) !== 1 ||
+    countPhraseOccurrences(haystack, specificAlias) !== 1
+  ) {
+    return false;
+  }
+  if (!/[\u4e00-\u9fff]/.test(specificAlias) && !/[\u4e00-\u9fff]/.test(umbrellaAlias)) {
+    if (englishPhraseIn(haystack, `${specificAlias} ${umbrellaAlias}`)) return true;
+    const sTokens = specificAlias.split(" ");
+    const uTokens = umbrellaAlias.split(" ");
+    const maxOverlap = Math.min(sTokens.length, uTokens.length);
+    for (let k = maxOverlap; k >= 1; k -= 1) {
+      if (sTokens.slice(-k).join(" ") === uTokens.slice(0, k).join(" ")) {
+        const merged = [...sTokens, ...uTokens.slice(k)].join(" ");
+        if (englishPhraseIn(haystack, merged)) return true;
+      }
+    }
+    return false;
+  }
+  if (CJK_UMBRELLA_CLASS_SUFFIXES.has(umbrellaAlias)) {
+    return haystack.includes(`${specificAlias}${umbrellaAlias}`);
+  }
+  return false;
+}
+
+/** One dish identity is a more specific refinement of another umbrella/parent identity. */
+function dishIsMoreSpecific(specific: DishIdentity, general: DishIdentity): boolean {
+  if (specific.id === general.id) return false;
+  if (isUmbrellaParentOf(general, specific)) return true;
+  const specificEnglish = specific.aliases
     .filter((alias) => alias.script === "english")
     .map((alias) => normalizeFoodName(alias.text));
-  const englishAliases = english.aliases.map((alias) => normalizeFoodName(alias.text));
-  return chineseEnglish.some((longer) =>
-    englishAliases.some((shorter) => containsAsTokenPhrase(longer, shorter)),
+  const generalAliases = general.aliases.map((alias) => normalizeFoodName(alias.text));
+  return specificEnglish.some((longer) =>
+    generalAliases.some((shorter) => containsAsTokenPhrase(longer, shorter)),
   );
 }
 
@@ -1362,6 +1500,9 @@ function curatedDishContradicted(
   if (SOUP_NOODLE_DISH_IDS.has(identity.id) && hasStirFryNoodleContradiction(food)) return true;
   if (identity.id === "creamy-macaroni-salad" && isHotCreamMacaroni(food as FoodEstimate)) return true;
   const names = normalizeFoodName(`${food.displayName} ${food.normalizedName}`);
+  if (SOUP_NOODLE_DISH_IDS.has(identity.id) && RICH_BROTH_NOODLE_CONTRADICTION_RE.test(names)) {
+    return true;
+  }
   if (
     (identity.familyId === "rice-plate" || identity.familyId === "siu-mei-rice") &&
     RICE_PLATE_CONTRADICTION_RE.test(names)
@@ -1446,16 +1587,11 @@ export function resolveCuratedDishIdentity(food: ContradictionFood): CuratedDish
     if (english.length === 0 || english.every((hit) => hit.id === chineseIdentity.id)) {
       return { status: "matched", identity: chineseIdentity };
     }
-    if (english.length === 1 && english[0] && chineseIsMoreSpecific(chineseIdentity, english[0])) {
+    if (english.length === 1 && english[0] && dishIsMoreSpecific(chineseIdentity, english[0])) {
       return { status: "matched", identity: chineseIdentity };
     }
-    if (
-      english.length === 1 &&
-      english[0] &&
-      english[0].familyId === chineseIdentity.id &&
-      english[0].id !== chineseIdentity.id
-    ) {
-      return { status: "matched", identity: chineseIdentity };
+    if (english.length === 1 && english[0] && isUmbrellaParentOf(chineseIdentity, english[0])) {
+      return { status: "matched", identity: english[0] };
     }
     return { status: "ambiguous" };
   }
@@ -1465,10 +1601,7 @@ export function resolveCuratedDishIdentity(food: ContradictionFood): CuratedDish
       ...(isChineseField(food.normalizedName) ? normalizedContained.map((hit) => hit.identity) : []),
     ]);
     if (chineseContained.length === 1 && chineseContained[0] && chineseContained[0].id !== english[0].id) {
-      if (
-        chineseIsMoreSpecific(chineseContained[0], english[0]) ||
-        english[0].familyId === chineseContained[0].id
-      ) {
+      if (dishIsMoreSpecific(chineseContained[0], english[0])) {
         return { status: "matched", identity: chineseContained[0] };
       }
       return { status: "ambiguous" };
@@ -1499,19 +1632,28 @@ function containedDishHits(
       if (!needle) continue;
       // Avoid 1-char CJK aliases (e.g. 粥) in substring fallback.
       if (/[\u4e00-\u9fff]/.test(needle) && [...needle].length < 2) continue;
-      if (!textContainsKey(normalized, needle, { singleCjkKeyMustBeStandalone: true })) continue;
+      if (
+        !textContainsKey(normalized, needle, {
+          singleCjkKeyMustBeStandalone: true,
+          skipLongerAliasShadow: true,
+        })
+      ) {
+        continue;
+      }
       if (!bestAlias || needle.length > bestAlias.length) bestAlias = needle;
     }
     if (bestAlias) raw.push({ identity, matchedAlias: bestAlias });
   }
   // Drop shorter aliases strictly contained in a longer matched dish alias
-  // (e.g. 叉燒碟頭飯 beats 碟頭飯; 壽司拼盤 beats 壽司).
+  // (e.g. 叉燒碟頭飯 beats 碟頭飯; 壽司拼盤 beats 壽司) and generic umbrella
+  // parents only when they form part of the same single-dish mention.
   return raw.filter((hit) =>
     !raw.some(
       (other) =>
         other.identity.id !== hit.identity.id &&
-        other.matchedAlias.length > hit.matchedAlias.length &&
-        textContainsKey(other.matchedAlias, hit.matchedAlias, { skipLongerAliasShadow: true }),
+        (aliasAbsorbedByLongerMatch(normalized, other.matchedAlias, hit.matchedAlias) ||
+          (isUmbrellaParentOf(hit.identity, other.identity) &&
+            describesSameDishMention(normalized, other.matchedAlias, hit.matchedAlias))),
     ),
   );
 }
@@ -1547,15 +1689,7 @@ function resolveContainedCuratedDishIdentity(food: ContradictionFood): CuratedDi
     if (english.length === 0 || english.every((hit) => hit.id === chineseIdentity.id)) {
       return { status: "matched", identity: chineseIdentity };
     }
-    if (english.length === 1 && english[0] && chineseIsMoreSpecific(chineseIdentity, english[0])) {
-      return { status: "matched", identity: chineseIdentity };
-    }
-    if (
-      english.length === 1 &&
-      english[0] &&
-      english[0].familyId === chineseIdentity.id &&
-      english[0].id !== chineseIdentity.id
-    ) {
+    if (english.length === 1 && english[0] && dishIsMoreSpecific(chineseIdentity, english[0])) {
       return { status: "matched", identity: chineseIdentity };
     }
     return { status: "ambiguous" };
@@ -1659,12 +1793,24 @@ export function canonicalizeFood(food: FoodEstimate): CanonicalFoodIdentity {
   const hasCurry = identityHits.some((rule) =>
     ["curry", "curry-rice"].includes(rule.canonicalName),
   );
+  const standaloneRiceRe = new RegExp(
+    `飯|饭|(?:^|\\s)rice(?!\\s+${RICE_ADJUNCT_FOLLOW_PATTERN}(?:$|\\s))(?:$|\\s)`,
+  );
+  const bakedRiceDishRe = new RegExp(
+    `焗[^拼加配及與和同+&,，/\\s]{0,8}[飯饭]|(?:^|\\s)baked(?:\\s+(?!and\\b|with\\b|on\\b|over\\b|beside\\b|plus\\b|or\\b|beans?\\b)[a-z]+){0,3}\\s+rice(?!\\s+${RICE_ADJUNCT_FOLLOW_PATTERN}(?:$|\\s))(?:$|\\s)`,
+  );
   const hasRice =
     identityHits.some((rule) => rule.canonicalName === "rice") ||
-    /飯|饭|(?:^|\s)rice(?:$|\s)/.test(text);
+    standaloneRiceRe.test(text);
+  const dishNamesText = normalizeFoodName(`${food.displayName} ${food.normalizedName}`);
   const hasCurryRiceDish =
-    identityHits.some((rule) => rule.canonicalName === "curry-rice") ||
-    (hasCurry && hasRice);
+    !isDishComponentOnly(food) &&
+    (identityHits.some((rule) => rule.canonicalName === "curry-rice") ||
+      (hasCurry && hasRice));
+  const hasBakedRiceDish =
+    !isDishComponentOnly(food) &&
+    (identityHits.some((rule) => rule.canonicalName === "baked-rice") ||
+      bakedRiceDishRe.test(dishNamesText));
   const tomatoSauceOverride =
     hasTomato &&
     (hasSauce || text.includes("風味") || text.includes("flavor")) &&
@@ -1682,7 +1828,9 @@ export function canonicalizeFood(food: FoodEstimate): CanonicalFoodIdentity {
   } else if (food.identityLevel === "dish") {
     const explicitDish = hasCurryRiceDish
       ? synthesizedIdentityHit("curry-rice")
-      : rankedHits.find((hit) => hit.kind === "named_dish" || hit.kind === "dish_class");
+      : hasBakedRiceDish
+        ? synthesizedIdentityHit("baked-rice")
+        : rankedHits.find((hit) => hit.kind === "named_dish" || hit.kind === "dish_class");
     const allowContainedDish = !SALAD_WORD.test(saladName) && !hasCreamMacaroniStem(creamMacaroniText(food));
     const contained = allowContainedDish ? resolveContainedCuratedDishIdentity(food) : { status: "none" as const };
     if (contained.status === "ambiguous") {
@@ -1693,10 +1841,14 @@ export function canonicalizeFood(food: FoodEstimate): CanonicalFoodIdentity {
         qualifiers: ["composite", "ambiguous"],
       };
     }
+    if (
+      contained.status === "matched" &&
+      (!explicitDish || GENERIC_DISH_UMBRELLA_CANONICALS.has(explicitDish.canonicalName))
+    ) {
+      return identityFromDish(contained.identity, preparation);
+    }
     if (explicitDish) {
       primary = explicitDish;
-    } else if (contained.status === "matched") {
-      return identityFromDish(contained.identity, preparation);
     } else {
       primary = synthesizedIdentityHit("mixed-dish");
     }
@@ -1706,8 +1858,31 @@ export function canonicalizeFood(food: FoodEstimate): CanonicalFoodIdentity {
     qualifiers.add("tomato");
   } else if (hasCurryRiceDish) {
     primary = synthesizedIdentityHit("curry-rice", "named_dish");
+  } else if (hasBakedRiceDish) {
+    primary = synthesizedIdentityHit("baked-rice", "named_dish");
   } else if (hasNamedDish(identityHits)) {
-    primary = rankedHits.find((hit) => hit.kind === "named_dish" || hit.kind === "dish_class");
+    const explicitDish = rankedHits.find((hit) => hit.kind === "named_dish" || hit.kind === "dish_class");
+    if (
+      explicitDish &&
+      GENERIC_DISH_UMBRELLA_CANONICALS.has(explicitDish.canonicalName) &&
+      !SALAD_WORD.test(saladName) &&
+      !hasCreamMacaroniStem(creamMacaroniText(food)) &&
+      !grainWithMilk
+    ) {
+      const contained = resolveContainedCuratedDishIdentity(food);
+      if (contained.status === "ambiguous") {
+        return {
+          canonicalName: "unknown",
+          category: "mixed",
+          preparation,
+          qualifiers: ["composite", "ambiguous"],
+        };
+      }
+      if (contained.status === "matched") {
+        return identityFromDish(contained.identity, preparation);
+      }
+    }
+    primary = explicitDish;
   } else if (!SALAD_WORD.test(saladName) && !hasCreamMacaroniStem(creamMacaroniText(food)) && !grainWithMilk) {
     const contained = resolveContainedCuratedDishIdentity(food);
     if (contained.status === "ambiguous") {
