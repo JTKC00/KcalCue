@@ -119,7 +119,7 @@ const IDENTITY_RULES: TermRule[] = [
   { keys: ["carbonara", "spaghetti carbonara"], canonicalName: "carbonara", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
   { keys: ["bolognese", "spaghetti bolognese", "肉醬意粉", "肉醬意大利粉", "肉醬麵", "肉醬"], canonicalName: "bolognese", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
   { keys: ["ramen", "拉麵"], canonicalName: "ramen", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
-  { keys: ["laksa"], canonicalName: "laksa", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
+  { keys: ["laksa", "喇沙", "叻沙"], canonicalName: "laksa", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
   { keys: ["pasta with sauce", "spaghetti", "pasta", "意粉", "意大利粉"], canonicalName: "pasta", category: "mixed", kind: "dish_class", qualifiers: ["composite"] },
   { keys: ["beef curry", "咖喱牛腩", "咖哩牛腩", "咖喱", "咖哩", "curry"], canonicalName: "curry", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
   { keys: ["stew", "stewed", "燉"], canonicalName: "stew", category: "mixed", kind: "named_dish", qualifiers: ["composite"] },
@@ -507,7 +507,7 @@ function standaloneCjkRemainder(haystack: string): string {
 }
 
 const RICE_ADJUNCT_FOLLOW_PATTERN =
-  "(?:noodles?|vermicelli|rolls?|porridge|paper|cakes?|flour|wine)";
+  "(?:noodles?|vermicelli|rolls?|porridge|soups?|broth|congee|paper|cakes?|flour|wine)";
 
 function textContainsKey(
   haystack: string,
@@ -1122,7 +1122,7 @@ const DEEP_FRIED_OR_BATTERED_CUE_RE =
 const NON_CLEAR_BROTH_CUE_RE =
   /拉麵|拉面|豚骨|火鍋|火锅|麻辣|沙嗲|忌廉|濃湯|浓汤|羅宋|罗宋|(?:^|\s)(?:ramen|tonkotsu|hotpot|hot\s+pot|cream|creamy|chowder|bisque|borscht)(?:$|\s)/;
 const RICE_PLATE_CONTRADICTION_RE =
-  /咖喱|咖哩|炒飯|炒饭|焗|燴|烩|煲仔|意大利飯|意大利饭|(?:^|\s)(?:curry|fried\s+rice|baked(?:\s+[a-z]+)*\s+rice|braised\s+rice|claypot|clay\s+pot|risotto)(?:$|\s)/;
+  /咖喱|咖哩|炒飯|炒饭|焗|燴|烩|煲仔|泡飯|泡饭|湯飯|汤饭|意大利飯|意大利饭|(?:^|\s)(?:curry|fried\s+rice|baked(?:\s+[a-z]+)*\s+rice|braised\s+rice|claypot|clay\s+pot|risotto)(?:$|\s)/;
 
 type ContradictionFood = {
   displayName: string;
@@ -1200,13 +1200,13 @@ function collectIdentityHits(text: string, food: FoodEstimate): IdentityHit[] {
   const hits: IdentityHit[] = [];
   const blockDairyMilk = blocksDairyMilkIdentity(food) || lowFatMilkEvidence(food) || chocolateMilkName(food);
   const blockCucumber = /(?:^|\s)sea\s+cucumbers?(?:$|\s)|海參|海参/.test(text);
+  const dishNames = normalizeFoodName(`${food.displayName} ${food.normalizedName}`);
   const blockWholeDishes = isDishComponentOnly(food);
-  const blockSoupNoodles = hasStirFryNoodleContradiction(food);
+  const blockSoupNoodles =
+    hasStirFryNoodleContradiction(food) || RICH_BROTH_NOODLE_CONTRADICTION_RE.test(dishNames);
   const blockSweetLemonTea = isUnsweetenedLemonTea(food);
   const friedFish = hasFriedBatteredFishEvidence(food);
-  const processedFish = PROCESSED_FISH_PRODUCT_RE.test(
-    normalizeFoodName(`${food.displayName} ${food.normalizedName}`),
-  );
+  const processedFish = PROCESSED_FISH_PRODUCT_RE.test(dishNames);
   const blockClearSoup = NON_CLEAR_BROTH_CUE_RE.test(text);
 
   for (const rule of IDENTITY_RULES) {
@@ -1406,7 +1406,7 @@ function isUmbrellaParentOf(umbrella: DishIdentity, specific: DishIdentity): boo
 }
 
 const MULTI_DISH_JOINER_RE =
-  /拼|加|及|與|和|同|\+|&|(?:^|\s)(?:and|plus|or)(?:$|\s)/;
+  /拼|加|配|及|與|和|同|\+|&|(?:^|\s)(?:and|plus|or|with)(?:$|\s)/;
 const CJK_UMBRELLA_CLASS_SUFFIXES = new Set([
   "湯麵",
   "汤面",
@@ -1429,6 +1429,21 @@ function countPhraseOccurrences(haystack: string, needle: string): number {
   return count;
 }
 
+function aliasAbsorbedByLongerMatch(
+  haystack: string,
+  longerAlias: string,
+  shorterAlias: string,
+): boolean {
+  if (longerAlias.length <= shorterAlias.length) return false;
+  if (!textContainsKey(longerAlias, shorterAlias, { skipLongerAliasShadow: true })) return false;
+  const remainder = haystack.split(longerAlias).join(" ").replace(/\s+/g, " ").trim();
+  if (!remainder) return true;
+  return !textContainsKey(remainder, shorterAlias, {
+    singleCjkKeyMustBeStandalone: true,
+    skipLongerAliasShadow: true,
+  });
+}
+
 function describesSameDishMention(
   haystack: string,
   specificAlias: string,
@@ -1445,10 +1460,12 @@ function describesSameDishMention(
     if (englishPhraseIn(haystack, `${specificAlias} ${umbrellaAlias}`)) return true;
     const sTokens = specificAlias.split(" ");
     const uTokens = umbrellaAlias.split(" ");
-    const lastSpecific = sTokens[sTokens.length - 1];
-    if (lastSpecific && lastSpecific === uTokens[0]) {
-      const merged = [...sTokens, ...uTokens.slice(1)].join(" ");
-      if (englishPhraseIn(haystack, merged)) return true;
+    const maxOverlap = Math.min(sTokens.length, uTokens.length);
+    for (let k = maxOverlap; k >= 1; k -= 1) {
+      if (sTokens.slice(-k).join(" ") === uTokens.slice(0, k).join(" ")) {
+        const merged = [...sTokens, ...uTokens.slice(k)].join(" ");
+        if (englishPhraseIn(haystack, merged)) return true;
+      }
     }
     return false;
   }
@@ -1627,8 +1644,7 @@ function containedDishHits(
     !raw.some(
       (other) =>
         other.identity.id !== hit.identity.id &&
-        ((other.matchedAlias.length > hit.matchedAlias.length &&
-          textContainsKey(other.matchedAlias, hit.matchedAlias, { skipLongerAliasShadow: true })) ||
+        (aliasAbsorbedByLongerMatch(normalized, other.matchedAlias, hit.matchedAlias) ||
           (isUmbrellaParentOf(hit.identity, other.identity) &&
             describesSameDishMention(normalized, other.matchedAlias, hit.matchedAlias))),
     ),
@@ -1774,7 +1790,7 @@ export function canonicalizeFood(food: FoodEstimate): CanonicalFoodIdentity {
     `飯|饭|(?:^|\\s)rice(?!\\s+${RICE_ADJUNCT_FOLLOW_PATTERN}(?:$|\\s))(?:$|\\s)`,
   );
   const bakedRiceDishRe = new RegExp(
-    `焗[a-z0-9\\u4e00-\\u9fff\\s]{0,12}[飯饭]|(?:^|\\s)baked(?:\\s+[a-z]+){0,4}\\s+rice(?!\\s+${RICE_ADJUNCT_FOLLOW_PATTERN}(?:$|\\s))(?:$|\\s)`,
+    `焗[^拼加配及與和同+&,，/\\s]{0,8}[飯饭]|(?:^|\\s)baked(?:\\s+(?!and\\b|with\\b|on\\b|over\\b|beside\\b|plus\\b|or\\b|beans?\\b)[a-z]+){0,3}\\s+rice(?!\\s+${RICE_ADJUNCT_FOLLOW_PATTERN}(?:$|\\s))(?:$|\\s)`,
   );
   const hasRice =
     identityHits.some((rule) => rule.canonicalName === "rice") ||
