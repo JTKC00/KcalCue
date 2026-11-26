@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { authenticated, apiError } from "@/lib/server/auth";
 import { foodEstimateSchema } from "@/lib/domain/food-analysis";
 import { blocksUsdaLiveLookup, isCompositeIdentity, type MealPlantMilkContext } from "@/lib/nutrition/canonical";
+import { resolveFromCatalogIndex } from "@/lib/nutrition/catalog-entry";
+import { needsServerCatalogCheck } from "@/lib/nutrition/client";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
+import { getNutritionCatalogDb, loadFirestoreNutritionCatalogIndex } from "@/lib/firebase/nutrition-catalog";
 import { supportsUsdaPortionUnit, UsdaNutritionClient, UsdaNutritionError } from "@/lib/nutrition/usda";
 import { getNutritionApiKey } from "@/lib/server/env";
 import { reserveHourlyUsdaCall } from "@/lib/server/durable-nutrition-quota";
@@ -93,8 +96,62 @@ export async function POST(request: Request) {
   const startedAt = performance.now();
 
   try {
+    const hasBearer = Boolean(request.headers.get("authorization")?.startsWith("Bearer "));
+    let preAuthAccount: Awaited<ReturnType<typeof authenticated>> | null = null;
+    let preAuthError: unknown = null;
+    let uidRateLimitConsumed = false;
+    let anonymousRateLimitConsumed = false;
+
+    // Enforce rate limits BEFORE any Firestore catalog load or expensive catalog matching.
+    if (hasBearer) {
+      try {
+        preAuthAccount = await authenticated(request);
+        if (!consumeRateLimit(`nutrition:uid:${preAuthAccount.user.id}`, NUTRITION_RATE_LIMIT).allowed) {
+          return rateLimitedResponse();
+        }
+        uidRateLimitConsumed = true;
+      } catch (error) {
+        preAuthError = error;
+        if (ip === "unknown") {
+          if (!consumeRateLimit("nutrition:anonymous", NUTRITION_RATE_LIMIT).allowed) {
+            return rateLimitedResponse();
+          }
+          anonymousRateLimitConsumed = true;
+        }
+      }
+    } else if (ip === "unknown") {
+      if (!consumeRateLimit("nutrition:anonymous", NUTRITION_RATE_LIMIT).allowed) {
+        return rateLimitedResponse();
+      }
+      anonymousRateLimitConsumed = true;
+    }
+
+    const catalogDb = getNutritionCatalogDb();
+    const catalogIndexes = catalogDb
+      ? parsed.data.foods.flatMap((food, index) =>
+        needsServerCatalogCheck(food, matches[index], mealContext) ? [index] : [])
+      : [];
+    const catalogHandled = new Set<number>();
+    if (catalogDb && catalogIndexes.length > 0 && !request.signal.aborted) {
+      const catalogIndex = await loadFirestoreNutritionCatalogIndex(catalogDb);
+      for (const index of catalogIndexes) {
+        const catalogMatch = resolveFromCatalogIndex(
+          parsed.data.foods[index],
+          catalogIndex,
+          matches[index],
+          mealContext,
+        );
+        if (!catalogMatch) continue;
+        if (catalogMatch.includedInTotal || !matches[index].includedInTotal) {
+          matches[index] = catalogMatch;
+          catalogHandled.add(index);
+        }
+      }
+    }
+
     const remoteIndexes = apiKey ? matches.flatMap((match, index) =>
       !match.includedInTotal &&
+      !catalogHandled.has(index) &&
       supportsUsdaPortionUnit(parsed.data.foods[index].unit) &&
       !isCompositeIdentity(match.identity) &&
       !blocksUsdaLiveLookup(parsed.data.foods[index], mealContext) ? [index] : []) : [];
@@ -113,26 +170,35 @@ export async function POST(request: Request) {
         // Local reference/demo resolution remains public. A provider-backed
         // lookup requires the same verified trial account as Live analysis.
         let remoteAccount: Awaited<ReturnType<typeof authenticated>>;
-        try {
-          const account = await Promise.race([authenticated(request), stopped]);
-          if (account === null) {
-            if (ip === "unknown" && !consumeRateLimit("nutrition:anonymous", NUTRITION_RATE_LIMIT).allowed) {
+        if (preAuthAccount) {
+          remoteAccount = preAuthAccount;
+        } else if (preAuthError !== null) {
+          return apiError(preAuthError);
+        } else {
+          try {
+            const account = await Promise.race([authenticated(request), stopped]);
+            if (account === null) {
+              if (ip === "unknown" && !anonymousRateLimitConsumed &&
+                !consumeRateLimit("nutrition:anonymous", NUTRITION_RATE_LIMIT).allowed) {
+                return rateLimitedResponse();
+              }
+              for (const index of remoteIndexes) {
+                warnings.push({ index, code: deadline.signal.aborted ? "timeout" : "canceled" });
+              }
+              return NextResponse.json({ matches, provider: "usda-fdc", warnings });
+            }
+            remoteAccount = account;
+          } catch (error) {
+            if (ip === "unknown" && !anonymousRateLimitConsumed &&
+              !consumeRateLimit("nutrition:anonymous", NUTRITION_RATE_LIMIT).allowed) {
               return rateLimitedResponse();
             }
-            for (const index of remoteIndexes) {
-              warnings.push({ index, code: deadline.signal.aborted ? "timeout" : "canceled" });
-            }
-            return NextResponse.json({ matches, provider: "usda-fdc", warnings });
+            return apiError(error);
           }
-          remoteAccount = account;
-        } catch (error) {
-          if (ip === "unknown" && !consumeRateLimit("nutrition:anonymous", NUTRITION_RATE_LIMIT).allowed) {
-            return rateLimitedResponse();
-          }
-          return apiError(error);
         }
         stopAuthentication();
-        if (!consumeRateLimit(`nutrition:uid:${remoteAccount.user.id}`, NUTRITION_RATE_LIMIT).allowed) {
+        if (!uidRateLimitConsumed &&
+          !consumeRateLimit(`nutrition:uid:${remoteAccount.user.id}`, NUTRITION_RATE_LIMIT).allowed) {
           return rateLimitedResponse();
         }
         const usda = new UsdaNutritionClient(apiKey, async () =>
@@ -169,19 +235,6 @@ export async function POST(request: Request) {
       } finally {
         clearTimeout(timeout);
         stopAuthentication();
-      }
-    } else {
-      let localBucket: string | null = ip === "unknown" ? "nutrition:anonymous" : null;
-      if (request.headers.get("authorization")?.startsWith("Bearer ")) {
-        try {
-          const { user } = await authenticated(request);
-          localBucket = `nutrition:uid:${user.id}`;
-        } catch {
-          if (ip === "unknown") localBucket = "nutrition:anonymous";
-        }
-      }
-      if (localBucket && !consumeRateLimit(localBucket, NUTRITION_RATE_LIMIT).allowed) {
-        return rateLimitedResponse();
       }
     }
 

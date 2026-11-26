@@ -1,9 +1,64 @@
 import type { FoodEstimate } from "@/lib/domain/food-analysis";
 import type { ResolvableFood } from "./resolver";
-import { canonicalizeFood, normalizeFoodName, photoGenericMilkNeedsConfirmation, type MealPlantMilkContext } from "./canonical";
+import {
+  canonicalizeFood,
+  contradictoryDairyMilkLabel,
+  normalizeFoodName,
+  photoGenericMilkNeedsConfirmation,
+  type MealPlantMilkContext,
+} from "./canonical";
+import { CATALOG_PROFILE_ID_PREFIX } from "./catalog-entry";
 import type { NutritionMatch } from "./types";
 import { copy } from "@/content/zh-HK";
 import { nutritionMatchResponseSchema } from "./response-schema";
+
+const BARCODE_CUE_RE = /(?:^|[^0-9])\d{8,14}(?:$|[^0-9])/;
+
+export function isExactLocalProfileMatch(
+  food: Pick<FoodEstimate, "displayName" | "normalizedName">,
+  match: NutritionMatch | null | undefined,
+): boolean {
+  if (!match?.includedInTotal || !match.profile) return false;
+  const names = [
+    match.profile.id,
+    match.profile.displayName,
+    match.profile.canonicalName,
+    ...match.profile.aliases,
+  ].map(normalizeFoodName);
+  const display = normalizeFoodName(food.displayName);
+  const normalized = normalizeFoodName(food.normalizedName);
+  if (display) return names.includes(display);
+  return Boolean(normalized) && names.includes(normalized);
+}
+
+function hasServerCatalogContextCue(
+  food: Pick<ResolvableFood, "displayName" | "normalizedName" | "notes">,
+): boolean {
+  if (food.notes?.trim()) return true;
+  if (BARCODE_CUE_RE.test(food.displayName) || BARCODE_CUE_RE.test(food.normalizedName)) return true;
+  return false;
+}
+
+export function needsServerCatalogCheck(
+  food: ResolvableFood,
+  localMatch: NutritionMatch | null | undefined,
+  mealContext?: MealPlantMilkContext,
+): boolean {
+  if (food.suspectedDuplicateMilk === true) return false;
+  if (food.userMilkTypeChoice != null) return false;
+  if (contradictoryDairyMilkLabel(food, mealContext)) return false;
+  if (photoGenericMilkNeedsConfirmation(food, mealContext)) return false;
+  if (
+    localMatch?.includedInTotal &&
+    (localMatch.profile?.source.provider === "usda-fdc" ||
+      localMatch.profile?.id.startsWith(CATALOG_PROFILE_ID_PREFIX))
+  ) {
+    return false;
+  }
+  if (!localMatch || !localMatch.includedInTotal) return true;
+  if (!isExactLocalProfileMatch(food, localMatch)) return true;
+  return hasServerCatalogContextCue(food);
+}
 
 export interface NutritionResolveResponse {
   matches?: NutritionMatch[];
@@ -40,6 +95,19 @@ export function canReuseNutritionMatchForNameEdit(
     typeof nextFactor !== "number" || !Number.isFinite(nextFactor) || nextFactor <= 0
   ) return false;
 
+  // Catalog matches can depend on item notes (brand/barcode) or piece count semantics
+  // (e.g. 1 box of 6pc McNuggets vs 6 individual pieces). Re-resolve when those change.
+  if (match.profile.id.startsWith(CATALOG_PROFILE_ID_PREFIX)) {
+    if ((currentFood.notes ?? "").trim() !== (nextFood.notes ?? "").trim()) return false;
+    if (
+      currentFood.unit === "piece" &&
+      nextFood.unit === "piece" &&
+      (currentFood.portionMax > 1) !== (nextFood.portionMax > 1)
+    ) {
+      return false;
+    }
+  }
+
   const currentIdentity = canonicalizeFood(currentFood);
   const nextIdentity = canonicalizeFood(nextFood);
   const matchIdentityKey = nutritionIdentityKey(match.identity);
@@ -64,17 +132,15 @@ export async function enrichUnresolvedMatches(
 ): Promise<NutritionMatch[]> {
   const unresolvedIndexes = localMatches
     .map((match, index) => (
-      match.includedInTotal
-      || foods[index]?.suspectedDuplicateMilk === true
-      || photoGenericMilkNeedsConfirmation(foods[index] ?? { displayName: "", normalizedName: "" }, mealContext)
-        ? -1
-        : index
+      foods[index] && needsServerCatalogCheck(foods[index], match, mealContext)
+        ? index
+        : -1
     ))
     .filter((index) => index >= 0);
 
   if (unresolvedIndexes.length === 0) return localMatches;
 
-  const failedMatch = (match: NutritionMatch): NutritionMatch => signal?.aborted
+  const failedMatch = (match: NutritionMatch): NutritionMatch => signal?.aborted || match.includedInTotal
     ? match
     : {
       ...match,
@@ -130,8 +196,16 @@ export async function enrichUnresolvedMatches(
         return;
       }
       const match = parsed.data;
-      if (match.includedInTotal) next[index] = match;
-      else if (warningIndexes.has(offset)) next[index] = failedMatch(localMatches[index]);
+      if (match.includedInTotal) {
+        next[index] = match;
+      } else if (!localMatches[index].includedInTotal && warningIndexes.has(offset)) {
+        next[index] = failedMatch(localMatches[index]);
+      } else if (
+        !localMatches[index].includedInTotal &&
+        (match.coverageReason === "UNIT_CONVERSION_MISSING" || match.coverageReason === "AMBIGUOUS_MATCH")
+      ) {
+        next[index] = match;
+      }
     });
     return next;
   } catch {
