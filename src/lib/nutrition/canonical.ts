@@ -1632,7 +1632,14 @@ function containedDishHits(
       if (!needle) continue;
       // Avoid 1-char CJK aliases (e.g. 粥) in substring fallback.
       if (/[\u4e00-\u9fff]/.test(needle) && [...needle].length < 2) continue;
-      if (!textContainsKey(normalized, needle, { singleCjkKeyMustBeStandalone: true })) continue;
+      if (
+        !textContainsKey(normalized, needle, {
+          singleCjkKeyMustBeStandalone: true,
+          skipLongerAliasShadow: true,
+        })
+      ) {
+        continue;
+      }
       if (!bestAlias || needle.length > bestAlias.length) bestAlias = needle;
     }
     if (bestAlias) raw.push({ identity, matchedAlias: bestAlias });
