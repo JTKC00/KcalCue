@@ -7,7 +7,7 @@ import { demoFoodAnalysis } from "@/lib/providers/food-vision/demo";
 import { CURRENT_MEAL_SCHEMA_VERSION, dayNutrition, newDraft } from "./types";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { MealRepository } from "./repository";
-import { changeSyncState, clearSyncState } from "./outbox";
+import { changeSyncState, clearSyncState, readPhotoPayload } from "./outbox";
 import { dayCalories } from "./calories";
 import { provenance } from "@/test/provenance-fixture";
 
@@ -65,7 +65,7 @@ describe("durable offline meal outbox", () => {
       const request = indexedDB.open("kcalcue-sync", currentVersion + 1);
       request.onupgradeneeded = () => {
         if (!request.result.objectStoreNames.contains("photoPayloads"))
-          request.result.createObjectStore("photoPayloads");
+          request.result.createObjectStore("photoPayloads", { keyPath: ["uid", "uploadId"] });
       };
       request.onsuccess = () => {
         request.result.close();
@@ -767,5 +767,112 @@ describe("durable offline meal outbox", () => {
     const clear = await repository.save({ ...oldEdit, calorieCorrection: null }, crypto.randomUUID());
     await repository.save({ ...clear, calorieCorrection: undefined, time: "19:00" }, crypto.randomUUID());
     expect((await repository.list())[0].calorieCorrection).toBeNull();
+  });
+
+  it("rejects a changed command under an already acknowledged mutation ID", async () => {
+    const mutationId = crypto.randomUUID();
+    const first = await repository.save(draft(), mutationId);
+    fixture.fetch.mockResolvedValueOnce(Response.json({ record: first }))
+      .mockResolvedValueOnce(Response.json({ records: [first] }));
+    await repository.sync();
+    expect((await repository.state()).jobs).toHaveLength(0);
+    await expect(repository.save({ ...first, time: "19:30" }, mutationId))
+      .rejects.toMatchObject({ code: "conflict", status: 409 });
+    expect((await repository.state()).jobs).toHaveLength(0);
+    expect((await repository.list())[0].time).toBe(first.time);
+  });
+
+  it("stages photo upload, attaches on meal save, clears Blob on ACK, and keeps other meals syncing", async () => {
+    const photo = new Blob(["private jpeg fixture"], { type: "image/jpeg" });
+    const mutationId = crypto.randomUUID();
+    const uploadId = crypto.randomUUID();
+    const first = await repository.saveWithPhoto({ ...draft(), photo }, mutationId, uploadId);
+    const other = await repository.save(draft(), crypto.randomUUID());
+    expect(await (await readPhotoPayload("a", uploadId))?.text()).toBe("private jpeg fixture");
+    expect((await repository.state()).jobs[0]).toMatchObject({
+      id: mutationId, photoUpload: { uploadId, status: "pending" },
+    });
+
+    // Transient upload failure + status still "uploading" leaves other meals able to sync.
+    fixture.fetch
+      .mockResolvedValueOnce(Response.json({ error: { code: "photo_storage_unavailable" } }, { status: 503 }))
+      .mockResolvedValueOnce(Response.json({ registryState: "uploading" }))
+      .mockResolvedValueOnce(Response.json({ record: other }))
+      .mockResolvedValueOnce(Response.json({ records: [other] }));
+    await expect(repository.sync()).rejects.toMatchObject({ status: 503 });
+    expect((await repository.state()).jobs.map((job) => job.id)).toEqual([mutationId]);
+    expect(await readPhotoPayload("a", uploadId)).not.toBeNull();
+
+    // Next sync recovers staged status via /api/meals/photo/status and attaches with original uploadId.
+    fixture.fetch
+      .mockRejectedValueOnce(new TypeError("upload response lost"))
+      .mockResolvedValueOnce(Response.json({ registryState: "staged" }))
+      .mockResolvedValueOnce(Response.json({ record: first }))
+      .mockResolvedValueOnce(Response.json({ records: [first, other] }));
+    await new MealRepository().sync();
+    expect((await repository.state()).jobs).toHaveLength(0);
+    expect(await readPhotoPayload("a", uploadId)).toBeNull();
+    const command = fixture.fetch.mock.calls
+      .filter(([url, init]) => url === "/api/meals" && init?.method === "POST")
+      .map(([, init]) => JSON.parse(init.body))
+      .find((item) => item.mutationId === mutationId);
+    expect(command).toMatchObject({
+      mutationId, photoAction: { kind: "attach", uploadId },
+    });
+    expect(command).not.toHaveProperty("photo");
+    expect(command).not.toHaveProperty("photoUpload");
+  });
+
+  it("replaces a blocked pending photo job without photo using a new mutationId and clears its Blob", async () => {
+    const photo = new Blob(["private jpeg fixture"], { type: "image/jpeg" });
+    const mutationId = crypto.randomUUID();
+    const uploadId = crypto.randomUUID();
+    const first = await repository.saveWithPhoto({ ...draft(), photo }, mutationId, uploadId);
+    fixture.fetch
+      .mockResolvedValueOnce(Response.json({ error: { code: "photo_output_too_large" } }, { status: 413 }))
+      .mockResolvedValueOnce(Response.json({ records: [] }));
+    await repository.sync();
+    expect((await repository.state()).jobs[0]).toMatchObject({ id: mutationId, error: "photo_output_too_large" });
+
+    const replacementId = await repository.saveQueuedWithoutPhoto(first.id, mutationId);
+    expect(replacementId).not.toBe(mutationId);
+    expect(await readPhotoPayload("a", uploadId)).toBeNull();
+    const queued = (await repository.state()).jobs;
+    expect(queued).toHaveLength(1);
+    expect(queued[0]).toMatchObject({ id: replacementId, kind: "save" });
+    expect(queued[0].photoUpload).toBeUndefined();
+    expect(queued[0].error).toBeUndefined();
+  });
+
+  it("queues removePhoto action, hides photoRef offline, and discards photo Blobs per account", async () => {
+    const first = await repository.save(draft(), crypto.randomUUID());
+    const photoRef = {
+      attachmentId: crypto.randomUUID(), generation: "1234567890123",
+      contentType: "image/jpeg" as const, width: 1200, height: 900, byteSize: 100_000,
+    };
+    const confirmed = { ...first, schemaVersion: CURRENT_MEAL_SCHEMA_VERSION, createdAt: "2026-10-07T01:00:00.000Z", photoRef };
+    await changeSyncState("a", () => ({ remote: [confirmed], syncedAt: null, jobs: [] }));
+
+    const removeMutationId = crypto.randomUUID();
+    const visible = await repository.save(confirmed, removeMutationId, "a", undefined, { removePhoto: true });
+    expect(visible.photoRef).toBeNull();
+    fixture.fetch
+      .mockResolvedValueOnce(Response.json({ record: { ...confirmed, version: 2, photoRef: null } }))
+      .mockResolvedValueOnce(Response.json({ records: [{ ...confirmed, version: 2, photoRef: null }] }));
+    await repository.sync();
+    const removeCmd = JSON.parse(fixture.fetch.mock.calls[0][1].body);
+    expect(removeCmd).toMatchObject({ mutationId: removeMutationId, photoAction: { kind: "remove" } });
+
+    const photo = new Blob(["private jpeg fixture"], { type: "image/jpeg" });
+    const mealA = await repository.saveWithPhoto({ ...draft(), photo }, crypto.randomUUID(), crypto.randomUUID());
+    const uploadA = (await repository.state()).jobs[0].photoUpload!.uploadId;
+    fixture.uid = "b";
+    const mealB = await repository.saveWithPhoto({ ...draft(), photo }, crypto.randomUUID(), crypto.randomUUID());
+    const uploadB = (await repository.state("b")).jobs[0].photoUpload!.uploadId;
+    fixture.uid = "a";
+    await repository.discardPending(mealA.id);
+    expect(await readPhotoPayload("a", uploadA)).toBeNull();
+    expect((await repository.state("b")).jobs).toMatchObject([{ record: { id: mealB.id } }]);
+    expect(await readPhotoPayload("b", uploadB)).not.toBeNull();
   });
 });
