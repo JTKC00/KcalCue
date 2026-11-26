@@ -1078,10 +1078,12 @@ export function contradictoryDairyMilkLabel(
 
 const DISH_COMPONENT_SUFFIX_RE =
   /(?:皮|醬|酱|汁|醋|油|湯底|汤底|醬料|酱料|餅底|饼底|調味粉|调味粉|湯粉|汤粉|味粉|咖喱粉|咖哩粉)$|(?:^|\s)(?:sauce|oil|vinegar|wrapper|wrappers|crust|broth|base|soup\s+base|skin|pastry|shell|stock|seasoning|powder|glaze|dip)$/;
-const STIR_FRY_NAME_CUE_RE =
-  /炒|撈|捞|(?:^|\s)(?:fried|stir\s+fried|stirfried|pan\s+fried|dry\s+fried|chow|lo\s+mein|yakisoba|yaki\s+udon|yakiudon)(?:$|\s)/;
-const STIR_FRY_PREP_CUE_RE =
-  /炒|(?:^|\s)(?:stir\s+fried|stirfried|dry\s+fried)(?:$|\s)/;
+const STIR_FRY_OR_DRY_NOODLE_NAME_CUE_RE =
+  /炒|撈|捞|乾拌|干拌|涼拌|凉拌|拌烏冬|拌乌冬|拌烏龍|拌乌龙|拌麵|拌面|拌米線|拌米线|拌河粉|拌拉麵|拌拉面|走湯|走汤|無湯|无汤|免湯|免汤|冷烏冬|冷乌冬|冷麵|冷面|沾麵|沾面|(?:^|\s)(?:fried|stir\s+fried|stirfried|pan\s+fried|dry\s+fried|dry|tossed|brothless|no\s+soup|no\s+broth|without\s+soup|without\s+broth|chow|lo\s+mein|yakisoba|yaki\s+udon|yakiudon|zaru|bukkake|tsukemen|dipping|mazesoba|abura\s+soba|cold\s+udon|cold\s+noodles?)(?:$|\s)/;
+const STIR_FRY_OR_DRY_NOODLE_PREP_CUE_RE =
+  /炒|乾拌|干拌|涼拌|凉拌|拌|乾撈|干捞|撈|捞|無湯|无汤|走湯|走汤|免湯|免汤|(?:^|\s)(?:stir\s+fried|stirfried|dry\s+fried|dry|tossed|brothless|no\s+soup|no\s+broth|without\s+soup|without\s+broth)(?:$|\s)/;
+const DRY_NOODLE_NOTE_CUE_RE =
+  /乾拌|干拌|涼拌|凉拌|走湯|走汤|無湯|无汤|免湯|免汤|(?:^|\s)(?:dry\s+tossed|brothless|no\s+soup|no\s+broth|without\s+soup|without\s+broth)(?:$|\s)/;
 const SOUP_NOODLE_DISH_IDS = new Set([
   "cart-noodles",
   "beef-brisket-noodles",
@@ -1099,7 +1101,7 @@ const SOUP_NOODLE_DISH_IDS = new Set([
 ]);
 const SOUP_NOODLE_CANONICALS = new Set(["ramen", "noodle-soup"]);
 const RICH_BROTH_NOODLE_CONTRADICTION_RE =
-  /咖喱|咖哩|喇沙|叻沙|(?:^|\s)(?:curry|laksa)(?:$|\s)/;
+  /咖喱|咖哩|喇沙|叻沙|忌廉|白汁|(?:^|\s)(?:curry|laksa|cream|creamy|carbonara)(?:$|\s)/;
 const GENERIC_DISH_UMBRELLA_CANONICALS = new Set([
   "donburi",
   "pasta",
@@ -1148,12 +1150,14 @@ function isDishComponentOnly(food: Pick<ContradictionFood, "displayName" | "norm
 }
 
 function hasStirFryNoodleContradiction(
-  food: Pick<ContradictionFood, "displayName" | "normalizedName" | "preparationMethod">,
+  food: Pick<ContradictionFood, "displayName" | "normalizedName" | "preparationMethod" | "notes">,
 ): boolean {
   const names = normalizeFoodName(`${food.displayName} ${food.normalizedName}`);
-  if (STIR_FRY_NAME_CUE_RE.test(names)) return true;
+  if (STIR_FRY_OR_DRY_NOODLE_NAME_CUE_RE.test(names)) return true;
   const prep = normalizeFoodName(food.preparationMethod ?? "");
-  return Boolean(prep && STIR_FRY_PREP_CUE_RE.test(prep));
+  if (prep && STIR_FRY_OR_DRY_NOODLE_PREP_CUE_RE.test(prep)) return true;
+  const notes = normalizeFoodName(food.notes ?? "");
+  return Boolean(notes && DRY_NOODLE_NOTE_CUE_RE.test(notes));
 }
 
 export function isUnsweetenedLemonTea(food: ContradictionFood): boolean {
@@ -1398,8 +1402,58 @@ function isUmbrellaParentOf(umbrella: DishIdentity, specific: DishIdentity): boo
   ) {
     return true;
   }
-  if (umbrella.id === "plain-congee" && specific.familyId === "congee") {
-    return true;
+  return false;
+}
+
+const MULTI_DISH_JOINER_RE =
+  /拼|加|及|與|和|同|\+|&|(?:^|\s)(?:and|plus|or)(?:$|\s)/;
+const CJK_UMBRELLA_CLASS_SUFFIXES = new Set([
+  "湯麵",
+  "汤面",
+  "碟頭飯",
+  "碟头饭",
+  "碗頭飯",
+  "碗头饭",
+]);
+
+function countPhraseOccurrences(haystack: string, needle: string): number {
+  if (!needle) return 0;
+  let count = 0;
+  let index = 0;
+  while (true) {
+    const found = haystack.indexOf(needle, index);
+    if (found === -1) break;
+    count += 1;
+    index = found + Math.max(1, needle.length);
+  }
+  return count;
+}
+
+function describesSameDishMention(
+  haystack: string,
+  specificAlias: string,
+  umbrellaAlias: string,
+): boolean {
+  if (!specificAlias || !umbrellaAlias || MULTI_DISH_JOINER_RE.test(haystack)) return false;
+  if (
+    countPhraseOccurrences(haystack, umbrellaAlias) !== 1 ||
+    countPhraseOccurrences(haystack, specificAlias) !== 1
+  ) {
+    return false;
+  }
+  if (!/[\u4e00-\u9fff]/.test(specificAlias) && !/[\u4e00-\u9fff]/.test(umbrellaAlias)) {
+    if (englishPhraseIn(haystack, `${specificAlias} ${umbrellaAlias}`)) return true;
+    const sTokens = specificAlias.split(" ");
+    const uTokens = umbrellaAlias.split(" ");
+    const lastSpecific = sTokens[sTokens.length - 1];
+    if (lastSpecific && lastSpecific === uTokens[0]) {
+      const merged = [...sTokens, ...uTokens.slice(1)].join(" ");
+      if (englishPhraseIn(haystack, merged)) return true;
+    }
+    return false;
+  }
+  if (CJK_UMBRELLA_CLASS_SUFFIXES.has(umbrellaAlias)) {
+    return haystack.includes(`${specificAlias}${umbrellaAlias}`);
   }
   return false;
 }
@@ -1568,14 +1622,15 @@ function containedDishHits(
   }
   // Drop shorter aliases strictly contained in a longer matched dish alias
   // (e.g. 叉燒碟頭飯 beats 碟頭飯; 壽司拼盤 beats 壽司) and generic umbrella
-  // parents when a specific child dish is also matched in the same string.
+  // parents only when they form part of the same single-dish mention.
   return raw.filter((hit) =>
     !raw.some(
       (other) =>
         other.identity.id !== hit.identity.id &&
         ((other.matchedAlias.length > hit.matchedAlias.length &&
           textContainsKey(other.matchedAlias, hit.matchedAlias, { skipLongerAliasShadow: true })) ||
-          isUmbrellaParentOf(hit.identity, other.identity)),
+          (isUmbrellaParentOf(hit.identity, other.identity) &&
+            describesSameDishMention(normalized, other.matchedAlias, hit.matchedAlias))),
     ),
   );
 }
