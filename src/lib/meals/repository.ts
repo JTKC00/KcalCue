@@ -8,6 +8,7 @@ import {
   hasCurrentMealVersion,
   markPhotoUploadStaged,
   readPhotoPayload,
+  replaceExpiredPhotoJobAndPayload,
   visibleMeals,
   type PendingMeal,
 } from "./outbox";
@@ -171,7 +172,12 @@ export class MealRepository {
               throw new RepositoryError("conflict", 409);
             if (existing.error) {
               const index = state.jobs.findIndex((pending) => pending.id === existing.id);
-              state.jobs[index] = { ...existing, record, ...(removePhoto ? { removePhoto: true } : { removePhoto: undefined }), error: undefined };
+              state.jobs[index] = {
+                ...existing,
+                record,
+                ...(removePhoto ? { removePhoto: true } : { removePhoto: undefined }),
+                error: undefined,
+              };
             } else if (
               existing.expectedVersion !== draft.version ||
               Boolean(existing.removePhoto) !== removePhoto ||
@@ -208,47 +214,208 @@ export class MealRepository {
     return this.save(draft, mutationId, uid, { uploadId, blob: draft.photo });
   }
 
-  // Escape hatch when a pending photo upload cannot complete before meal save.
-  // Only allowed while the photo is still pending (meal POST has not been
-  // dispatched). Allocates a fresh mutationId and clears the local Blob.
+  private async readRemoteSnapshot(uid: string, since?: string): Promise<MealListPage | null> {
+    const readOnce = async (): Promise<MealListPage | null> => {
+      if (uid !== firebaseAuth()?.currentUser?.uid || !navigator.onLine) return null;
+      const first = mealListPage(await result(await authorizedFetch(
+        `/api/meals?paged=1${since ? `&since=${encodeURIComponent(since)}` : ""}`,
+        { cache: "no-store" }, uid,
+      )));
+      let records = first.records;
+      let cursor = first.nextCursor;
+      if (cursor) {
+        const received = new Set(records!.map((record) => record.id));
+        const complete = [...records!];
+        for (let pageNumber = 1; cursor; pageNumber++) {
+          if (pageNumber >= MAX_MEAL_SYNC_PAGES)
+            throw new RepositoryError("invalid_response", 502);
+          if (uid !== firebaseAuth()?.currentUser?.uid || !navigator.onLine) return null;
+          const page = mealListPage(await result(await authorizedFetch(
+            `/api/meals?paged=1&cursor=${encodeURIComponent(cursor)}&revision=${encodeURIComponent(first.revision!)}`,
+            { cache: "no-store" }, uid,
+          )));
+          if (page.revision !== first.revision || !page.records ||
+            page.records.some((record) => received.has(record.id)) ||
+            page.nextCursor === cursor)
+            throw new RepositoryError("invalid_response", 502);
+          for (const record of page.records) received.add(record.id);
+          complete.push(...page.records);
+          cursor = page.nextCursor;
+        }
+        records = complete;
+      }
+      return { records, revision: first.revision };
+    };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await readOnce();
+      } catch (error) {
+        // A concurrent cloud write invalidates the page cursor. Restart the
+        // read once without replaying any already-acknowledged meal writes.
+        if (!(error instanceof RepositoryError && error.code === "snapshot_changed") || attempt === 1)
+          throw error;
+      }
+    }
+    return null;
+  }
+
+  // Before rewriting a staged photo job whose reservation expired
+  // (`photo_not_staged`), verify against the live cloud snapshot that the
+  // original mutation was not already committed with a lost ACK.
+  private async confirmStagedMutationNotCommitted(
+    mealId: string,
+    blockedMutationId: string,
+    expectedVersion: number,
+    uploadId: string,
+    uid: string,
+  ): Promise<"already_committed" | "not_committed"> {
+    if (!navigator.onLine) throw new RepositoryError("service_unavailable", 503);
+    const snapshot = await this.readRemoteSnapshot(uid);
+    if (!snapshot?.records) throw new RepositoryError("service_unavailable", 503);
+    const remote = snapshot.records.find((record) => record.id === mealId);
+    if (remote?.mutationId === blockedMutationId) {
+      await changeSyncStateAndClearPhotos(uid, (current) => ({
+        ...current,
+        remote: snapshot.records ?? current.remote,
+        revision: snapshot.revision ?? current.revision,
+        jobs: current.jobs.filter((job) => job.id !== blockedMutationId),
+      }), [uploadId]);
+      return "already_committed";
+    }
+    if (remote && remote.version > expectedVersion) {
+      throw new RepositoryError("conflict", 409);
+    }
+    return "not_committed";
+  }
+
+  // Escape hatch when a pending photo upload or an expired staged reservation
+  // (`photo_not_staged`) cannot attach. Allocates a fresh mutationId and clears
+  // the local Blob. Staged mutations must verify non-commit first.
   async saveQueuedWithoutPhoto(mealId: string, blockedMutationId: string, uid = currentUser()): Promise<string> {
     if (currentUser() !== uid) throw new RepositoryError("login_required", 401);
     if (!navigator.locks) throw new RepositoryError("browser_unsupported", 400);
     const nextMutationId = crypto.randomUUID();
-    await navigator.locks.request(`kcalcue-account-${uid}`, async () => {
-      if (currentUser() !== uid) throw new RepositoryError("login_required", 401);
-      const state = await changeSyncState(uid);
-      const target = state.jobs.find((job) => job.id === blockedMutationId && job.record.id === mealId);
-      if (!target || target.kind !== "save" || !target.photoUpload || target.photoUpload.status !== "pending") {
-        throw new RepositoryError("conflict", 409);
-      }
-      const uploadId = target.photoUpload.uploadId;
-      await changeSyncStateAndClearPhotos(uid, (current) => {
-        const currentTarget = current.jobs.find((job) => job.id === blockedMutationId && job.record.id === mealId);
-        if (!currentTarget || currentTarget.kind !== "save" || !currentTarget.photoUpload || currentTarget.photoUpload.status !== "pending") {
+    let resultId = nextMutationId;
+    await locked(uid, async () => {
+      await navigator.locks.request(`kcalcue-account-${uid}`, async () => {
+        if (currentUser() !== uid) throw new RepositoryError("login_required", 401);
+        const state = await changeSyncState(uid);
+        const target = state.jobs.find((job) => job.id === blockedMutationId && job.record.id === mealId);
+        if (!target || target.kind !== "save" || !target.photoUpload) {
           throw new RepositoryError("conflict", 409);
         }
-        return {
-          ...current,
-          jobs: current.jobs.map((job) =>
-            job.id === blockedMutationId
-              ? {
-                  id: nextMutationId,
-                  kind: "save",
-                  record: {
-                    ...currentTarget.record,
-                    mutationId: nextMutationId,
-                    updatedAt: new Date().toISOString(),
-                  },
-                  expectedVersion: currentTarget.expectedVersion,
-                }
-              : job,
-          ),
-        };
-      }, [uploadId]);
+        const isPending = target.photoUpload.status === "pending";
+        const isExpiredStaged = target.photoUpload.status === "staged" && target.error === "photo_not_staged";
+        if (!isPending && !isExpiredStaged) {
+          throw new RepositoryError("conflict", 409);
+        }
+        const uploadId = target.photoUpload.uploadId;
+        if (isExpiredStaged) {
+          const outcome = await this.confirmStagedMutationNotCommitted(
+            mealId, blockedMutationId, target.expectedVersion, uploadId, uid,
+          );
+          if (outcome === "already_committed") {
+            resultId = blockedMutationId;
+            return;
+          }
+        }
+        await changeSyncStateAndClearPhotos(uid, (current) => {
+          const currentTarget = current.jobs.find((job) => job.id === blockedMutationId && job.record.id === mealId);
+          if (!currentTarget || currentTarget.kind !== "save" || !currentTarget.photoUpload) {
+            throw new RepositoryError("conflict", 409);
+          }
+          const stillValid = currentTarget.photoUpload.status === "pending" ||
+            (currentTarget.photoUpload.status === "staged" && currentTarget.error === "photo_not_staged");
+          if (!stillValid) throw new RepositoryError("conflict", 409);
+          return {
+            ...current,
+            jobs: current.jobs.map((job) =>
+              job.id === blockedMutationId
+                ? {
+                    id: nextMutationId,
+                    kind: "save",
+                    record: {
+                      ...currentTarget.record,
+                      mutationId: nextMutationId,
+                      updatedAt: new Date().toISOString(),
+                    },
+                    expectedVersion: currentTarget.expectedVersion,
+                    ...(currentTarget.seq !== undefined ? { seq: currentTarget.seq } : {}),
+                  }
+                : job,
+            ),
+          };
+        }, [uploadId]);
+      });
     });
     signalChange(uid);
-    return nextMutationId;
+    return resultId;
+  }
+
+  // Re-queues an expired `staged` photo upload (`photo_not_staged`) under a
+  // fresh mutationId and fresh uploadId while preserving the local JPEG Blob.
+  async requeueExpiredPhotoUpload(
+    mealId: string,
+    blockedMutationId: string,
+    uid = currentUser(),
+  ): Promise<{ mutationId: string; uploadId: string } | null> {
+    if (currentUser() !== uid) throw new RepositoryError("login_required", 401);
+    if (!navigator.locks) throw new RepositoryError("browser_unsupported", 400);
+    const nextMutationId = crypto.randomUUID();
+    const nextUploadId = crypto.randomUUID();
+    let outcome: { mutationId: string; uploadId: string } | null = {
+      mutationId: nextMutationId,
+      uploadId: nextUploadId,
+    };
+    await locked(uid, async () => {
+      await navigator.locks.request(`kcalcue-account-${uid}`, async () => {
+        if (currentUser() !== uid) throw new RepositoryError("login_required", 401);
+        const state = await changeSyncState(uid);
+        const target = state.jobs.find((job) => job.id === blockedMutationId && job.record.id === mealId);
+        if (!target || target.kind !== "save" || !target.photoUpload ||
+            target.photoUpload.status !== "staged" || target.error !== "photo_not_staged") {
+          throw new RepositoryError("conflict", 409);
+        }
+        const oldUploadId = target.photoUpload.uploadId;
+        const commitState = await this.confirmStagedMutationNotCommitted(
+          mealId, blockedMutationId, target.expectedVersion, oldUploadId, uid,
+        );
+        if (commitState === "already_committed") {
+          outcome = null;
+          return;
+        }
+        const blob = await readPhotoPayload(uid, oldUploadId);
+        if (!blob) throw new RepositoryError("photo_payload_missing", 409);
+        await replaceExpiredPhotoJobAndPayload(uid, oldUploadId, nextUploadId, blob, (current, newIntent) => {
+          const currentTarget = current.jobs.find((job) => job.id === blockedMutationId && job.record.id === mealId);
+          if (!currentTarget || currentTarget.kind !== "save" || !currentTarget.photoUpload ||
+              currentTarget.photoUpload.status !== "staged" || currentTarget.error !== "photo_not_staged") {
+            throw new RepositoryError("conflict", 409);
+          }
+          return {
+            ...current,
+            jobs: current.jobs.map((job) =>
+              job.id === blockedMutationId
+                ? {
+                    id: nextMutationId,
+                    kind: "save",
+                    record: {
+                      ...currentTarget.record,
+                      mutationId: nextMutationId,
+                      updatedAt: new Date().toISOString(),
+                    },
+                    expectedVersion: currentTarget.expectedVersion,
+                    photoUpload: newIntent,
+                    ...(currentTarget.seq !== undefined ? { seq: currentTarget.seq } : {}),
+                  }
+                : job,
+            ),
+          };
+        });
+      });
+    });
+    signalChange(uid);
+    return outcome;
   }
 
   async delete(record: MealRecord) {
@@ -459,49 +626,7 @@ export class MealRepository {
       }
       if (uid !== firebaseAuth()?.currentUser?.uid) return;
       const since = (await changeSyncState(uid)).revision;
-      const readSnapshot = async (): Promise<MealListPage | null> => {
-        if (uid !== firebaseAuth()?.currentUser?.uid || !navigator.onLine) return null;
-        const first = mealListPage(await result(await authorizedFetch(
-          `/api/meals?paged=1${since ? `&since=${encodeURIComponent(since)}` : ""}`,
-          { cache: "no-store" }, uid,
-        )));
-        let records = first.records;
-        let cursor = first.nextCursor;
-        if (cursor) {
-          const received = new Set(records!.map((record) => record.id));
-          const complete = [...records!];
-          for (let pageNumber = 1; cursor; pageNumber++) {
-            if (pageNumber >= MAX_MEAL_SYNC_PAGES)
-              throw new RepositoryError("invalid_response", 502);
-            if (uid !== firebaseAuth()?.currentUser?.uid || !navigator.onLine) return null;
-            const page = mealListPage(await result(await authorizedFetch(
-              `/api/meals?paged=1&cursor=${encodeURIComponent(cursor)}&revision=${encodeURIComponent(first.revision!)}`,
-              { cache: "no-store" }, uid,
-            )));
-            if (page.revision !== first.revision || !page.records ||
-              page.records.some((record) => received.has(record.id)) ||
-              page.nextCursor === cursor)
-              throw new RepositoryError("invalid_response", 502);
-            for (const record of page.records) received.add(record.id);
-            complete.push(...page.records);
-            cursor = page.nextCursor;
-          }
-          records = complete;
-        }
-        return { records, revision: first.revision };
-      };
-      let snapshot: MealListPage | null = null;
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          snapshot = await readSnapshot();
-          break;
-        } catch (error) {
-          // A concurrent cloud write invalidates the page cursor. Restart the
-          // read once without replaying any already-acknowledged meal writes.
-          if (!(error instanceof RepositoryError && error.code === "snapshot_changed") || attempt === 1)
-            throw error;
-        }
-      }
+      const snapshot = await this.readRemoteSnapshot(uid, since);
       if (!snapshot || uid !== firebaseAuth()?.currentUser?.uid) return;
       await changeSyncState(uid, (state) => ({
         ...state,

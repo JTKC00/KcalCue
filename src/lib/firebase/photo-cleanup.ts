@@ -16,6 +16,7 @@ export type PhotoCleanupResult =
 export type DeletedPhotoReconcileResult =
   | "not_deleted"
   | "already_reconciled"
+  | "confirmed_absent"
   | "deleted_late_generation";
 
 export interface PhotoAbsenceProofOptions {
@@ -154,14 +155,31 @@ export async function reconcileUnknownPhotoGenerationAndCleanup(
 export async function reconcileDeletedPhotoAsset(
   db: Firestore,
   objects: Pick<ExactPhotoObjectStore, "metadata" | "read" | "deleteGeneration"> &
-    Partial<Pick<ExactPhotoObjectStore, "verifyGenerationAbsent">>,
+    Partial<Pick<ExactPhotoObjectStore, "verifyGenerationAbsent" | "verifyKeyAbsent">>,
   uid: string,
   uploadId: string,
   options?: { absenceProof?: PhotoBucketIdentity },
 ): Promise<DeletedPhotoReconcileResult> {
   const asset = await checkedAsset(db, uid, uploadId);
   if (asset.state !== "deleted") return "not_deleted";
-  const stored = await objects.metadata(asset.bucketName, asset.objectKey);
+  let stored;
+  try {
+    stored = await objects.metadata(asset.bucketName, asset.objectKey);
+  } catch (error) {
+    if (error instanceof HttpError &&
+        error.status === 503 &&
+        error.code === "photo_storage_unavailable" &&
+        options?.absenceProof &&
+        options.absenceProof.bucketName === asset.bucketName &&
+        objects.verifyKeyAbsent) {
+      const absent = await objects.verifyKeyAbsent(
+        asset.bucketName, asset.objectKey, options.absenceProof,
+      );
+      if (absent !== "absent") throw new HttpError(503, "photo_storage_unavailable");
+      return "confirmed_absent";
+    }
+    throw error;
+  }
   if (stored.generation === asset.generation)
     throw new HttpError(503, "photo_deleted_generation_present");
   if (stored.inputSha256 !== asset.inputSha256)

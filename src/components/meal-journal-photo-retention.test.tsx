@@ -13,6 +13,7 @@ const fixture = vi.hoisted(() => ({
   save: vi.fn(),
   saveWithPhoto: vi.fn(),
   saveQueuedWithoutPhoto: vi.fn(),
+  requeueExpiredPhotoUpload: vi.fn(),
   sync: vi.fn(),
   write: vi.fn(),
   preparePhoto: vi.fn(),
@@ -39,6 +40,7 @@ vi.mock("@/lib/meals/repository", () => ({
     save = fixture.save;
     saveWithPhoto = fixture.saveWithPhoto;
     saveQueuedWithoutPhoto = fixture.saveQueuedWithoutPhoto;
+    requeueExpiredPhotoUpload = fixture.requeueExpiredPhotoUpload;
     sync = fixture.sync;
   },
 }));
@@ -95,6 +97,10 @@ beforeEach(() => {
     ...draft, userId: "a", mutationId, version: draft.version + 1, updatedAt: new Date().toISOString(),
   }));
   fixture.saveQueuedWithoutPhoto.mockReset().mockResolvedValue(crypto.randomUUID());
+  fixture.requeueExpiredPhotoUpload.mockReset().mockResolvedValue({
+    mutationId: crypto.randomUUID(),
+    uploadId: crypto.randomUUID(),
+  });
   fixture.sync.mockReset();
   fixture.write.mockReset();
   fixture.preparePhoto.mockReset().mockResolvedValue(new Blob(["jpeg"], { type: "image/jpeg" }));
@@ -189,4 +195,39 @@ it("defaults opt-in unchecked, queues photo atomically when checked offline, and
   fireEvent.click(screen.getByRole("button", { name: /離線儲存餐點/ }));
   await waitFor(() => expect(fixture.saveWithPhoto).toHaveBeenCalledTimes(1));
   expect(await screen.findByText("已保留本機；餐點及附圖待同步。")).toBeInTheDocument();
+});
+
+it("offers retry-upload and save-without-photo actions when a staged photo expires (photo_not_staged)", async () => {
+  const expiredStagedJob = {
+    id: crypto.randomUUID(),
+    kind: "save" as const,
+    expectedVersion: 0,
+    error: "photo_not_staged",
+    photoUpload: {
+      uploadId: crypto.randomUUID(),
+      sha256: "a".repeat(64),
+      byteSize: 100,
+      pipelineVersion: 1,
+      status: "staged" as const,
+    },
+    record: {
+      ...newDraft(),
+      userId: "a",
+      version: 1,
+      mutationId: crypto.randomUUID(),
+      updatedAt: new Date().toISOString(),
+      items: createEditableFoodItems(demoFoodAnalysis.foods),
+    } satisfies MealRecord,
+  };
+  fixture.state.mockResolvedValue({ remote: [], jobs: [expiredStagedJob], syncedAt: null });
+
+  render(<MealJournal initialProviderMode="live" initialPhotoUploadsEnabled={true} />);
+  await act(async () => { fixture.callback?.({ uid: "a", email: "a@example.com" }); });
+
+  expect(await screen.findByRole("button", { name: "不附圖儲存餐點" })).toBeInTheDocument();
+  const retryBtn = screen.getByRole("button", { name: "重新上傳附圖" });
+  fireEvent.click(retryBtn);
+  await waitFor(() => expect(fixture.requeueExpiredPhotoUpload).toHaveBeenCalledWith(
+    expiredStagedJob.record.id, expiredStagedJob.id, "a",
+  ));
 });

@@ -9,6 +9,7 @@ import { runDeletedPhotoReconcileBatch } from "./photo-deleted-scanner";
 
 const maintenancePath = "kcalcuePhotoMaintenance/current";
 const DEFAULT_LEASE_MS = 120_000;
+const DEFAULT_MAX_CYCLE_MS = 90_000;
 const BASE_BACKOFF_MS = 60_000;
 const MAX_BACKOFF_MS = 3_600_000;
 const STALE_ALERT_FAILURE_THRESHOLD = 3;
@@ -27,6 +28,7 @@ export interface PhotoMaintenanceCycleResult {
   consecutiveFailures: number;
   retryAfterMs?: number;
   staleOver24hCount: number;
+  budgetExceeded?: boolean;
   phases?: {
     expiry: PhotoMaintenancePhaseSummary;
     attachedTombstones: PhotoMaintenancePhaseSummary;
@@ -41,6 +43,7 @@ export interface PhotoMaintenanceOptions {
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
   leaseMs?: number;
+  maxCycleMs?: number;
   maxPhaseRetries?: number;
   retryDelayMs?: number;
 }
@@ -74,14 +77,12 @@ function summarizeOutcomes(
   outcomes: Array<{ result: string; code?: string }>,
   scanned: number,
   successResults: Set<string>,
-  ignoredErrorCodes?: Set<string>,
 ): PhotoMaintenancePhaseSummary {
   const errorCodes = new Set<string>();
   let processed = 0;
   let errors = 0;
   for (const outcome of outcomes) {
     if (outcome.result === "error" || outcome.result === "invalid_path") {
-      if (outcome.code && ignoredErrorCodes?.has(outcome.code)) continue;
       errors += 1;
       errorCodes.add(outcome.code ?? outcome.result);
     } else if (successResults.has(outcome.result)) {
@@ -105,8 +106,9 @@ function failedPhaseSummary(error: unknown): PhotoMaintenancePhaseSummary {
   };
 }
 
-// Runs one bounded 4-phase photo maintenance cycle under a Firestore lease with
-// capped exponential backoff and non-private monitoring metrics.
+// Runs one bounded 4-phase photo maintenance cycle under a renewable Firestore
+// lease with time budget enforcement, capped exponential backoff, and
+// fail-closed monitoring metrics.
 export async function runPhotoMaintenanceCycle(
   db: Firestore,
   objects: Pick<ExactPhotoObjectStore, "metadata" | "read" | "deleteGeneration"> &
@@ -116,7 +118,8 @@ export async function runPhotoMaintenanceCycle(
   const maxItems = options.maxItems ?? 5;
   if (!Number.isInteger(maxItems) || maxItems < 1 || maxItems > 10)
     throw new HttpError(400, "invalid_photo_maintenance_batch");
-  const leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS;
+  const leaseMs = Math.max(2_000, options.leaseMs ?? DEFAULT_LEASE_MS);
+  const maxCycleMs = Math.max(1_000, Math.min(options.maxCycleMs ?? DEFAULT_MAX_CYCLE_MS, leaseMs - 1_000));
   const maxPhaseRetries = Math.min(2, Math.max(0, options.maxPhaseRetries ?? 1));
   const retryDelayMs = options.retryDelayMs ?? 250;
   const now = options.now ?? (() => Date.now());
@@ -172,6 +175,25 @@ export async function runPhotoMaintenanceCycle(
   let deletingSummary: PhotoMaintenancePhaseSummary = { scanned: 0, processed: 0, errors: 0, errorCodes: [] };
   let deletedSummary: PhotoMaintenancePhaseSummary = { scanned: 0, processed: 0, errors: 0, errorCodes: [] };
   let staleOver24hCount = 0;
+  let budgetExceeded = false;
+
+  async function renewLeaseIfWithinBudget(): Promise<boolean> {
+    const currentMs = now();
+    if (currentMs - startMs >= maxCycleMs) {
+      budgetExceeded = true;
+      return false;
+    }
+    await db.runTransaction(async (tx) => {
+      const current = await tx.get(stateRef);
+      if (current.data()?.leaseRunId !== runId) {
+        throw new HttpError(409, "photo_maintenance_lease_lost");
+      }
+      tx.set(stateRef, {
+        leaseUntil: Timestamp.fromMillis(currentMs + leaseMs),
+      }, { merge: true });
+    });
+    return true;
+  }
 
   try {
     try {
@@ -184,52 +206,54 @@ export async function runPhotoMaintenanceCycle(
       expirySummary = failedPhaseSummary(error);
     }
 
-    try {
-      const attached = await withBoundedRetry(
-        () => runAttachedPhotoTombstoneBatch(db, maxItems),
-        maxPhaseRetries, retryDelayMs, sleep,
-      );
-      attachedSummary = summarizeOutcomes(attached.outcomes, attached.scanned, new Set(["deleting"]));
-    } catch (error) {
-      attachedSummary = failedPhaseSummary(error);
+    if (await renewLeaseIfWithinBudget()) {
+      try {
+        const attached = await withBoundedRetry(
+          () => runAttachedPhotoTombstoneBatch(db, maxItems),
+          maxPhaseRetries, retryDelayMs, sleep,
+        );
+        attachedSummary = summarizeOutcomes(attached.outcomes, attached.scanned, new Set(["deleting"]));
+      } catch (error) {
+        attachedSummary = failedPhaseSummary(error);
+      }
     }
 
-    try {
-      const deleting = await withBoundedRetry(
-        () => runDeletingPhotoCleanupBatch(db, objects, maxItems, {
-          absenceProof: options.absenceProof,
-          nowMs: now(),
-        }),
-        maxPhaseRetries, retryDelayMs, sleep,
-      );
-      staleOver24hCount = deleting.staleOver24hCount;
-      deletingSummary = summarizeOutcomes(
-        deleting.outcomes,
-        deleting.scanned,
-        new Set(["deleted", "already_deleted"]),
-      );
-    } catch (error) {
-      deletingSummary = failedPhaseSummary(error);
+    if (!budgetExceeded && await renewLeaseIfWithinBudget()) {
+      try {
+        const deleting = await withBoundedRetry(
+          () => runDeletingPhotoCleanupBatch(db, objects, maxItems, {
+            absenceProof: options.absenceProof,
+            nowMs: now(),
+          }),
+          maxPhaseRetries, retryDelayMs, sleep,
+        );
+        staleOver24hCount = deleting.staleOver24hCount;
+        deletingSummary = summarizeOutcomes(
+          deleting.outcomes,
+          deleting.scanned,
+          new Set(["deleted", "already_deleted"]),
+        );
+      } catch (error) {
+        deletingSummary = failedPhaseSummary(error);
+      }
     }
 
-    try {
-      const deleted = await withBoundedRetry(
-        () => runDeletedPhotoReconcileBatch(db, objects, maxItems, {
-          absenceProof: options.absenceProof,
-        }),
-        maxPhaseRetries, retryDelayMs, sleep,
-      );
-      deletedSummary = summarizeOutcomes(
-        deleted.outcomes,
-        deleted.scanned,
-        new Set(["deleted_late_generation", "already_reconciled"]),
-        // Already-deleted tombstones normally return 404/photo_storage_unavailable
-        // when no late write occurred; only conflicts/corruption or late-write
-        // cleanup failures should trip backoff and alerts.
-        new Set(["photo_storage_unavailable"]),
-      );
-    } catch (error) {
-      deletedSummary = failedPhaseSummary(error);
+    if (!budgetExceeded && await renewLeaseIfWithinBudget()) {
+      try {
+        const deleted = await withBoundedRetry(
+          () => runDeletedPhotoReconcileBatch(db, objects, maxItems, {
+            absenceProof: options.absenceProof,
+          }),
+          maxPhaseRetries, retryDelayMs, sleep,
+        );
+        deletedSummary = summarizeOutcomes(
+          deleted.outcomes,
+          deleted.scanned,
+          new Set(["deleted_late_generation", "already_reconciled", "confirmed_absent"]),
+        );
+      } catch (error) {
+        deletedSummary = failedPhaseSummary(error);
+      }
     }
   } finally {
     const finishMs = now();
@@ -251,10 +275,11 @@ export async function runPhotoMaintenanceCycle(
         leaseUntil: null,
         consecutiveFailures: nextFailures,
         backoffUntil: backoffMs > 0 ? Timestamp.fromMillis(finishMs + backoffMs) : null,
-        ...(totalErrors === 0 ? { lastSucceededAt: Timestamp.fromMillis(finishMs) } : {}),
+        ...(totalErrors === 0 && !budgetExceeded ? { lastSucceededAt: Timestamp.fromMillis(finishMs) } : {}),
         lastSummary: {
           elapsedMs: Math.max(0, finishMs - startMs),
           staleOver24hCount,
+          budgetExceeded,
           expiry: expirySummary,
           attachedTombstones: attachedSummary,
           deletingCleanup: deletingSummary,
@@ -273,6 +298,7 @@ export async function runPhotoMaintenanceCycle(
   const alert =
     staleOver24hCount > 0 ||
     totalErrors > 0 ||
+    budgetExceeded ||
     consecutiveFailures >= STALE_ALERT_FAILURE_THRESHOLD;
 
   const summary: PhotoMaintenanceCycleResult = {
@@ -281,6 +307,7 @@ export async function runPhotoMaintenanceCycle(
     alert,
     consecutiveFailures,
     staleOver24hCount,
+    ...(budgetExceeded ? { budgetExceeded: true } : {}),
     phases: {
       expiry: expirySummary,
       attachedTombstones: attachedSummary,

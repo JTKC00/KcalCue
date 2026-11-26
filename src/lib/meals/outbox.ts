@@ -18,6 +18,7 @@ export interface PendingMeal {
   error?: string;
   photoUpload?: PhotoUploadIntent;
   removePhoto?: boolean;
+  seq?: number;
 }
 
 export interface SyncState {
@@ -41,6 +42,7 @@ export function hasCurrentMealVersion(
 
 const empty = (): SyncState => ({ remote: [], jobs: [], syncedAt: null });
 const PHOTO_STORE = "photoPayloads";
+const PHOTO_JOBS_STORE = "photoJobs";
 const MAX_PHOTO_BYTES = 2 * 1024 * 1024;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -63,10 +65,45 @@ function abortWith(tx: IDBTransaction, error: unknown, reject: (error: unknown) 
   reject(error);
 }
 
+function mergeJobs(accountJobs: PendingMeal[], photoJobs: PendingMeal[]): PendingMeal[] {
+  if (photoJobs.length === 0) return accountJobs;
+  return [...accountJobs, ...photoJobs].sort((a, b) => (a.seq ?? -1) - (b.seq ?? -1));
+}
+
+function splitJobs(jobs: PendingMeal[]): { accountJobs: PendingMeal[]; photoJobs: PendingMeal[] } {
+  const photoMealIds = new Set<string>();
+  let anyPhoto = false;
+  for (const job of jobs) {
+    if (job.photoUpload || job.removePhoto) {
+      anyPhoto = true;
+      photoMealIds.add(job.record.id);
+    }
+  }
+  if (!anyPhoto) {
+    return { accountJobs: jobs, photoJobs: [] };
+  }
+  let nextSeq = jobs.reduce((max, job) => Math.max(max, job.seq ?? 0), 0);
+  const sequenced = jobs.map((job) => (job.seq === undefined ? { ...job, seq: ++nextSeq } : job));
+  const accountJobs: PendingMeal[] = [];
+  const photoJobs: PendingMeal[] = [];
+  for (const job of sequenced) {
+    if (job.photoUpload || job.removePhoto || photoMealIds.has(job.record.id)) {
+      photoJobs.push(job);
+    } else {
+      accountJobs.push(job);
+    }
+  }
+  return { accountJobs, photoJobs };
+}
+
+function hasIsolatedJob(jobs: PendingMeal[]): boolean {
+  return jobs.some((job) => Boolean(job.photoUpload || job.removePhoto));
+}
+
 async function open() {
   return new Promise<IDBDatabase>((resolve, reject) => {
     // Open the installed schema. A pinned v1 opener fails with VersionError
-    // after a later client adds an object store for atomic photo payloads.
+    // after a later client adds object stores for atomic photo payloads/jobs.
     const request = indexedDB.open("kcalcue-sync");
     request.onupgradeneeded = () => {
       if (!request.result.objectStoreNames.contains("accounts"))
@@ -77,11 +114,14 @@ async function open() {
   });
 }
 
-// Upgrade only when a photo is first queued. A tab still holding v1 blocks the
-// upgrade, so reject its enqueue instead of writing an account job alone.
+// Upgrade only when a photo or removePhoto intent is queued. Legacy v1 tabs
+// only read `accounts`, so isolating photo/removePhoto/dependent jobs into
+// `photoJobs` prevents an old tab from dropping photo intents.
 async function openForPhoto() {
   const current = await open();
-  if (current.objectStoreNames.contains(PHOTO_STORE)) return current;
+  if (current.objectStoreNames.contains(PHOTO_STORE) &&
+      current.objectStoreNames.contains(PHOTO_JOBS_STORE))
+    return current;
   const nextVersion = current.version + 1;
   current.close();
   return new Promise<IDBDatabase>((resolve, reject) => {
@@ -97,6 +137,9 @@ async function openForPhoto() {
         const store = db.createObjectStore(PHOTO_STORE, { keyPath: ["uid", "uploadId"] });
         store.createIndex("uid", "uid");
       }
+      if (!db.objectStoreNames.contains(PHOTO_JOBS_STORE)) {
+        db.createObjectStore(PHOTO_JOBS_STORE);
+      }
     };
     request.onsuccess = () => {
       if (blocked) request.result.close();
@@ -111,8 +154,6 @@ function clearPhotoRows(store: IDBObjectStore, uid: string, uploadIds?: string[]
     for (const uploadId of new Set(uploadIds)) store.delete([uid, uploadId]);
     return;
   }
-  // An earlier additive store may lack the index; the compound primary key
-  // still lets us clear only this account's rows.
   const cursor = store.indexNames.contains("uid")
     ? store.index("uid").openKeyCursor(IDBKeyRange.only(uid))
     : store.openKeyCursor();
@@ -171,13 +212,22 @@ export async function enqueuePhotoMeal(
   const db = await openForPhoto();
   try {
     return await new Promise<SyncState>((resolve, reject) => {
-      const tx = db.transaction(["accounts", PHOTO_STORE], "readwrite");
+      const tx = db.transaction(["accounts", PHOTO_JOBS_STORE, PHOTO_STORE], "readwrite");
       const accounts = tx.objectStore("accounts");
+      const photoJobsStore = tx.objectStore(PHOTO_JOBS_STORE);
       const photos = tx.objectStore(PHOTO_STORE);
       const request = accounts.get(uid);
+      const photoJobsRequest = photoJobsStore.get(uid);
       let value: SyncState;
-      request.onsuccess = () => {
-        const current: SyncState = request.result ?? empty();
+      let accountResult: SyncState | undefined;
+      let photoJobsResult: PendingMeal[] | undefined;
+      let accountLoaded = false;
+      let photoJobsLoaded = false;
+
+      const tryRun = () => {
+        if (!accountLoaded || !photoJobsLoaded) return;
+        const base = accountResult ?? empty();
+        const current: SyncState = { ...base, jobs: mergeJobs(base.jobs, photoJobsResult ?? []) };
         if (current.remote.some((record) => record.mutationId === job.id)) {
           abortWith(tx, new Error("Mutation already acknowledged"), reject);
           return;
@@ -213,7 +263,9 @@ export async function enqueuePhotoMeal(
               abortWith(tx, new Error("Photo upload ID already exists"), reject);
               return;
             }
-            value = { ...current, jobs: [...current.jobs, queued] };
+            const nextJobs = [...current.jobs, queued];
+            const split = splitJobs(nextJobs);
+            value = { ...current, jobs: mergeJobs(split.accountJobs, split.photoJobs) };
             photos.put({
               uid,
               uploadId,
@@ -222,10 +274,14 @@ export async function enqueuePhotoMeal(
               sha256,
               byteSize: blob.size,
             } satisfies PhotoPayload);
-            accounts.put(value, uid);
+            accounts.put({ ...base, jobs: split.accountJobs }, uid);
+            photoJobsStore.put(split.photoJobs, uid);
           }
         };
       };
+
+      request.onsuccess = () => { accountResult = request.result; accountLoaded = true; tryRun(); };
+      photoJobsRequest.onsuccess = () => { photoJobsResult = photoJobsRequest.result; photoJobsLoaded = true; tryRun(); };
       tx.oncomplete = () => resolve(value);
       tx.onerror = tx.onabort = () => reject(storageError(tx, request));
     });
@@ -261,14 +317,25 @@ export async function readPhotoPayload(uid: string, uploadId: string): Promise<B
 export async function markPhotoUploadStaged(uid: string, uploadId: string): Promise<SyncState> {
   const db = await open();
   try {
-    if (!db.objectStoreNames.contains(PHOTO_STORE)) throw new Error("Photo storage unavailable");
+    if (!db.objectStoreNames.contains(PHOTO_STORE) ||
+        !db.objectStoreNames.contains(PHOTO_JOBS_STORE))
+      throw new Error("Photo storage unavailable");
     return await new Promise<SyncState>((resolve, reject) => {
-      const tx = db.transaction(["accounts", PHOTO_STORE], "readwrite");
+      const tx = db.transaction(["accounts", PHOTO_JOBS_STORE, PHOTO_STORE], "readwrite");
       const accounts = tx.objectStore("accounts");
+      const photoJobsStore = tx.objectStore(PHOTO_JOBS_STORE);
       const request = accounts.get(uid);
+      const photoJobsRequest = photoJobsStore.get(uid);
       let value: SyncState;
-      request.onsuccess = () => {
-        const current: SyncState = request.result ?? empty();
+      let accountResult: SyncState | undefined;
+      let photoJobsResult: PendingMeal[] | undefined;
+      let accountLoaded = false;
+      let photoJobsLoaded = false;
+
+      const tryRun = () => {
+        if (!accountLoaded || !photoJobsLoaded) return;
+        const base = accountResult ?? empty();
+        const current: SyncState = { ...base, jobs: mergeJobs(base.jobs, photoJobsResult ?? []) };
         const job = current.jobs.find((pending) => pending.photoUpload?.uploadId === uploadId);
         if (!job?.photoUpload) {
           abortWith(tx, new Error("Photo upload intent missing"), reject);
@@ -282,12 +349,97 @@ export async function markPhotoUploadStaged(uid: string, uploadId: string): Prom
             abortWith(tx, new Error("Photo upload payload missing"), reject);
             return;
           }
-          value = { ...current, jobs: current.jobs.map((pending) => pending === job ? {
-            ...pending, photoUpload: { ...job.photoUpload!, status: "staged" },
-          } : pending) };
-          accounts.put(value, uid);
+          const updatedJobs = current.jobs.map((pending) => pending === job ? {
+            ...pending, photoUpload: { ...job.photoUpload!, status: "staged" as const },
+          } : pending);
+          const split = splitJobs(updatedJobs);
+          value = { ...current, jobs: mergeJobs(split.accountJobs, split.photoJobs) };
+          accounts.put({ ...base, jobs: split.accountJobs }, uid);
+          photoJobsStore.put(split.photoJobs, uid);
         };
       };
+
+      request.onsuccess = () => { accountResult = request.result; accountLoaded = true; tryRun(); };
+      photoJobsRequest.onsuccess = () => { photoJobsResult = photoJobsRequest.result; photoJobsLoaded = true; tryRun(); };
+      tx.oncomplete = () => resolve(value);
+      tx.onerror = tx.onabort = () => reject(storageError(tx, request));
+    });
+  } finally {
+    db.close();
+  }
+}
+
+export async function replaceExpiredPhotoJobAndPayload(
+  uid: string,
+  oldUploadId: string,
+  newUploadId: string,
+  blob: Blob,
+  replaceJob: (state: SyncState, newIntent: PhotoUploadIntent) => SyncState,
+): Promise<SyncState> {
+  if (!uid || !uuidPattern.test(newUploadId)
+    || blob.type !== "image/jpeg" || blob.size < 1 || blob.size > MAX_PHOTO_BYTES)
+    throw new Error("Invalid photo upload intent");
+  const buffer = await blob.arrayBuffer();
+  const digest = await crypto.subtle.digest("SHA-256", buffer);
+  const sha256 = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const payloadBytes = new Uint8Array(buffer);
+  const newIntent: PhotoUploadIntent = {
+    uploadId: newUploadId,
+    sha256,
+    byteSize: blob.size,
+    pipelineVersion: 1,
+    status: "pending",
+  };
+  const db = await openForPhoto();
+  try {
+    return await new Promise<SyncState>((resolve, reject) => {
+      const tx = db.transaction(["accounts", PHOTO_JOBS_STORE, PHOTO_STORE], "readwrite");
+      const accounts = tx.objectStore("accounts");
+      const photoJobsStore = tx.objectStore(PHOTO_JOBS_STORE);
+      const photos = tx.objectStore(PHOTO_STORE);
+      const request = accounts.get(uid);
+      const photoJobsRequest = photoJobsStore.get(uid);
+      let value: SyncState;
+      let accountResult: SyncState | undefined;
+      let photoJobsResult: PendingMeal[] | undefined;
+      let accountLoaded = false;
+      let photoJobsLoaded = false;
+
+      const tryRun = () => {
+        if (!accountLoaded || !photoJobsLoaded) return;
+        const base = accountResult ?? empty();
+        const current: SyncState = { ...base, jobs: mergeJobs(base.jobs, photoJobsResult ?? []) };
+        const payloadRequest = photos.get([uid, newUploadId]);
+        payloadRequest.onsuccess = () => {
+          if (payloadRequest.result) {
+            abortWith(tx, new Error("Photo upload ID already exists"), reject);
+            return;
+          }
+          try {
+            const next = replaceJob(current, newIntent);
+            if (next.jobs.some((pending) => pending.photoUpload?.uploadId === oldUploadId))
+              throw new Error("Cannot clear a queued photo payload");
+            const split = splitJobs(next.jobs);
+            value = { ...next, jobs: mergeJobs(split.accountJobs, split.photoJobs) };
+            photos.put({
+              uid,
+              uploadId: newUploadId,
+              bytes: payloadBytes,
+              type: blob.type,
+              sha256,
+              byteSize: blob.size,
+            } satisfies PhotoPayload);
+            clearPhotoRows(photos, uid, [oldUploadId]);
+            accounts.put({ ...next, jobs: split.accountJobs }, uid);
+            photoJobsStore.put(split.photoJobs, uid);
+          } catch (error) {
+            abortWith(tx, error, reject);
+          }
+        };
+      };
+
+      request.onsuccess = () => { accountResult = request.result; accountLoaded = true; tryRun(); };
+      photoJobsRequest.onsuccess = () => { photoJobsResult = photoJobsRequest.result; photoJobsLoaded = true; tryRun(); };
       tx.oncomplete = () => resolve(value);
       tx.onerror = tx.onabort = () => reject(storageError(tx, request));
     });
@@ -304,23 +456,48 @@ export async function changeSyncStateAndClearPhotos(
   const db = await open();
   try {
     const hasPhotos = db.objectStoreNames.contains(PHOTO_STORE);
-    if (!hasPhotos && uploadIds.length) throw new Error("Photo storage unavailable");
+    const hasPhotoJobs = db.objectStoreNames.contains(PHOTO_JOBS_STORE);
+    if ((!hasPhotos || !hasPhotoJobs) && uploadIds.length)
+      throw new Error("Photo storage unavailable");
+    const storeNames = ["accounts", ...(hasPhotoJobs ? [PHOTO_JOBS_STORE] : []), ...(hasPhotos ? [PHOTO_STORE] : [])];
     return await new Promise<SyncState>((resolve, reject) => {
-      const tx = db.transaction(hasPhotos ? ["accounts", PHOTO_STORE] : ["accounts"], "readwrite");
+      const tx = db.transaction(storeNames, "readwrite");
       const accounts = tx.objectStore("accounts");
+      const photoJobsStore = hasPhotoJobs ? tx.objectStore(PHOTO_JOBS_STORE) : null;
       const request = accounts.get(uid);
+      const photoJobsRequest = photoJobsStore ? photoJobsStore.get(uid) : null;
       let value: SyncState;
-      request.onsuccess = () => {
+      let accountResult: SyncState | undefined;
+      let photoJobsResult: PendingMeal[] | undefined;
+      let accountLoaded = false;
+      let photoJobsLoaded = !photoJobsRequest;
+
+      const tryRun = () => {
+        if (!accountLoaded || !photoJobsLoaded) return;
         try {
-          value = change(request.result ?? empty());
-          if (value.jobs.some((pending) => pending.photoUpload && uploadIds.includes(pending.photoUpload.uploadId)))
+          const base = accountResult ?? empty();
+          const merged: SyncState = { ...base, jobs: mergeJobs(base.jobs, photoJobsResult ?? []) };
+          const next = change(merged);
+          if (next.jobs.some((pending) => pending.photoUpload && uploadIds.includes(pending.photoUpload.uploadId)))
             throw new Error("Cannot clear a queued photo payload");
-          accounts.put(value, uid);
+          const split = splitJobs(next.jobs);
+          value = { ...next, jobs: mergeJobs(split.accountJobs, split.photoJobs) };
+          accounts.put({ ...next, jobs: split.accountJobs }, uid);
+          if (photoJobsStore) photoJobsStore.put(split.photoJobs, uid);
           if (hasPhotos) clearPhotoRows(tx.objectStore(PHOTO_STORE), uid, uploadIds);
         } catch (error) {
           abortWith(tx, error, reject);
         }
       };
+
+      request.onsuccess = () => { accountResult = request.result; accountLoaded = true; tryRun(); };
+      if (photoJobsRequest) {
+        photoJobsRequest.onsuccess = () => {
+          photoJobsResult = photoJobsRequest.result;
+          photoJobsLoaded = true;
+          tryRun();
+        };
+      }
       tx.oncomplete = () => resolve(value);
       tx.onerror = tx.onabort = () => reject(storageError(tx, request));
     });
@@ -329,35 +506,87 @@ export async function changeSyncStateAndClearPhotos(
   }
 }
 
+async function runChangeSyncState(
+  db: IDBDatabase,
+  uid: string,
+  change?: (state: SyncState) => SyncState,
+): Promise<{ state: SyncState; needsPhotoUpgrade: boolean }> {
+  const hasPhotoJobs = db.objectStoreNames.contains(PHOTO_JOBS_STORE);
+  const storeNames = hasPhotoJobs ? ["accounts", PHOTO_JOBS_STORE] : ["accounts"];
+  let needsPhotoUpgrade = false;
+  const state = await new Promise<SyncState>((resolve, reject) => {
+    const tx = db.transaction(storeNames, change ? "readwrite" : "readonly");
+    const accounts = tx.objectStore("accounts");
+    const photoJobsStore = hasPhotoJobs ? tx.objectStore(PHOTO_JOBS_STORE) : null;
+    const request = accounts.get(uid);
+    const photoJobsRequest = photoJobsStore ? photoJobsStore.get(uid) : null;
+    let value: SyncState;
+    let accountResult: SyncState | undefined;
+    let photoJobsResult: PendingMeal[] | undefined;
+    let accountLoaded = false;
+    let photoJobsLoaded = !photoJobsRequest;
+
+    const tryRun = () => {
+      if (!accountLoaded || !photoJobsLoaded) return;
+      try {
+        const base = accountResult ?? empty();
+        const merged: SyncState = { ...base, jobs: mergeJobs(base.jobs, photoJobsResult ?? []) };
+        if (!change) {
+          value = merged;
+          return;
+        }
+        const next = change(structuredClone(merged));
+        if (!hasPhotoJobs && hasIsolatedJob(next.jobs)) {
+          needsPhotoUpgrade = true;
+          tx.abort();
+          return;
+        }
+        const split = splitJobs(next.jobs);
+        value = { ...next, jobs: mergeJobs(split.accountJobs, split.photoJobs) };
+        accounts.put({ ...next, jobs: split.accountJobs }, uid);
+        if (photoJobsStore) photoJobsStore.put(split.photoJobs, uid);
+      } catch (error) {
+        abortWith(tx, error, reject);
+      }
+    };
+
+    request.onsuccess = () => { accountResult = request.result; accountLoaded = true; tryRun(); };
+    if (photoJobsRequest) {
+      photoJobsRequest.onsuccess = () => {
+        photoJobsResult = photoJobsRequest.result;
+        photoJobsLoaded = true;
+        tryRun();
+      };
+    }
+    tx.oncomplete = () => resolve(value);
+    tx.onerror = tx.onabort = () => {
+      if (needsPhotoUpgrade) resolve(empty());
+      else reject(storageError(tx, request));
+    };
+  });
+  return { state, needsPhotoUpgrade };
+}
+
 // One IDB transaction prevents tabs losing each other's queued changes.
+// Photo/removePhoto/dependent jobs are stored in `photoJobs` so legacy tabs
+// reading only `accounts` cannot consume or drop them.
 export async function changeSyncState(
   uid: string,
   change?: (state: SyncState) => SyncState,
 ): Promise<SyncState> {
   const db = await open();
   try {
-    return await new Promise((resolve, reject) => {
-      const tx = db.transaction("accounts", change ? "readwrite" : "readonly");
-      const store = tx.objectStore("accounts");
-      const request = store.get(uid);
-      let value: SyncState;
-      request.onsuccess = () => {
-        try {
-          value = request.result ?? empty();
-          if (change) {
-            value = change(value);
-            store.put(value, uid);
-          }
-        } catch (error) {
-          tx.abort();
-          reject(error);
-        }
-      };
-      tx.oncomplete = () => resolve(value);
-      tx.onerror = tx.onabort = () => reject(storageError(tx, request));
-    });
+    const result = await runChangeSyncState(db, uid, change);
+    if (!result.needsPhotoUpgrade) return result.state;
   } finally {
     db.close();
+  }
+  const upgraded = await openForPhoto();
+  try {
+    const result = await runChangeSyncState(upgraded, uid, change);
+    return result.state;
+  } finally {
+    upgraded.close();
   }
 }
 
@@ -407,9 +636,12 @@ export async function clearSyncState(uid: string) {
   const db = await open();
   try {
     const hasPhotos = db.objectStoreNames.contains(PHOTO_STORE);
+    const hasPhotoJobs = db.objectStoreNames.contains(PHOTO_JOBS_STORE);
+    const storeNames = ["accounts", ...(hasPhotoJobs ? [PHOTO_JOBS_STORE] : []), ...(hasPhotos ? [PHOTO_STORE] : [])];
     await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(hasPhotos ? ["accounts", PHOTO_STORE] : ["accounts"], "readwrite");
+      const tx = db.transaction(storeNames, "readwrite");
       tx.objectStore("accounts").put(empty(), uid);
+      if (hasPhotoJobs) tx.objectStore(PHOTO_JOBS_STORE).put([], uid);
       if (hasPhotos) clearPhotoRows(tx.objectStore(PHOTO_STORE), uid);
       tx.oncomplete = () => resolve();
       tx.onerror = tx.onabort = () => reject(storageError(tx));

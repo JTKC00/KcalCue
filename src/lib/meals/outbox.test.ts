@@ -875,4 +875,99 @@ describe("durable offline meal outbox", () => {
     expect((await repository.state("b")).jobs).toMatchObject([{ record: { id: mealB.id } }]);
     expect(await readPhotoPayload("b", uploadB)).not.toBeNull();
   });
+
+  it("isolates photo, removePhoto, and follow-up meal jobs from legacy accounts store readers", async () => {
+    const ordinary = await repository.save(draft(), crypto.randomUUID());
+    const photo = new Blob(["private jpeg fixture"], { type: "image/jpeg" });
+    const photoMeal = await repository.saveWithPhoto({ ...draft(), photo }, crypto.randomUUID(), crypto.randomUUID());
+    const followUp = await repository.save({ ...photoMeal, time: "21:15" }, crypto.randomUUID());
+    const confirmed = {
+      ...ordinary,
+      id: crypto.randomUUID(),
+      schemaVersion: CURRENT_MEAL_SCHEMA_VERSION,
+      createdAt: "2026-10-07T01:00:00.000Z",
+      photoRef: {
+        attachmentId: crypto.randomUUID(), generation: "1234567890123",
+        contentType: "image/jpeg" as const, width: 1200, height: 900, byteSize: 100_000,
+      },
+    };
+    await changeSyncState("a", (state) => ({ ...state, remote: [...state.remote, confirmed] }));
+    await repository.save(confirmed, crypto.randomUUID(), "a", undefined, { removePhoto: true });
+
+    const rawAccountJobs = await new Promise<Array<{ id: string; record: { id: string } }>>((resolve, reject) => {
+      const req = indexedDB.open("kcalcue-sync");
+      req.onsuccess = () => {
+        const db = req.result;
+        const tx = db.transaction("accounts", "readonly");
+        const getReq = tx.objectStore("accounts").get("a");
+        getReq.onsuccess = () => { db.close(); resolve(getReq.result?.jobs ?? []); };
+        getReq.onerror = () => reject(getReq.error);
+      };
+      req.onerror = () => reject(req.error);
+    });
+    expect(rawAccountJobs.map((job) => job.id)).toEqual([ordinary.mutationId]);
+    expect((await repository.state()).jobs.map((job) => job.id)).toEqual([
+      ordinary.mutationId,
+      photoMeal.mutationId,
+      followUp.mutationId,
+      expect.any(String),
+    ]);
+  });
+
+  it("recovers an expired staged photo (photo_not_staged) safely after checking non-commit", async () => {
+    const photo = new Blob(["private jpeg fixture"], { type: "image/jpeg" });
+    const mutationId = crypto.randomUUID();
+    const uploadId = crypto.randomUUID();
+    const first = await repository.saveWithPhoto({ ...draft(), photo }, mutationId, uploadId);
+
+    // Upload succeeds (staged), then meal POST fails with photo_not_staged.
+    fixture.fetch
+      .mockResolvedValueOnce(Response.json({ uploadId, state: "staged" }))
+      .mockResolvedValueOnce(Response.json({ error: { code: "photo_not_staged" } }, { status: 409 }))
+      .mockResolvedValueOnce(Response.json({ records: [] }));
+    await repository.sync();
+    expect((await repository.state()).jobs[0]).toMatchObject({
+      id: mutationId,
+      error: "photo_not_staged",
+      photoUpload: { uploadId, status: "staged" },
+    });
+
+    // Re-queueing expired photo confirms non-commit and allocates fresh mutationId + uploadId keeping JPEG bytes.
+    fixture.fetch.mockResolvedValueOnce(Response.json({ records: [] }));
+    const requeued = await repository.requeueExpiredPhotoUpload(first.id, mutationId);
+    expect(requeued).not.toBeNull();
+    expect(requeued!.mutationId).not.toBe(mutationId);
+    expect(requeued!.uploadId).not.toBe(uploadId);
+    expect(await readPhotoPayload("a", uploadId)).toBeNull();
+    expect(await (await readPhotoPayload("a", requeued!.uploadId))?.text()).toBe("private jpeg fixture");
+
+    // Simulate second photo_not_staged where server ACTUALLY already committed (lost ACK) -> reconciles cleanly!
+    fixture.fetch
+      .mockResolvedValueOnce(Response.json({ uploadId: requeued!.uploadId, state: "staged" }))
+      .mockResolvedValueOnce(Response.json({ error: { code: "photo_not_staged" } }, { status: 409 }))
+      .mockResolvedValueOnce(Response.json({ records: [] }));
+    await repository.sync();
+
+    fixture.fetch.mockResolvedValueOnce(Response.json({ records: [{ ...first, mutationId: requeued!.mutationId }] }));
+    const resolvedId = await repository.saveQueuedWithoutPhoto(first.id, requeued!.mutationId);
+    expect(resolvedId).toBe(requeued!.mutationId);
+    expect((await repository.state()).jobs).toHaveLength(0);
+    expect(await readPhotoPayload("a", requeued!.uploadId)).toBeNull();
+  });
+
+  it("refuses saveQueuedWithoutPhoto or requeueExpiredPhotoUpload for staged jobs with non-expiry errors", async () => {
+    const photo = new Blob(["private jpeg fixture"], { type: "image/jpeg" });
+    const mutationId = crypto.randomUUID();
+    const uploadId = crypto.randomUUID();
+    const first = await repository.saveWithPhoto({ ...draft(), photo }, mutationId, uploadId);
+    fixture.fetch
+      .mockResolvedValueOnce(Response.json({ uploadId, state: "staged" }))
+      .mockResolvedValueOnce(Response.json({ error: { code: "conflict" } }, { status: 409 }))
+      .mockResolvedValueOnce(Response.json({ records: [] }));
+    await repository.sync();
+    await expect(repository.saveQueuedWithoutPhoto(first.id, mutationId))
+      .rejects.toMatchObject({ status: 409, code: "conflict" });
+    await expect(repository.requeueExpiredPhotoUpload(first.id, mutationId))
+      .rejects.toMatchObject({ status: 409, code: "conflict" });
+  });
 });

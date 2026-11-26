@@ -9,8 +9,11 @@
 !src/app/
 !src/app/api/
 !src/app/api/analyze/
+!src/app/api/internal/
+!src/app/api/internal/photo-maintenance/
 !src/app/api/meals/
 !src/app/api/meals/photo/
+!src/app/api/meals/photo/status/
 !src/app/api/nutrition/
 !src/app/api/nutrition/resolve/
 !src/app/api/status/
@@ -34,6 +37,8 @@
 src/**
 !src/app/api/meals/[[]id]/
 !src/app/api/meals/[[]id]/photo/
+!src/app/api/meals/[[]id]/photo-uploads/
+!src/app/api/meals/[[]id]/photo-uploads/[[]uploadId]/
 !Dockerfile
 !.dockerignore
 !package.json

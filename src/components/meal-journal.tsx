@@ -51,6 +51,7 @@ const messages: Record<string, string> = {
   photo_quota_not_configured: "私人照片保存尚未設定上限，可不附圖儲存餐點。",
   photo_quota_exceeded: "照片保存空間暫達上限，可稍後重試或不附圖儲存餐點。",
   photo_output_too_large: "壓縮後照片仍超過 2 MiB 上限，請更換圖片或不附圖儲存餐點。",
+  photo_not_staged: "此附圖的暫存期限已過，可重新上傳附圖或不附圖儲存餐點。",
   photo_upload_expired: "此草稿圖片的上傳期限已過，請重新選取圖片或不附圖儲存餐點。",
   photo_upload_conflict: "圖片上傳識別衝突，請移除草稿圖片重新選取，或不附圖儲存餐點。",
   photo_object_conflict: "雲端圖片檢查不一致，請重新選取圖片或不附圖儲存餐點。",
@@ -1336,6 +1337,29 @@ export function MealJournal({
       void refresh();
     }
   }
+  async function retryExpiredPhoto(job: PendingMeal) {
+    if (busyRef.current) return;
+    const scope = operationScope();
+    if (job.record.userId !== scope.id) return;
+    busyRef.current = true;
+    setBusy(true);
+    refreshGeneration.current++;
+    try {
+      const result = await repository.requeueExpiredPhotoUpload(job.record.id, job.id, scope.id);
+      if (!scope.isCurrent()) return;
+      setNotice(
+        result
+          ? { kind: "pending-sync", message: "已排程重新上傳附圖，待同步。" }
+          : "",
+      );
+    } catch (error) {
+      if (scope.isCurrent()) setNotice(errorText(error));
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+      void refresh();
+    }
+  }
   const visible = records
     .filter(
       (r) =>
@@ -1490,7 +1514,19 @@ export function MealJournal({
                   {job.photoUpload ? "（含待同步附圖）" : ""}
                   ：{messages[job.error!] ?? "同步未完成，修改仍保留於本機。"}
                 </p>
-                {job.kind === "save" && job.photoUpload?.status === "pending" && (
+                {job.kind === "save" && job.photoUpload?.status === "staged" && job.error === "photo_not_staged" && (
+                  <button
+                    className="button button-secondary"
+                    disabled={busy || syncing}
+                    onClick={() => void retryExpiredPhoto(job)}
+                  >
+                    重新上傳附圖
+                  </button>
+                )}
+                {job.kind === "save" && job.photoUpload && (
+                  job.photoUpload.status === "pending" ||
+                  (job.photoUpload.status === "staged" && job.error === "photo_not_staged")
+                ) && (
                   <button
                     className="button button-secondary"
                     disabled={busy || syncing}

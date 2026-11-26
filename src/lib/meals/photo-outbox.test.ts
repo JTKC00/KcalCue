@@ -51,6 +51,21 @@ describe("photo outbox transaction", () => {
     expect(stored?.type).toBe("image/jpeg");
     expect(await stored?.text()).toBe("private image");
     expect((await changeSyncState("a")).jobs).toEqual(state.jobs);
+
+    // Legacy tabs only read `accounts`; photo jobs stay isolated in `photoJobs`.
+    const rawAccountsJobs = await new Promise<PendingMeal[]>((resolve, reject) => {
+      const req = indexedDB.open("kcalcue-sync");
+      req.onsuccess = () => {
+        const db = req.result;
+        const tx = db.transaction("accounts", "readonly");
+        const getReq = tx.objectStore("accounts").get("a");
+        getReq.onsuccess = () => { db.close(); resolve((getReq.result?.jobs ?? []) as PendingMeal[]); };
+        getReq.onerror = () => reject(getReq.error);
+      };
+      req.onerror = () => reject(req.error);
+    });
+    expect(rawAccountsJobs).toHaveLength(1);
+    expect(rawAccountsJobs[0].id).toBe(ordinary.id);
   });
 
   it("reuses an exact mutation and bytes, preserving staged state; rejects changed intent or content", async () => {

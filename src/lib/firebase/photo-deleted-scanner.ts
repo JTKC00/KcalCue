@@ -27,7 +27,7 @@ export interface DeletedPhotoReconcileBatchResult {
 export async function runDeletedPhotoReconcileBatch(
   db: Firestore,
   objects: Pick<ExactPhotoObjectStore, "metadata" | "read" | "deleteGeneration"> &
-    Partial<Pick<ExactPhotoObjectStore, "verifyGenerationAbsent">>,
+    Partial<Pick<ExactPhotoObjectStore, "verifyGenerationAbsent" | "verifyKeyAbsent">>,
   maxItems = 5,
   options?: { absenceProof?: PhotoBucketIdentity },
 ): Promise<DeletedPhotoReconcileBatchResult> {
