@@ -1079,9 +1079,9 @@ export function contradictoryDairyMilkLabel(
 const DISH_COMPONENT_SUFFIX_RE =
   /(?:皮|醬|酱|汁|醋|油|湯底|汤底|醬料|酱料|餅底|饼底|調味粉|调味粉|湯粉|汤粉|味粉|咖喱粉|咖哩粉)$|(?:^|\s)(?:sauce|oil|vinegar|wrapper|wrappers|crust|broth|base|soup\s+base|skin|pastry|shell|stock|seasoning|powder|glaze|dip)$/;
 const STIR_FRY_OR_DRY_NOODLE_NAME_CUE_RE =
-  /炒|撈|捞|乾拌|干拌|涼拌|凉拌|拌烏冬|拌乌冬|拌烏龍|拌乌龙|拌麵|拌面|拌米線|拌米线|拌河粉|拌拉麵|拌拉面|走湯|走汤|無湯|无汤|免湯|免汤|冷烏冬|冷乌冬|冷麵|冷面|沾麵|沾面|(?:^|\s)(?:fried|stir\s+fried|stirfried|pan\s+fried|dry\s+fried|dry|tossed|brothless|no\s+soup|no\s+broth|without\s+soup|without\s+broth|chow|lo\s+mein|yakisoba|yaki\s+udon|yakiudon|zaru|bukkake|tsukemen|dipping|mazesoba|abura\s+soba|cold\s+udon|cold\s+noodles?)(?:$|\s)/;
+  /炒|撈|捞|焗|乾拌|干拌|涼拌|凉拌|拌烏冬|拌乌冬|拌烏龍|拌乌龙|拌麵|拌面|拌米線|拌米线|拌河粉|拌拉麵|拌拉面|走湯|走汤|無湯|无汤|免湯|免汤|冷烏冬|冷乌冬|冷麵|冷面|沾麵|沾面|(?:^|\s)(?:fried|stir\s+fried|stirfried|pan\s+fried|dry\s+fried|baked|gratin|dry|tossed|brothless|no\s+soup|no\s+broth|without\s+soup|without\s+broth|chow|lo\s+mein|yakisoba|yaki\s+udon|yakiudon|zaru|bukkake|tsukemen|dipping|mazesoba|abura\s+soba|cold\s+udon|cold\s+noodles?)(?:$|\s)/;
 const STIR_FRY_OR_DRY_NOODLE_PREP_CUE_RE =
-  /炒|乾拌|干拌|涼拌|凉拌|拌|乾撈|干捞|撈|捞|無湯|无汤|走湯|走汤|免湯|免汤|(?:^|\s)(?:stir\s+fried|stirfried|dry\s+fried|dry|tossed|brothless|no\s+soup|no\s+broth|without\s+soup|without\s+broth)(?:$|\s)/;
+  /炒|焗|乾拌|干拌|涼拌|凉拌|拌|乾撈|干捞|撈|捞|無湯|无汤|走湯|走汤|免湯|免汤|(?:^|\s)(?:stir\s+fried|stirfried|dry\s+fried|baked|gratin|dry|tossed|brothless|no\s+soup|no\s+broth|without\s+soup|without\s+broth)(?:$|\s)/;
 const DRY_NOODLE_NOTE_CUE_RE =
   /乾拌|干拌|涼拌|凉拌|走湯|走汤|無湯|无汤|免湯|免汤|(?:^|\s)(?:dry\s+tossed|brothless|no\s+soup|no\s+broth|without\s+soup|without\s+broth)(?:$|\s)/;
 const SOUP_NOODLE_DISH_IDS = new Set([
@@ -1770,9 +1770,15 @@ export function canonicalizeFood(food: FoodEstimate): CanonicalFoodIdentity {
   const hasCurry = identityHits.some((rule) =>
     ["curry", "curry-rice"].includes(rule.canonicalName),
   );
+  const standaloneRiceRe = new RegExp(
+    `飯|饭|(?:^|\\s)rice(?!\\s+${RICE_ADJUNCT_FOLLOW_PATTERN}(?:$|\\s))(?:$|\\s)`,
+  );
+  const bakedRiceDishRe = new RegExp(
+    `焗[a-z0-9\\u4e00-\\u9fff\\s]{0,12}[飯饭]|(?:^|\\s)baked(?:\\s+[a-z]+){0,4}\\s+rice(?!\\s+${RICE_ADJUNCT_FOLLOW_PATTERN}(?:$|\\s))(?:$|\\s)`,
+  );
   const hasRice =
     identityHits.some((rule) => rule.canonicalName === "rice") ||
-    /飯|饭|(?:^|\s)rice(?:$|\s)/.test(text);
+    standaloneRiceRe.test(text);
   const dishNamesText = normalizeFoodName(`${food.displayName} ${food.normalizedName}`);
   const hasCurryRiceDish =
     !isDishComponentOnly(food) &&
@@ -1781,9 +1787,7 @@ export function canonicalizeFood(food: FoodEstimate): CanonicalFoodIdentity {
   const hasBakedRiceDish =
     !isDishComponentOnly(food) &&
     (identityHits.some((rule) => rule.canonicalName === "baked-rice") ||
-      /焗[a-z0-9\u4e00-\u9fff\s]{0,12}[飯饭]|(?:^|\s)baked(?:\s+[a-z]+){0,4}\s+rice(?:$|\s)/.test(
-        dishNamesText,
-      ));
+      bakedRiceDishRe.test(dishNamesText));
   const tomatoSauceOverride =
     hasTomato &&
     (hasSauce || text.includes("風味") || text.includes("flavor")) &&
