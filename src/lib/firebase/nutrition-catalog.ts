@@ -1,3 +1,4 @@
+import { gunzipSync } from "node:zlib";
 import type { Firestore } from "firebase-admin/firestore";
 import { adminServices } from "./admin";
 import {
@@ -10,8 +11,31 @@ import {
 
 export const NUTRITION_CATALOG_SHARDS_COLLECTION = "kcalcueNutritionCatalogShards";
 export const DEFAULT_CATALOG_CACHE_TTL_MS = 10 * 60 * 1000;
-export const DEFAULT_CATALOG_LOAD_TIMEOUT_MS = 4 * 1000;
+export const DEFAULT_CATALOG_LOAD_TIMEOUT_MS = 8 * 1000;
+const MAX_SHARD_GUNZIP_BYTES = 4 * 1024 * 1024;
 const ERROR_RETRY_COOLDOWN_MS = 30 * 1000;
+
+function decodeRawShardDoc(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object") return raw;
+  const record = raw as Record<string, unknown>;
+  if (!(record.entriesGzip instanceof Uint8Array)) return raw;
+  try {
+    const jsonText = gunzipSync(Buffer.from(record.entriesGzip), {
+      maxOutputLength: MAX_SHARD_GUNZIP_BYTES,
+    }).toString("utf8");
+    const entries = JSON.parse(jsonText);
+    if (!Array.isArray(entries)) return null;
+    if (typeof record.entryCount === "number" && record.entryCount !== entries.length) {
+      return null;
+    }
+    const { entriesGzip: _omitGzip, entryCount: _omitCount, ...rest } = record;
+    void _omitGzip;
+    void _omitCount;
+    return { ...rest, entries };
+  } catch {
+    return null;
+  }
+}
 
 interface CatalogCacheState {
   index: CatalogIndex;
@@ -160,7 +184,8 @@ export async function loadFirestoreNutritionCatalogIndex(
       let skippedShards = 0;
       for (const doc of snapshot.docs) {
         const raw = doc.data();
-        const parsed = firestoreCatalogShardSchema.safeParse(raw);
+        const decoded = decodeRawShardDoc(raw);
+        const parsed = firestoreCatalogShardSchema.safeParse(decoded);
         if (parsed.success) {
           validShards.push(parsed.data);
         } else {

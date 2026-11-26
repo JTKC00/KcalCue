@@ -1,13 +1,14 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { inflateRawSync } from "node:zlib";
+import { gzipSync, inflateRawSync } from "node:zlib";
 import { applicationDefault, cert, getApps, initializeApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { z } from "zod";
 
 export const SHARDS_COLLECTION = "kcalcueNutritionCatalogShards";
 export const SHARD_SCHEMA_VERSION = 2;
-export const MAX_SHARD_JSON_BYTES = 320_000;
+export const MAX_SHARD_JSON_BYTES = 2_400_000;
+export const MAX_SHARD_GZIP_BYTES = 260_000;
 export const MAX_SHARD_DOC_BYTES = 850_000;
 export const MAX_BATCH_BYTES = 8_000_000;
 export const SYNC_USER_AGENT = "KcalCueCatalogSync/2.0 (+https://kcalcue.snugzap.com)";
@@ -68,8 +69,12 @@ export const shardSchema = z.object({
   shardCount: z.number().int().positive(),
   syncedAt: z.iso.datetime(),
   active: z.boolean(),
+  entryCount: z.number().int().nonnegative().optional(),
   defaults: sourceDefaultsSchema,
-  entries: z.array(compactEntrySchema),
+  entries: z.array(compactEntrySchema).optional(),
+  entriesGzip: z.instanceof(Uint8Array).optional(),
+}).refine((shard) => Array.isArray(shard.entries) || shard.entriesGzip instanceof Uint8Array, {
+  message: "Shard must provide either entries or entriesGzip",
 });
 
 export function round1(value) {
@@ -261,6 +266,9 @@ export function parseXlsxSheet(zipEntries, sheetPath) {
 }
 
 export function stripUndefinedDeep(value) {
+  if (Buffer.isBuffer(value) || value instanceof Uint8Array) {
+    return value;
+  }
   if (Array.isArray(value)) {
     return value.map((item) => stripUndefinedDeep(item));
   }
@@ -280,6 +288,7 @@ export function assertFirestoreCompatible(value, fieldPath = "root", insideArray
     throw new Error(`Firestore incompatible undefined value at "${fieldPath}"`);
   }
   if (value === null || typeof value === "boolean" || typeof value === "string") return;
+  if (Buffer.isBuffer(value) || value instanceof Uint8Array) return;
   if (typeof value === "number") {
     if (!Number.isFinite(value)) {
       throw new Error(`Firestore incompatible non-finite number at "${fieldPath}"`);
@@ -304,6 +313,20 @@ export function assertFirestoreCompatible(value, fieldPath = "root", insideArray
   throw new Error(`Firestore incompatible value type "${typeof value}" at "${fieldPath}"`);
 }
 
+export function shardByteSize(shard) {
+  if (shard?.entriesGzip instanceof Uint8Array) {
+    const { entriesGzip, ...meta } = shard;
+    return Buffer.byteLength(JSON.stringify(meta), "utf8") + entriesGzip.byteLength;
+  }
+  return Buffer.byteLength(JSON.stringify(shard), "utf8");
+}
+
+export function shardEntryCount(shard) {
+  if (typeof shard?.entryCount === "number") return shard.entryCount;
+  if (Array.isArray(shard?.entries)) return shard.entries.length;
+  return 0;
+}
+
 export function packSourceShards(sourceKey, defaults, entries, syncedAt) {
   const validatedDefaults = stripUndefinedDeep(sourceDefaultsSchema.parse(defaults));
   const validatedEntries = entries.map((entry) => {
@@ -312,27 +335,46 @@ export function packSourceShards(sourceKey, defaults, entries, syncedAt) {
     return clean;
   });
 
+  // Pack validated entries into gzip-compressed Firestore Bytes shards.
+  // Gzip reduces ~5.4 MB of repetitive JSON to ~620 KB across ~5-6 docs and eliminates
+  // per-field Firestore indexing overhead on the entries array.
   const buckets = [];
   let current = [];
-  let currentBytes = 0;
+  let currentRawBytes = 0;
+
+  const flushBucket = () => {
+    if (current.length === 0) return;
+    // If a bucket's compressed size still exceeds MAX_SHARD_GZIP_BYTES, split in half.
+    const queue = [current];
+    while (queue.length > 0) {
+      const slice = queue.shift();
+      const gz = gzipSync(Buffer.from(JSON.stringify(slice), "utf8"), { level: 9 });
+      if (gz.byteLength > MAX_SHARD_GZIP_BYTES && slice.length > 1) {
+        const mid = Math.ceil(slice.length / 2);
+        queue.unshift(slice.slice(0, mid), slice.slice(mid));
+      } else {
+        buckets.push({ entries: slice, gzip: gz });
+      }
+    }
+    current = [];
+    currentRawBytes = 0;
+  };
 
   for (const entry of validatedEntries) {
     const entryBytes = Buffer.byteLength(JSON.stringify(entry), "utf8") + 2;
-    if (entryBytes > MAX_SHARD_JSON_BYTES) {
+    if (entryBytes > MAX_SHARD_GZIP_BYTES) {
       throw new Error(`Single catalog entry "${entry.id}" exceeds shard budget (${entryBytes} bytes)`);
     }
-    if (current.length > 0 && currentBytes + entryBytes > MAX_SHARD_JSON_BYTES) {
-      buckets.push(current);
-      current = [];
-      currentBytes = 0;
+    if (current.length > 0 && currentRawBytes + entryBytes > MAX_SHARD_JSON_BYTES) {
+      flushBucket();
     }
     current.push(entry);
-    currentBytes += entryBytes;
+    currentRawBytes += entryBytes;
   }
-  if (current.length > 0) buckets.push(current);
+  flushBucket();
 
   const shardCount = buckets.length;
-  return buckets.map((shardEntries, shardIndex) => {
+  return buckets.map(({ entries: shardEntries, gzip }, shardIndex) => {
     const shard = stripUndefinedDeep(
       shardSchema.parse({
         schemaVersion: SHARD_SCHEMA_VERSION,
@@ -341,12 +383,13 @@ export function packSourceShards(sourceKey, defaults, entries, syncedAt) {
         shardCount,
         syncedAt,
         active: true,
+        entryCount: shardEntries.length,
         defaults: validatedDefaults,
-        entries: shardEntries,
+        entriesGzip: gzip,
       }),
     );
     assertFirestoreCompatible(shard, `${sourceKey}__shard_${shardIndex}`);
-    const docBytes = Buffer.byteLength(JSON.stringify(shard), "utf8");
+    const docBytes = shardByteSize(shard);
     if (docBytes > MAX_SHARD_DOC_BYTES) {
       throw new Error(
         `Packed shard ${sourceKey}__shard_${shardIndex} exceeds safe document size (${docBytes} > ${MAX_SHARD_DOC_BYTES} bytes)`,
@@ -425,7 +468,7 @@ export async function applySourceShards(db, sourceKey, shards, syncedAt, options
   if (!Array.isArray(shards) || shards.length === 0) {
     throw new Error(`Refusing to apply empty shard list for source "${sourceKey}".`);
   }
-  const incomingEntries = shards.reduce((sum, shard) => sum + (shard.entries?.length ?? 0), 0);
+  const incomingEntries = shards.reduce((sum, shard) => sum + shardEntryCount(shard), 0);
   if (incomingEntries === 0) {
     throw new Error(`Refusing to apply 0 entries for source "${sourceKey}".`);
   }
@@ -439,8 +482,8 @@ export async function applySourceShards(db, sourceKey, shards, syncedAt, options
   let existingActiveEntries = 0;
   for (const doc of existingSnap.docs) {
     const data = doc.data();
-    if (data?.active !== false && Array.isArray(data?.entries)) {
-      existingActiveEntries += data.entries.length;
+    if (data?.active !== false) {
+      existingActiveEntries += shardEntryCount(data);
     }
   }
   if (!force && existingActiveEntries > 0 && incomingEntries < existingActiveEntries * 0.5) {
@@ -452,7 +495,7 @@ export async function applySourceShards(db, sourceKey, shards, syncedAt, options
   const incomingIds = new Set(shards.map((shard) => shardDocId(sourceKey, shard.shardIndex)));
   const ops = [];
   for (const shard of shards) {
-    const byteSize = Buffer.byteLength(JSON.stringify(shard), "utf8");
+    const byteSize = shardByteSize(shard);
     ops.push({
       type: "set",
       ref: collection.doc(shardDocId(sourceKey, shard.shardIndex)),
@@ -462,19 +505,18 @@ export async function applySourceShards(db, sourceKey, shards, syncedAt, options
   }
   let deactivatedShards = 0;
   for (const doc of existingSnap.docs) {
-    if (!incomingIds.has(doc.id) && doc.data()?.active !== false) {
+    if (!incomingIds.has(doc.id)) {
       ops.push({
-        type: "update",
+        type: "delete",
         ref: doc.ref,
-        data: { active: false, syncedAt },
-        byteSize: 256,
+        byteSize: 128,
       });
       deactivatedShards += 1;
     }
   }
 
   // Keep every single-source write atomic in one batch when under safe size/op limits
-  // (all 5 current sources fit in 1 batch <= 4 MiB; split only if a future source grows huge).
+  // (all 5 current sources fit in 1 batch <= 1 MiB; split only if a future source grows huge).
   const BATCH_OP_LIMIT = 20;
   let currentBatchOps = [];
   let currentBatchBytes = 0;
@@ -497,6 +539,7 @@ export async function applySourceShards(db, sourceKey, shards, syncedAt, options
     const batch = db.batch();
     for (const op of chunk) {
       if (op.type === "set") batch.set(op.ref, op.data);
+      else if (op.type === "delete") batch.delete(op.ref);
       else batch.update(op.ref, op.data);
     }
     await batch.commit();

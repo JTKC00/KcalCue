@@ -7,6 +7,7 @@ import {
   getTargetFirestore,
   packSourceShards,
   resolveProjectTarget,
+  shardByteSize,
 } from "./catalog/shared.mjs";
 import { fetchMcDonaldsHkSource } from "./catalog/sources/mcdonalds-hk.mjs";
 import { fetchCfsHkFrlSource } from "./catalog/sources/cfs-hk-frl.mjs";
@@ -70,7 +71,7 @@ export async function buildShardsForSources(
       );
     }
     const shards = packSourceShards(sourceKey, loaded.defaults, loaded.entries, syncedAt);
-    const totalBytes = shards.reduce((sum, shard) => sum + Buffer.byteLength(JSON.stringify(shard), "utf8"), 0);
+    const totalBytes = shards.reduce((sum, shard) => sum + shardByteSize(shard), 0);
     results.push({
       sourceKey,
       entryCount: loaded.entries.length,
