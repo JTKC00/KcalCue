@@ -22,8 +22,10 @@ import { PHOTO_MILK_CHOICES, type PhotoMilkChoiceId } from "@/lib/nutrition/phot
 import {
   canReuseNutritionMatchForNameEdit,
   enrichUnresolvedMatches,
+  needsServerCatalogCheck,
   resolveNutritionMatchWithFallback,
 } from "@/lib/nutrition/client";
+import { CATALOG_PROFILE_ID_PREFIX } from "@/lib/nutrition/catalog-entry";
 import type { NutritionMatch } from "@/lib/nutrition/types";
 import {
   DEMO_ANALYZE_DELAY_MS,
@@ -79,6 +81,7 @@ interface KcalCueAppProps {
   calorieCorrection?: MealDraft["calorieCorrection"];
   mealNote?: string | null;
   onDraftChange?: (change: Pick<MealDraft, "items" | "analysis" | "analysisProvenance" | "mode">, file: File | null) => void;
+  onNutritionPendingChange?: (pending: boolean) => void;
   onExit?: () => void;
   onNewMeal?: () => void;
   manual?: boolean;
@@ -135,7 +138,8 @@ function createManualItem(): EditableFoodItem {
 
 function normalizedNameForMatch(name: string, match: NutritionMatch | null): string {
   if (!match?.profile) return name;
-  return match.profile.source.provider === "usda-fdc"
+  return match.profile.source.provider === "usda-fdc" ||
+    match.profile.id.startsWith(CATALOG_PROFILE_ID_PREFIX)
     ? name
     : match.profile.canonicalName;
 }
@@ -414,7 +418,7 @@ function reapplyPhotoMilkGuard(
   return changed ? next : items;
 }
 
-export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrection, mealNote, onDraftChange, onExit, onNewMeal, manual, onPhotoSelected }: KcalCueAppProps) {
+export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrection, mealNote, onDraftChange, onNutritionPendingChange, onExit, onNewMeal, manual, onPhotoSelected }: KcalCueAppProps) {
   const [stage, setStage] = useState<AppStage>(initialDraft?.items.length || manual ? "result" : "input");
   const [file, setFile] = useState<File | null>(() => initialDraft?.photo && !initialDraft.items.length ? new File([initialDraft.photo], "餐點.jpg", { type: "image/jpeg" }) : null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -431,6 +435,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
   );
   const [appError, setAppError] = useState<AppError | null>(null);
   const [nutritionPending, setNutritionPending] = useState(false);
+  const [pendingEditLookups, setPendingEditLookups] = useState(0);
   const nutritionProvider = useMemo(() => new LocalNutritionProvider(), []);
   const originalFoods = useMemo(
     () => new Map(createEditableFoodItems(analysis?.foods ?? []).map(food => [food.id, food])),
@@ -438,6 +443,11 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
   );
   const nameEditTimers = useRef(new Map<string, number>());
   const nameEditRevisions = useRef(new Map<string, number>());
+  const activeLookupKeysRef = useRef(new Set<string>());
+  const noteLookupTimerRef = useRef<number | null>(null);
+  const noteLookupRevisionRef = useRef(0);
+  const prevMealNoteRef = useRef<string | null>(mealNote ?? null);
+  const itemsRef = useRef<EditableFoodItem[]>(items);
   const analyzeAbortRef = useRef<AbortController | null>(null);
   const editAbortRef = useRef(new AbortController());
   const mealContextRef = useRef<MealPlantMilkContext>({});
@@ -455,9 +465,21 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
       : items,
     [stage, items, plantMilkContext, nutritionProvider],
   );
+  const effectiveNutritionPending = nutritionPending || pendingEditLookups > 0;
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
   useEffect(() => {
     mealContextRef.current = plantMilkContext;
   }, [plantMilkContext]);
+  useEffect(() => {
+    onNutritionPendingChange?.(effectiveNutritionPending);
+  }, [effectiveNutritionPending, onNutritionPendingChange]);
+  useEffect(() => {
+    return () => {
+      onNutritionPendingChange?.(false);
+    };
+  }, [onNutritionPendingChange]);
   useLayoutEffect(() => {
     if (stage === "result") onDraftChange?.({ items: guardedItems, analysis, analysisProvenance, mode: activeMode }, file);
   }, [stage, guardedItems, analysis, analysisProvenance, activeMode, file, onDraftChange]);
@@ -482,20 +504,113 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
 
   useEffect(() => {
     const timers = nameEditTimers.current;
+    const activeKeys = activeLookupKeysRef.current;
     return () => {
       for (const timer of timers.values()) {
         window.clearTimeout(timer);
       }
+      if (noteLookupTimerRef.current !== null) {
+        window.clearTimeout(noteLookupTimerRef.current);
+        noteLookupTimerRef.current = null;
+      }
+      activeKeys.clear();
       analyzeAbortRef.current?.abort("unmount");
       editAbortRef.current.abort();
     };
   }, []);
+
+  useEffect(() => {
+    const nextNote = mealNote ?? null;
+    if (nextNote === prevMealNoteRef.current) return;
+    prevMealNoteRef.current = nextNote;
+
+    if (noteLookupTimerRef.current !== null) {
+      window.clearTimeout(noteLookupTimerRef.current);
+      noteLookupTimerRef.current = null;
+    }
+    const revision = ++noteLookupRevisionRef.current;
+    if (stage !== "result" || initialProviderMode !== "live" || activeMode === "demo") {
+      if (activeLookupKeysRef.current.delete("__meal_note__")) {
+        setPendingEditLookups(activeLookupKeysRef.current.size);
+      }
+      return;
+    }
+
+    const candidates = itemsRef.current.flatMap((item) => {
+      if (!hasKnownPortion(item) || !item.displayName.trim()) return [];
+      if (
+        item.userMilkTypeChoice ||
+        item.suspectedDuplicateMilk === true ||
+        contradictoryDairyMilkLabel(item, plantMilkContext) ||
+        photoGenericMilkNeedsConfirmation(item, plantMilkContext)
+      ) {
+        return [];
+      }
+      const freshLocal = nutritionProvider.resolve(item, plantMilkContext);
+      const hadCatalog = Boolean(item.nutritionMatch?.profile?.id.startsWith(CATALOG_PROFILE_ID_PREFIX));
+      if (!hadCatalog && !needsServerCatalogCheck(item, freshLocal, plantMilkContext)) return [];
+      return [{ id: item.id, food: item, freshLocal }];
+    });
+
+    if (candidates.length === 0) {
+      if (activeLookupKeysRef.current.delete("__meal_note__")) {
+        setPendingEditLookups(activeLookupKeysRef.current.size);
+      }
+      return;
+    }
+
+    activeLookupKeysRef.current.add("__meal_note__");
+    setPendingEditLookups(activeLookupKeysRef.current.size);
+    noteLookupTimerRef.current = window.setTimeout(() => {
+      noteLookupTimerRef.current = null;
+      const signal = editAbortRef.current.signal;
+      void enrichUnresolvedMatches(
+        candidates.map((c) => c.food),
+        candidates.map((c) => c.freshLocal),
+        signal,
+        plantMilkContext,
+      )
+        .then((resolvedMatches) => {
+          if (signal.aborted || noteLookupRevisionRef.current !== revision) return;
+          const byId = new Map(candidates.map((c, idx) => [c.id, { food: c.food, match: resolvedMatches[idx] ?? c.freshLocal }]));
+          setItems((current) => current.map((item) => {
+            const entry = byId.get(item.id);
+            if (!entry) return item;
+            if (item.displayName !== entry.food.displayName || item.unit !== entry.food.unit) return item;
+            if (item.userMilkTypeChoice || item.suspectedDuplicateMilk === true) return item;
+            if (contradictoryDairyMilkLabel(item, mealContextRef.current)) return item;
+            if (photoGenericMilkNeedsConfirmation(item, mealContextRef.current)) return item;
+            return {
+              ...item,
+              normalizedName: normalizedNameForMatch(item.displayName, entry.match),
+              nutritionMatch: entry.match,
+            };
+          }));
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (noteLookupRevisionRef.current === revision && activeLookupKeysRef.current.delete("__meal_note__")) {
+            setPendingEditLookups(activeLookupKeysRef.current.size);
+          }
+        });
+    }, 350);
+  }, [mealNote, stage, initialProviderMode, activeMode, plantMilkContext, nutritionProvider]);
 
   const handleFileSelected = (nextFile: File | null) => {
     analyzeAbortRef.current?.abort("superseded");
     analyzeAbortRef.current = null;
     editAbortRef.current.abort();
     editAbortRef.current = new AbortController();
+    for (const timer of nameEditTimers.current.values()) {
+      window.clearTimeout(timer);
+    }
+    nameEditTimers.current.clear();
+    if (noteLookupTimerRef.current !== null) {
+      window.clearTimeout(noteLookupTimerRef.current);
+      noteLookupTimerRef.current = null;
+    }
+    activeLookupKeysRef.current.clear();
+    setPendingEditLookups(0);
     setAppError(null);
     setNutritionPending(false);
     setPreviewFailed(false);
@@ -646,7 +761,10 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
             && food.suspectedDuplicateMilk !== true
             ? [{ index, food, match: localMatches[index]! }] : [],
         );
-        if (responseMode === "live" && knownFoods.some((entry) => !entry.match.includedInTotal)) {
+        if (
+          responseMode === "live" &&
+          knownFoods.some((entry) => needsServerCatalogCheck(entry.food, entry.match, photoContext))
+        ) {
           setNutritionPending(true);
           const unchangedFood = (item: EditableFoodItem, index: number) => {
             const original = initialItems[index];
@@ -747,6 +865,12 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
       window.clearTimeout(timer);
     }
     nameEditTimers.current.clear();
+    if (noteLookupTimerRef.current !== null) {
+      window.clearTimeout(noteLookupTimerRef.current);
+      noteLookupTimerRef.current = null;
+    }
+    activeLookupKeysRef.current.clear();
+    setPendingEditLookups(0);
     setStage("input");
     setFile(null);
     setPreviewUrl(null);
@@ -780,9 +904,56 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
       window.clearTimeout(timer);
       nameEditTimers.current.delete(id);
     }
+    if (activeLookupKeysRef.current.delete(id)) {
+      setPendingEditLookups(activeLookupKeysRef.current.size);
+    }
     const revision = (nameEditRevisions.current.get(id) ?? 0) + 1;
     nameEditRevisions.current.set(id, revision);
     return revision;
+  };
+
+  const scheduleItemServerLookup = (
+    id: string,
+    targetFood: EditableFoodItem & { portionMin: number; portionMax: number },
+    localMatch: NutritionMatch,
+    revision: number,
+    debounceMs: number,
+  ) => {
+    activeLookupKeysRef.current.add(id);
+    setPendingEditLookups(activeLookupKeysRef.current.size);
+
+    const run = () => {
+      nameEditTimers.current.delete(id);
+      const signal = editAbortRef.current.signal;
+      void resolveNutritionMatchWithFallback(targetFood, localMatch, signal, mealContextRef.current)
+        .then((resolvedMatch) => {
+          if (signal.aborted || nameEditRevisions.current.get(id) !== revision) return;
+          updateItem(id, (item) => {
+            if (item.displayName !== targetFood.displayName || item.unit !== targetFood.unit) return item;
+            if (item.userMilkTypeChoice) return item;
+            if (item.suspectedDuplicateMilk === true) return item;
+            if (contradictoryDairyMilkLabel(item, mealContextRef.current)) return item;
+            return {
+              ...item,
+              normalizedName: normalizedNameForMatch(item.displayName, resolvedMatch),
+              nutritionMatch: resolvedMatch,
+            };
+          });
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (nameEditRevisions.current.get(id) === revision && activeLookupKeysRef.current.delete(id)) {
+            setPendingEditLookups(activeLookupKeysRef.current.size);
+          }
+        });
+    };
+
+    if (debounceMs > 0) {
+      const timer = window.setTimeout(run, debounceMs);
+      nameEditTimers.current.set(id, timer);
+    } else {
+      run();
+    }
   };
 
   const handleNameChange = (id: string, name: string, milkChoice?: Exclude<PhotoMilkChoiceId, "other">) => {
@@ -816,36 +987,17 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
     }));
 
     if (
-      activeMode !== "live" ||
+      initialProviderMode !== "live" ||
+      activeMode === "demo" ||
       !localMatch ||
-      localMatch.includedInTotal ||
       cachedMatch ||
-      !hasKnownPortion(nextFood)
+      !hasKnownPortion(nextFood) ||
+      !needsServerCatalogCheck(nextFood, localMatch, mealContextRef.current)
     ) {
       return;
     }
 
-    const timer = window.setTimeout(() => {
-      const signal = editAbortRef.current.signal;
-      void resolveNutritionMatchWithFallback(nextFood, localMatch, signal, mealContextRef.current).then(
-        (resolvedMatch) => {
-          if (signal.aborted || nameEditRevisions.current.get(id) !== revision) return;
-          updateItem(id, (item) => {
-            if (item.displayName !== name) return item;
-            if (item.userMilkTypeChoice) return item;
-            if (item.suspectedDuplicateMilk === true) return item;
-            if (contradictoryDairyMilkLabel(item, mealContextRef.current)) return item;
-            return {
-              ...item,
-              normalizedName: normalizedNameForMatch(name, resolvedMatch),
-              nutritionMatch: resolvedMatch,
-            };
-          });
-        },
-      );
-      nameEditTimers.current.delete(id);
-    }, 350);
-    nameEditTimers.current.set(id, timer);
+    scheduleItemServerLookup(id, nextFood, localMatch, revision, 350);
   };
 
   const handleMilkChoice = (id: string, choiceId: PhotoMilkChoiceId) => {
@@ -891,54 +1043,141 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
     value: number | null,
   ) => {
     if (value !== null && (!Number.isFinite(value) || value <= 0)) return;
-    invalidateNameLookup(id);
-    updateItem(id, (item) => {
-      if (value === null) return {
-        ...item, portionMin: null, portionMax: null,
-        originalPortionMin: null, originalPortionMax: null,
-        nutritionMatch: null,
-      };
-      if (field === "portionMin") {
-        const portionMax = Math.max(value, item.portionMax ?? value);
-        return {
-          ...item,
-          portionMin: value,
-          portionMax,
-          originalPortionMin: value,
-          originalPortionMax: portionMax,
-          nutritionMatch: item.nutritionMatch ?? nutritionProvider.resolve({
-            ...item, portionMin: value, portionMax,
-          }, mealContextRef.current),
-        };
-      }
-      const portionMin = Math.min(value, item.portionMin ?? value);
-      return {
+    const currentItem = items.find((item) => item.id === id);
+    if (!currentItem) return;
+    if (value === null) {
+      invalidateNameLookup(id);
+      updateItem(id, (item) => ({
         ...item,
-        portionMin,
-        portionMax: value,
-        originalPortionMin: portionMin,
-        originalPortionMax: value,
-        nutritionMatch: item.nutritionMatch ?? nutritionProvider.resolve({
-          ...item, portionMin, portionMax: value,
-        }, mealContextRef.current),
-      };
-    });
+        portionMin: null,
+        portionMax: null,
+        originalPortionMin: null,
+        originalPortionMax: null,
+        nutritionMatch: null,
+      }));
+      return;
+    }
+
+    const hadPendingLookup = nameEditTimers.current.has(id) || activeLookupKeysRef.current.has(id);
+    const hadKnownPortion = hasKnownPortion(currentItem);
+    const portionMin = field === "portionMin" ? value : Math.min(value, currentItem.portionMin ?? value);
+    const portionMax = field === "portionMin" ? Math.max(value, currentItem.portionMax ?? value) : value;
+    const piecePackBoundaryCrossed =
+      currentItem.unit === "piece" &&
+      Boolean(currentItem.nutritionMatch?.profile?.id.startsWith(CATALOG_PROFILE_ID_PREFIX)) &&
+      currentItem.portionMax !== null &&
+      (currentItem.portionMax > 1) !== (portionMax > 1);
+
+    const nextFood = {
+      ...currentItem,
+      portionMin,
+      portionMax,
+      originalPortionMin: portionMin,
+      originalPortionMax: portionMax,
+    };
+    const shouldRecomputeMatch =
+      !currentItem.nutritionMatch || !hadKnownPortion || piecePackBoundaryCrossed || hadPendingLookup;
+    const localMatch = nextFood.displayName.trim()
+      ? nutritionProvider.resolve(nextFood, mealContextRef.current)
+      : null;
+    const nextMatch = shouldRecomputeMatch ? localMatch : currentItem.nutritionMatch;
+
+    updateItem(id, () => ({
+      ...nextFood,
+      nutritionMatch: nextMatch,
+    }));
+
+    if (
+      !shouldRecomputeMatch ||
+      initialProviderMode !== "live" ||
+      activeMode === "demo" ||
+      !localMatch ||
+      !needsServerCatalogCheck(nextFood, localMatch, mealContextRef.current)
+    ) {
+      if (hadPendingLookup) invalidateNameLookup(id);
+      return;
+    }
+
+    const revision = invalidateNameLookup(id);
+    scheduleItemServerLookup(id, nextFood, localMatch, revision, 250);
   };
 
   const handleUnitChange = (id: string, unit: PortionUnit) => {
-    invalidateNameLookup(id);
-    updateItem(id, (item) => {
-      const profile =
-        item.nutritionMatch?.profile ??
-        nutritionProvider.findByName(item.normalizedName) ??
-        nutritionProvider.findByName(item.displayName);
-      return convertPortionUnit(item, unit, profile);
-    });
+    const revision = invalidateNameLookup(id);
+    const currentItem = items.find((item) => item.id === id);
+    if (!currentItem) return;
+    const profile =
+      currentItem.nutritionMatch?.profile ??
+      nutritionProvider.findByName(currentItem.normalizedName) ??
+      nutritionProvider.findByName(currentItem.displayName);
+    const converted = convertPortionUnit(currentItem, unit, profile);
+    const keepsExistingProfile = Boolean(
+      currentItem.nutritionMatch?.includedInTotal &&
+      currentItem.nutritionMatch.profile?.gramsPerUnit[unit],
+    );
+    const localMatch = keepsExistingProfile
+      ? currentItem.nutritionMatch
+      : converted.displayName.trim() && hasKnownPortion(converted)
+        ? nutritionProvider.resolve(converted, mealContextRef.current)
+        : null;
+
+    updateItem(id, () => ({
+      ...converted,
+      nutritionMatch: localMatch,
+    }));
+
+    if (
+      keepsExistingProfile ||
+      initialProviderMode !== "live" ||
+      activeMode === "demo" ||
+      !localMatch ||
+      !hasKnownPortion(converted) ||
+      !needsServerCatalogCheck(converted, localMatch, mealContextRef.current)
+    ) {
+      return;
+    }
+
+    scheduleItemServerLookup(id, converted, localMatch, revision, 0);
   };
 
   const handlePreset = (id: string, preset: PortionPreset) => {
-    invalidateNameLookup(id);
-    updateItem(id, (item) => applyPortionPreset(item, preset));
+    const currentItem = items.find((item) => item.id === id);
+    if (!currentItem) return;
+    const hadPendingLookup = nameEditTimers.current.has(id) || activeLookupKeysRef.current.has(id);
+    const hadKnownPortion = hasKnownPortion(currentItem);
+    const nextFood = applyPortionPreset(currentItem, preset);
+    const piecePackBoundaryCrossed =
+      nextFood.unit === "piece" &&
+      Boolean(currentItem.nutritionMatch?.profile?.id.startsWith(CATALOG_PROFILE_ID_PREFIX)) &&
+      currentItem.portionMax !== null &&
+      nextFood.portionMax !== null &&
+      (currentItem.portionMax > 1) !== (nextFood.portionMax > 1);
+
+    const shouldRecomputeMatch =
+      !currentItem.nutritionMatch || !hadKnownPortion || piecePackBoundaryCrossed || hadPendingLookup;
+    const localMatch = nextFood.displayName.trim() && hasKnownPortion(nextFood)
+      ? nutritionProvider.resolve(nextFood, mealContextRef.current)
+      : null;
+
+    updateItem(id, () => ({
+      ...nextFood,
+      nutritionMatch: shouldRecomputeMatch ? localMatch : currentItem.nutritionMatch,
+    }));
+
+    if (
+      !shouldRecomputeMatch ||
+      initialProviderMode !== "live" ||
+      activeMode === "demo" ||
+      !localMatch ||
+      !hasKnownPortion(nextFood) ||
+      !needsServerCatalogCheck(nextFood, localMatch, mealContextRef.current)
+    ) {
+      if (hadPendingLookup) invalidateNameLookup(id);
+      return;
+    }
+
+    const revision = invalidateNameLookup(id);
+    scheduleItemServerLookup(id, nextFood, localMatch, revision, 250);
   };
 
   return (
@@ -1003,7 +1242,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
           analysis={analysis}
           items={guardedItems}
           mode={activeMode}
-          nutritionPending={nutritionPending}
+          nutritionPending={effectiveNutritionPending}
           calorieCorrection={calorieCorrection}
           previewUrl={previewUrl}
           previewFailed={previewFailed}
@@ -1012,7 +1251,10 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
           onPortionChange={handlePortionChange}
           onUnitChange={handleUnitChange}
           onPreset={handlePreset}
-          onDelete={(id) => setItems((current) => current.filter((item) => item.id !== id))}
+          onDelete={(id) => {
+            invalidateNameLookup(id);
+            setItems((current) => current.filter((item) => item.id !== id));
+          }}
           onMilkChoice={handleMilkChoice}
           onConfirmSeparateMilk={handleConfirmSeparateMilk}
           onAdd={() => setItems((current) => [...current, createManualItem()])}

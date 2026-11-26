@@ -16,8 +16,15 @@ import {
 } from "@/lib/firebase/meals";
 import { accountPath } from "@/lib/firebase/admin";
 import { createEditableFoodItems, hasKnownPortion } from "@/lib/domain/editable-meal";
-import { canReuseNutritionMatchForNameEdit } from "@/lib/nutrition/client";
+import { canReuseNutritionMatchForNameEdit, needsServerCatalogCheck } from "@/lib/nutrition/client";
 import { blocksUsdaLiveLookup, isCompositeIdentity, mealPlantMilkContext } from "@/lib/nutrition/canonical";
+import {
+  CATALOG_PROFILE_ID_PREFIX,
+  emptyCatalogIndex,
+  resolveFromCatalogIndex,
+  type CatalogIndex,
+} from "@/lib/nutrition/catalog-entry";
+import { loadFirestoreNutritionCatalogIndex } from "@/lib/firebase/nutrition-catalog";
 import { supportsUsdaPortionUnit, UsdaNutritionClient } from "@/lib/nutrition/usda";
 import { getNutritionApiKey } from "@/lib/server/env";
 import { reserveHourlyUsdaCall } from "@/lib/server/durable-nutrition-quota";
@@ -164,6 +171,7 @@ export async function POST(request: Request) {
       analysis: previous?.analysis ?? null,
       mealNote: previous?.journalNote ?? null,
     });
+    const noteChanged = resolvedNote !== (previous?.journalNote ?? null);
     const reusePreviousNutrition =
       journalNote !== undefined &&
       !!previous &&
@@ -172,26 +180,94 @@ export async function POST(request: Request) {
     const previousItems = new Map(previous?.items.map((item) => [item.id, item]) ?? []);
     const plantMilkGuardUnchanged = (item: typeof input.items[number]) =>
       blocksUsdaLiveLookup(item, mealContext) === blocksUsdaLiveLookup(item, previousContext);
+
+    // Only load Firestore catalog shards when at least one item actually requires catalog lookup
+    // (or when a journal-note edit may add/remove a brand cue for a catalog match).
+    let catalogIndex: CatalogIndex = emptyCatalogIndex();
+    const analysisNeedsCatalog =
+      !previous?.originalItems &&
+      Boolean(analysisForNutrition?.foods.some((food) => {
+        if (!hasKnownPortion(food)) return false;
+        const photoFood = { ...food, entrySource: "photo" as const };
+        return needsServerCatalogCheck(photoFood, local.resolve(photoFood, mealContext), mealContext);
+      }));
+    const itemsNeedCatalog = input.items.some((item) => {
+      if (!hasKnownPortion(item)) return false;
+      const old = previousItems.get(item.id);
+      const oldIsCatalog = Boolean(old?.nutritionMatch?.profile?.id.startsWith(CATALOG_PROFILE_ID_PREFIX));
+      if (noteChanged && oldIsCatalog) return true;
+      const canReuse =
+        old &&
+        plantMilkGuardUnchanged(item) &&
+        !noteChanged &&
+        (reusePreviousNutrition ||
+          (hasKnownPortion(old) && canReuseNutritionMatchForNameEdit(old, item, old.nutritionMatch)));
+      if (canReuse) return false;
+      return needsServerCatalogCheck(item, local.resolve(item, mealContext), mealContext);
+    });
+    if (itemsNeedCatalog || analysisNeedsCatalog) {
+      catalogIndex = await loadFirestoreNutritionCatalogIndex(db);
+    }
+
+    const resolveWithCatalog = (
+      food: Parameters<typeof local.resolve>[0],
+    ) => {
+      const localMatch = local.resolve(food, mealContext);
+      if (catalogIndex.entryCount > 0 && needsServerCatalogCheck(food, localMatch, mealContext)) {
+        const catalogMatch = resolveFromCatalogIndex(food, catalogIndex, localMatch, mealContext);
+        if (catalogMatch && (catalogMatch.includedInTotal || !localMatch.includedInTotal)) {
+          return { match: catalogMatch, catalogHandled: true };
+        }
+      }
+      return { match: localMatch, catalogHandled: false };
+    };
+
+    const catalogHandledIds = new Set<string>();
+    const reusedItemIds = new Set<string>();
     const initialItems = input.items.map((item) => {
       if (!hasKnownPortion(item)) return { ...item, nutritionMatch: null };
       const old = previousItems.get(item.id);
-      if (reusePreviousNutrition && old && plantMilkGuardUnchanged(item))
-        return { ...item, nutritionMatch: old.nutritionMatch ?? null };
-      const match =
+      const baseReusable =
         old &&
-        hasKnownPortion(old) && canReuseNutritionMatchForNameEdit(old, item, old.nutritionMatch) &&
-        plantMilkGuardUnchanged(item)
-          ? old.nutritionMatch!
-          : local.resolve(item, mealContext);
-      return { ...item, nutritionMatch: match };
+        plantMilkGuardUnchanged(item) &&
+        (reusePreviousNutrition ||
+          (hasKnownPortion(old) && canReuseNutritionMatchForNameEdit(old, item, old.nutritionMatch)));
+
+      if (baseReusable) {
+        if (noteChanged) {
+          const oldProfileId = old.nutritionMatch?.profile?.id ?? null;
+          const oldIsCatalog = Boolean(oldProfileId?.startsWith(CATALOG_PROFILE_ID_PREFIX));
+          const fresh = resolveWithCatalog(item);
+          const freshProfileId = fresh.match.profile?.id ?? null;
+          if ((oldIsCatalog && freshProfileId !== oldProfileId) || (fresh.catalogHandled && freshProfileId !== oldProfileId)) {
+            if (fresh.catalogHandled) catalogHandledIds.add(item.id);
+            return { ...item, nutritionMatch: fresh.match };
+          }
+        }
+        reusedItemIds.add(item.id);
+        return { ...item, nutritionMatch: old.nutritionMatch ?? null };
+      }
+
+      const resolved = resolveWithCatalog(item);
+      if (resolved.catalogHandled) catalogHandledIds.add(item.id);
+      return { ...item, nutritionMatch: resolved.match };
     });
+    const isRemoteEligible = (
+      food: Parameters<typeof local.resolve>[0],
+      match: ReturnType<typeof local.resolve> | null,
+      handledByCatalog: boolean,
+    ) =>
+      !handledByCatalog &&
+      hasKnownPortion(food) &&
+      match !== null &&
+      !match.includedInTotal &&
+      supportsUsdaPortionUnit(food.unit) &&
+      !isCompositeIdentity(match.identity) &&
+      !blocksUsdaLiveLookup(food, mealContext);
     const needsRemote = (item: typeof initialItems[number]) =>
-      (!reusePreviousNutrition || !plantMilkGuardUnchanged(item)) &&
-      hasKnownPortion(item) && item.nutritionMatch !== null &&
-      !item.nutritionMatch.includedInTotal &&
-      supportsUsdaPortionUnit(item.unit) &&
-      !isCompositeIdentity(item.nutritionMatch.identity) &&
-      !blocksUsdaLiveLookup(item, mealContext);
+      !reusedItemIds.has(item.id) &&
+      hasKnownPortion(item) &&
+      isRemoteEligible(item, item.nutritionMatch, catalogHandledIds.has(item.id));
     // All writes participate in this claim. Otherwise a changed local/manual
     // payload with the same mutation ID could race a Live lookup and commit
     // first, causing the eventual Live request to acknowledge the wrong body.
@@ -212,41 +288,75 @@ export async function POST(request: Request) {
     const attemptToken = attempt.token;
     const allowRemote = attempt.state === "claimed";
     try {
-      const items = await Promise.all(initialItems.map(async (item) => {
-        let match = item.nutritionMatch;
-        if (needsRemote(item) && match && hasKnownPortion(item) && usda && input.mode === "live" && allowRemote) {
-          try {
-            const remote = await usda.resolve(item);
-            if (remote.includedInTotal) match = remote;
-          } catch {
-            // An unavailable provider or exhausted budget cannot create a
-            // trusted nutrition value. Save the meal with explicit uncertainty.
-            match = {
-              ...match,
-              reasons: [copy.nutritionLookupFailed,
-                ...match.reasons.filter((reason) => reason !== copy.nutritionLookupFailed)],
-            };
-          }
-        } else if (needsRemote(item) && match && usda && input.mode === "live" && !allowRemote) {
-          match = {
+      const resolveRemote = async (
+        food: Parameters<typeof local.resolve>[0],
+        match: ReturnType<typeof local.resolve>,
+      ) => {
+        if (!usda) return match;
+        if (!allowRemote) {
+          return {
             ...match,
             reasons: [copy.nutritionLookupFailed,
               ...match.reasons.filter((reason) => reason !== copy.nutritionLookupFailed)],
           };
         }
+        try {
+          const remote = await usda.resolve(food);
+          return remote.includedInTotal ? remote : match;
+        } catch {
+          // An unavailable provider or exhausted budget cannot create a
+          // trusted nutrition value. Save the meal with explicit uncertainty.
+          return {
+            ...match,
+            reasons: [copy.nutritionLookupFailed,
+              ...match.reasons.filter((reason) => reason !== copy.nutritionLookupFailed)],
+          };
+        }
+      };
+
+      const items = await Promise.all(initialItems.map(async (item) => {
+        let match = item.nutritionMatch;
+        if (needsRemote(item) && match && hasKnownPortion(item)) {
+          match = await resolveRemote(item, match);
+        }
         return { ...item, nutritionMatch: match };
       }));
       const analysis = previous ? previous.analysis : input.analysis;
-      const originalItems =
-        previous?.originalItems ??
-        (analysis
-          ? createEditableFoodItems(
-              analysis.foods,
-              analysis.foods.map((food) => hasKnownPortion(food)
-                ? local.resolve({ ...food, entrySource: "photo" }, mealContext)
-                : null),
-            ).map((item) => ({ ...item, entrySource: "photo" as const }))
-          : items);
+      const originalItems = previous?.originalItems
+        ? previous.originalItems
+        : analysis
+          ? await (async () => {
+              const seeded = createEditableFoodItems(analysis.foods).map((item) => ({
+                ...item,
+                entrySource: "photo" as const,
+              }));
+              const resolvedOriginalMatches = await Promise.all(seeded.map(async (origItem) => {
+                if (!hasKnownPortion(origItem)) return null;
+                const matchingCurrent = items.find((current) =>
+                  current.id === origItem.id &&
+                  current.displayName === origItem.displayName &&
+                  current.normalizedName === origItem.normalizedName &&
+                  current.identityLevel === origItem.identityLevel &&
+                  current.unit === origItem.unit &&
+                  (current.preparationMethod ?? "") === (origItem.preparationMethod ?? "") &&
+                  (current.notes ?? "") === (origItem.notes ?? "") &&
+                  current.userMilkTypeChoice === origItem.userMilkTypeChoice &&
+                  (origItem.unit !== "piece" ||
+                    (current.portionMax !== null && (current.portionMax > 1) === (origItem.portionMax > 1))),
+                );
+                if (matchingCurrent?.nutritionMatch) return matchingCurrent.nutritionMatch;
+                const resolved = resolveWithCatalog(origItem);
+                if (isRemoteEligible(origItem, resolved.match, resolved.catalogHandled)) {
+                  return resolveRemote(origItem, resolved.match);
+                }
+                return resolved.match;
+              }));
+              return seeded.map((item, idx) => ({
+                ...item,
+                nutritionMatch: resolvedOriginalMatches[idx] ?? null,
+              }));
+            })()
+          : items;
       const record: Omit<MealRecord, "updatedAt"> = {
         ...mealInput,
         calorieCorrection: resolveCalorieCorrection(input.calorieCorrection, input.items, previous),

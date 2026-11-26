@@ -20,7 +20,13 @@
     "check:codecs": "node scripts/check-codecs.mjs",
     "test:watch": "vitest",
     "test:e2e": "node scripts/e2e-server.mjs",
-    "test:firestore": "vitest run --config vitest.firestore.config.mts"
+    "test:firestore": "vitest run --config vitest.firestore.config.mts",
+    "catalog:sync": "node scripts/sync-nutrition-catalog.mjs",
+    "catalog:sync:mcdonalds-hk": "node scripts/sync-nutrition-catalog.mjs --source mcdonalds-hk",
+    "catalog:sync:cfs-hk": "node scripts/sync-nutrition-catalog.mjs --source cfs-hk-frl",
+    "catalog:sync:tfnd": "node scripts/sync-nutrition-catalog.mjs --source tfnd-tw",
+    "catalog:sync:usda": "node scripts/sync-nutrition-catalog.mjs --source usda-fdc",
+    "catalog:sync:off-hktw": "node scripts/sync-nutrition-catalog.mjs --source openfoodfacts-hktw"
   },
   "dependencies": {
     "@google/genai": "2.24.0",

@@ -270,6 +270,7 @@ export function MealJournal({
   const [notice, setNotice] = useState<JournalNotice>("");
   const [syncNotice, setSyncNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [nutritionPending, setNutritionPending] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [photoFailure, setPhotoFailure] = useState<null | "retryable" | "too_large">(null);
   const [conflict, setConflict] = useState(false);
@@ -1535,6 +1536,7 @@ export function MealJournal({
                   mealNote={draft.journalNote}
                   manual={manual}
                   onDraftChange={onDraftChange}
+                  onNutritionPendingChange={setNutritionPending}
                   onPhotoSelected={onPhotoSelected}
                   onExit={() => {
                     void discard();
@@ -1746,7 +1748,11 @@ export function MealJournal({
                   className="button button-primary"
                   aria-describedby={draft.mode === "live" ? "save-review-note" : undefined}
                   disabled={
-                    busy || !draft.items.length || draft.mode === "demo" || journalNoteTooLong
+                    busy ||
+                    (nutritionPending && online) ||
+                    !draft.items.length ||
+                    draft.mode === "demo" ||
+                    journalNoteTooLong
                   }
                   onClick={() => void save()}
                 >
