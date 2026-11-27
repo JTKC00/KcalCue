@@ -9,7 +9,7 @@ import {
   cloudConfigured,
 } from "@/lib/firebase/client";
 import { Account } from "./firebase-account";
-import { clearSyncState, visibleMeals, type PendingMeal } from "@/lib/meals/outbox";
+import { clearOrphanedPhotoOutbox, clearSyncState, visibleMeals, type PendingMeal } from "@/lib/meals/outbox";
 import { draftTabId, prepareDraftTabId, localMeals, type LocalMeals, type SavedDraftSummary } from "@/lib/meals/cache";
 import { MealRepository, RepositoryError } from "@/lib/meals/repository";
 import {
@@ -162,6 +162,17 @@ const photoRateLimitNotice = "照片處理稍忙，請約 10 秒後重試。原�
 function clearPhotoNotice(notice: JournalNotice): JournalNotice {
   return notice === oversizedPhotoNotice || notice === retryablePhotoNotice ||
     notice === photoRateLimitNotice ? "" : notice;
+}
+async function clearOrphanedPhotoOutboxLocked(uid: string) {
+  if (typeof navigator !== "undefined" && navigator.locks?.request) {
+    await navigator.locks.request(`kcalcue-sync-${uid}`, () =>
+      navigator.locks.request(`kcalcue-account-${uid}`, () =>
+        clearOrphanedPhotoOutbox(uid),
+      ),
+    );
+    return;
+  }
+  await clearOrphanedPhotoOutbox(uid);
 }
 
 function mealCalorieLabel(calories: MealCalorieSummary) {
@@ -481,18 +492,20 @@ export function MealJournal({
             (await localMeals.read("guest", tabKey).catch(() => ({ draft: null })))
               .draft)
           : null;
-      const loggedOutUid = localStorage.getItem("kcalcue-logout")?.split(":")[0];
+      const initialLoggedOutUid = localStorage.getItem("kcalcue-logout")?.split(":")[0];
       if (oldId !== "guest" && oldId !== id) {
         cacheEnabled.current = false;
         await writes.current;
         // Account changes preserve unsynced work; explicit logout clears local data.
-        if (loggedOutUid === oldId) {
+        const currentLoggedOutUid = localStorage.getItem("kcalcue-logout")?.split(":")[0];
+        if (currentLoggedOutUid === oldId) {
           await localMeals.clear(oldId);
-          await clearSyncState(oldId);
+          await clearOrphanedPhotoOutboxLocked(oldId);
         }
       }
-      if (loggedOutUid && loggedOutUid !== "guest" && loggedOutUid !== oldId && loggedOutUid !== id) {
-        await clearSyncState(loggedOutUid).catch(() => {});
+      const latestLoggedOutUid = localStorage.getItem("kcalcue-logout")?.split(":")[0] ?? initialLoggedOutUid;
+      if (latestLoggedOutUid && latestLoggedOutUid !== "guest" && latestLoggedOutUid !== oldId && latestLoggedOutUid !== id) {
+        await clearOrphanedPhotoOutboxLocked(latestLoggedOutUid).catch(() => {});
       }
       const local = await localMeals.read(id, tabKey).catch(() => {
         setNotice("本機儲存不可用，請勿在儲存到雲端前關閉頁面。");
@@ -630,7 +643,7 @@ export function MealJournal({
       const loggedOut = event.newValue?.split(":")[0];
       if (!loggedOut || loggedOut === "guest") return;
       if (loggedOut !== current.current.userId) {
-        void clearSyncState(loggedOut).catch(() => {});
+        void clearOrphanedPhotoOutboxLocked(loggedOut).catch(() => {});
         return;
       }
       const old = current.current.userId;
@@ -658,7 +671,7 @@ export function MealJournal({
       loadGeneration++;
       void writes.current
         .then(() => localMeals.clear(old))
-        .then(() => clearSyncState(old))
+        .then(() => clearOrphanedPhotoOutboxLocked(old))
         .then(() => {
           if (active) setNotice("這個帳戶已在另一個分頁登出，本機資料已清除。");
         })

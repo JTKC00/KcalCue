@@ -243,11 +243,12 @@ async function purgeOrphanedPhotoOutbox(db: IDBDatabase, uid: string): Promise<v
 
     const tryRun = () => {
       if (!accountLoaded || !photoJobsLoaded) return;
+      const hasActiveEpoch = typeof accountResult?.photoEpoch === "string" && accountResult.photoEpoch.length > 0;
       const photoState = hasPhotoJobs
         ? readStoredPhotoJobs(photoJobsResult, accountResult?.photoEpoch)
         : { jobs: [], orphaned: false };
-      if (!photoState.orphaned) return;
-      if (photoJobsStore) photoJobsStore.delete(uid);
+      if (!photoState.orphaned && hasActiveEpoch) return;
+      if (photoJobsStore && photoJobsResult !== undefined) photoJobsStore.delete(uid);
       if (hasPhotos) clearPhotoRows(tx.objectStore(PHOTO_STORE), uid);
     };
 
@@ -798,6 +799,16 @@ export function visibleMeals(state: SyncState) {
     }
   }
   return [...meals.values()];
+}
+
+export async function clearOrphanedPhotoOutbox(uid: string): Promise<void> {
+  if (typeof indexedDB === "undefined") return;
+  const db = await open();
+  try {
+    await purgeOrphanedPhotoOutbox(db, uid);
+  } finally {
+    db.close();
+  }
 }
 
 export async function clearSyncState(uid: string) {
