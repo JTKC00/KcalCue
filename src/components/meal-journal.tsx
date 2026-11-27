@@ -221,6 +221,45 @@ function mealView(record: MealRecord): MealView {
   return view;
 }
 
+function formatDisplayDate(isoDate: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : isoDate;
+}
+
+function DateInput({
+  value,
+  onChange,
+  required,
+  disabled,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  required?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <span className={`date-input-wrap${disabled ? " is-disabled" : ""}${!value ? " is-empty" : ""}`}>
+      <span className="date-input-display" aria-hidden="true">
+        {value ? formatDisplayDate(value) : "DD/MM/YYYY"}
+      </span>
+      <input
+        required={required}
+        disabled={disabled}
+        type="date"
+        value={value}
+        onClick={(e) => {
+          try {
+            (e.currentTarget as HTMLInputElement & { showPicker?: () => void }).showPicker?.();
+          } catch {
+            // Ignore browsers that block or do not implement showPicker().
+          }
+        }}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </span>
+  );
+}
+
 function journalDateLabel(date: string) {
   const parsed = new Date(`${date}T12:00:00`);
   return Number.isNaN(parsed.getTime())
@@ -1511,7 +1550,7 @@ export function MealJournal({
           <p>此裝置另有 {otherDrafts.length} 份未儲存草稿。</p>
           {otherDrafts.map((saved) => (
             <div key={saved.revision}>
-              <span>{saved.label} · {saved.date} · {new Date(saved.updatedAt).toLocaleString("zh-HK")}</span>{" "}
+              <span>{saved.label} · {formatDisplayDate(saved.date)} · {new Date(saved.updatedAt).toLocaleString("zh-HK")}</span>{" "}
               <button className="button button-secondary" onClick={() => void recoverDraft(saved)}>
                 恢復草稿
               </button>
@@ -1761,14 +1800,11 @@ export function MealJournal({
                 <div className="metadata-grid">
                   <label className="metadata-date">
                     日期
-                    <input
+                    <DateInput
                       required
                       disabled={busy}
-                      type="date"
                       value={draft.date}
-                      onChange={(e) =>
-                        setDraft({ ...draft, date: e.target.value })
-                      }
+                      onChange={(date) => setDraft({ ...draft, date })}
                     />
                   </label>
                   <label>
@@ -2068,10 +2104,9 @@ export function MealJournal({
           {tab === "history" && (
             <label className="date-filter">
               按日期查看
-              <input
-                type="date"
+              <DateInput
                 value={filter}
-                onChange={(e) => setFilter(e.target.value)}
+                onChange={setFilter}
               />
               <button
                 className="button button-ghost"
@@ -2139,8 +2174,7 @@ export function MealJournal({
             const meals = visible.filter((r) => r.date === date);
             const nutrition = dayNutrition(meals);
             const calories = dayCalories(meals);
-            const calorieRange = calories.range && (calories.referenceCount
-              ? roundRange(calories.range, 5) : calories.range);
+            const calorieRange = calories.range;
             const groups = tab === "today"
               ? Object.entries(mealTypes).map(([mealType, label]) => ({
                 key: mealType,
@@ -2154,7 +2188,7 @@ export function MealJournal({
                 {tab === "history" && (
                   <div className="journal-day-heading">
                     <h2>{journalDateLabel(date)}</h2>
-                    <span>{date}</span>
+                    <span>{formatDisplayDate(date)}</span>
                   </div>
                 )}
                 <div className={`day-summary journal-card ${tab === "today" ? "today-summary" : "history-summary"}`} role="region" aria-label={tab === "today" ? "今日摘要" : `${date} 摘要`}>

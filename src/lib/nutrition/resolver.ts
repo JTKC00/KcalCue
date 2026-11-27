@@ -151,6 +151,18 @@ function scoreProfile(
     score += 20;
   }
 
+  if (identity.canonicalName === "egg" && profile.canonicalName === "egg") {
+    const eggStyle = identity.qualifiers.includes("braised")
+      ? "egg-braised"
+      : identity.qualifiers.includes("fried") || identity.preparation === "pan_fried" || identity.preparation === "stir_fried"
+        ? "egg-fried"
+        : identity.qualifiers.includes("boiled") || identity.preparation === "boiled" || identity.preparation === "steamed"
+          ? "egg-boiled"
+          : "egg-generic";
+    if (profile.id === eggStyle) score += 100;
+    else if (profile.id === "egg-generic" && eggStyle !== "egg-generic") score -= 50;
+  }
+
   if (!isCompatibleNutritionIdentity(identity, profile)) score -= 200;
   else if (isCompositeIdentity(identity) && !profile.composite) score -= 40;
   else if (!isCompositeIdentity(identity) && profile.composite) score -= 20;

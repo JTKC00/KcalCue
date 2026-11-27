@@ -1041,6 +1041,7 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
     id: string,
     field: "portionMin" | "portionMax",
     value: number | null,
+    peerAnchor?: number | null,
   ) => {
     if (value !== null && (!Number.isFinite(value) || value <= 0)) return;
     const currentItem = items.find((item) => item.id === id);
@@ -1060,8 +1061,10 @@ export function KcalCueApp({ initialProviderMode, initialDraft, calorieCorrectio
 
     const hadPendingLookup = nameEditTimers.current.has(id) || activeLookupKeysRef.current.has(id);
     const hadKnownPortion = hasKnownPortion(currentItem);
-    const portionMin = field === "portionMin" ? value : Math.min(value, currentItem.portionMin ?? value);
-    const portionMax = field === "portionMin" ? Math.max(value, currentItem.portionMax ?? value) : value;
+    const baseMin = peerAnchor !== undefined ? peerAnchor : currentItem.portionMin;
+    const baseMax = peerAnchor !== undefined ? peerAnchor : currentItem.portionMax;
+    const portionMin = field === "portionMin" ? value : Math.min(value, baseMin ?? value);
+    const portionMax = field === "portionMin" ? Math.max(value, baseMax ?? value) : value;
     const piecePackBoundaryCrossed =
       currentItem.unit === "piece" &&
       Boolean(currentItem.nutritionMatch?.profile?.id.startsWith(CATALOG_PROFILE_ID_PREFIX)) &&

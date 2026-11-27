@@ -37,6 +37,7 @@ interface ResultViewProps {
     id: string,
     field: "portionMin" | "portionMax",
     value: number | null,
+    peerAnchor?: number | null,
   ) => void;
   onUnitChange: (id: string, unit: PortionUnit) => void;
   onPreset: (id: string, preset: PortionPreset) => void;
@@ -279,8 +280,8 @@ export function ResultView({
                   calculation={meal.foods[index]}
                   recognition={recognitionSources[index]}
                   onNameChange={(name) => onNameChange(item.id, name)}
-                  onPortionChange={(field, value) =>
-                    onPortionChange(item.id, field, value)
+                  onPortionChange={(field, value, peerAnchor) =>
+                    onPortionChange(item.id, field, value, peerAnchor)
                   }
                   onUnitChange={(unit) => onUnitChange(item.id, unit)}
                   onPreset={(preset) => onPreset(item.id, preset)}

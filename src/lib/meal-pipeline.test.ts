@@ -39,8 +39,8 @@ describe("demo meal analysis pipeline", () => {
 
     expect(correctedRice).toMatchObject({
       displayName: "白飯",
-      portionMin: 188,
-      portionMax: 300,
+      portionMin: 195,
+      portionMax: 260,
       originalPortionMin: 150,
       originalPortionMax: 200,
     });

@@ -118,9 +118,9 @@ export function applyPortionPreset(
   preset: PortionPreset,
 ): EditableFoodItem {
   const factors: Record<PortionPreset, readonly [number, number]> = {
-    small: [0.65, 0.8],
+    small: [0.75, 0.75],
     regular: [1, 1],
-    large: [1.25, 1.5],
+    large: [1.3, 1.3],
   };
   const [minFactor, maxFactor] = factors[preset];
 
