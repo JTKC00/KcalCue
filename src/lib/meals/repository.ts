@@ -495,6 +495,7 @@ export class MealRepository {
         if (response.status === 401) throw new RepositoryError(code, 401);
         const permanent =
           (response.status < 500 && response.status !== 429 && response.status !== 408) ||
+          (response.status === 429 && code === "photo_quota_exceeded") ||
           (response.status === 503 && (code === "photo_uploads_disabled" || code === "photo_quota_not_configured"));
         if (permanent) return { status: "blocked", code };
         uploadError = new RepositoryError(code, response.status);

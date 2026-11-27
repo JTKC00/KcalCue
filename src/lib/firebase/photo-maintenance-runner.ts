@@ -50,6 +50,7 @@ export interface PhotoMaintenanceOptions {
 
 function isTransientBatchError(error: unknown): boolean {
   if (!(error instanceof HttpError)) return true;
+  if (error.code === "photo_maintenance_lease_lost") return false;
   return error.status === 503 || error.status === 409;
 }
 
@@ -58,6 +59,7 @@ async function withBoundedRetry<T>(
   maxPhaseRetries: number,
   retryDelayMs: number,
   sleep: (ms: number) => Promise<void>,
+  canRetry?: () => Promise<boolean>,
 ): Promise<T> {
   let attempt = 0;
   while (true) {
@@ -67,8 +69,14 @@ async function withBoundedRetry<T>(
       if (attempt >= maxPhaseRetries || !isTransientBatchError(error)) {
         throw error;
       }
+      if (canRetry && !(await canRetry())) {
+        throw error;
+      }
       attempt += 1;
       await sleep(retryDelayMs * attempt);
+      if (canRetry && !(await canRetry())) {
+        throw error;
+      }
     }
   }
 }
@@ -170,6 +178,7 @@ export async function runPhotoMaintenanceCycle(
     return result;
   }
 
+  let leaseUntilMs = startMs + leaseMs;
   let expirySummary: PhotoMaintenancePhaseSummary = { scanned: 0, processed: 0, errors: 0, errorCodes: [] };
   let attachedSummary: PhotoMaintenancePhaseSummary = { scanned: 0, processed: 0, errors: 0, errorCodes: [] };
   let deletingSummary: PhotoMaintenancePhaseSummary = { scanned: 0, processed: 0, errors: 0, errorCodes: [] };
@@ -179,19 +188,25 @@ export async function runPhotoMaintenanceCycle(
 
   async function renewLeaseIfWithinBudget(): Promise<boolean> {
     const currentMs = now();
+    if (currentMs >= leaseUntilMs) {
+      throw new HttpError(409, "photo_maintenance_lease_lost");
+    }
     if (currentMs - startMs >= maxCycleMs) {
       budgetExceeded = true;
       return false;
     }
     await db.runTransaction(async (tx) => {
       const current = await tx.get(stateRef);
-      if (current.data()?.leaseRunId !== runId) {
+      const data = current.data();
+      const storedLeaseUntil = data?.leaseUntil instanceof Timestamp ? data.leaseUntil.toMillis() : 0;
+      if (data?.leaseRunId !== runId || storedLeaseUntil <= currentMs) {
         throw new HttpError(409, "photo_maintenance_lease_lost");
       }
       tx.set(stateRef, {
         leaseUntil: Timestamp.fromMillis(currentMs + leaseMs),
       }, { merge: true });
     });
+    leaseUntilMs = currentMs + leaseMs;
     return true;
   }
 
@@ -199,21 +214,23 @@ export async function runPhotoMaintenanceCycle(
     try {
       const expiry = await withBoundedRetry(
         () => runPhotoExpiryBatch(db, maxItems, Timestamp.fromMillis(now())),
-        maxPhaseRetries, retryDelayMs, sleep,
+        maxPhaseRetries, retryDelayMs, sleep, renewLeaseIfWithinBudget,
       );
       expirySummary = summarizeOutcomes(expiry.outcomes, expiry.scanned, new Set(["deleting"]));
     } catch (error) {
+      if (error instanceof HttpError && error.code === "photo_maintenance_lease_lost") throw error;
       expirySummary = failedPhaseSummary(error);
     }
 
-    if (await renewLeaseIfWithinBudget()) {
+    if (!budgetExceeded && await renewLeaseIfWithinBudget()) {
       try {
         const attached = await withBoundedRetry(
           () => runAttachedPhotoTombstoneBatch(db, maxItems),
-          maxPhaseRetries, retryDelayMs, sleep,
+          maxPhaseRetries, retryDelayMs, sleep, renewLeaseIfWithinBudget,
         );
         attachedSummary = summarizeOutcomes(attached.outcomes, attached.scanned, new Set(["deleting"]));
       } catch (error) {
+        if (error instanceof HttpError && error.code === "photo_maintenance_lease_lost") throw error;
         attachedSummary = failedPhaseSummary(error);
       }
     }
@@ -224,8 +241,9 @@ export async function runPhotoMaintenanceCycle(
           () => runDeletingPhotoCleanupBatch(db, objects, maxItems, {
             absenceProof: options.absenceProof,
             nowMs: now(),
+            beforeItem: renewLeaseIfWithinBudget,
           }),
-          maxPhaseRetries, retryDelayMs, sleep,
+          maxPhaseRetries, retryDelayMs, sleep, renewLeaseIfWithinBudget,
         );
         staleOver24hCount = deleting.staleOver24hCount;
         deletingSummary = summarizeOutcomes(
@@ -234,6 +252,7 @@ export async function runPhotoMaintenanceCycle(
           new Set(["deleted", "already_deleted"]),
         );
       } catch (error) {
+        if (error instanceof HttpError && error.code === "photo_maintenance_lease_lost") throw error;
         deletingSummary = failedPhaseSummary(error);
       }
     }
@@ -243,8 +262,9 @@ export async function runPhotoMaintenanceCycle(
         const deleted = await withBoundedRetry(
           () => runDeletedPhotoReconcileBatch(db, objects, maxItems, {
             absenceProof: options.absenceProof,
+            beforeItem: renewLeaseIfWithinBudget,
           }),
-          maxPhaseRetries, retryDelayMs, sleep,
+          maxPhaseRetries, retryDelayMs, sleep, renewLeaseIfWithinBudget,
         );
         deletedSummary = summarizeOutcomes(
           deleted.outcomes,
@@ -252,6 +272,7 @@ export async function runPhotoMaintenanceCycle(
           new Set(["deleted_late_generation", "already_reconciled", "confirmed_absent"]),
         );
       } catch (error) {
+        if (error instanceof HttpError && error.code === "photo_maintenance_lease_lost") throw error;
         deletedSummary = failedPhaseSummary(error);
       }
     }

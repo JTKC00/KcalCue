@@ -24,7 +24,12 @@ export interface PhotoCleanupBatchResult {
   wrapped: boolean;
   cursor: string | null;
   staleOver24hCount: number;
+  stoppedEarly?: boolean;
   outcomes: Array<{ path: string; result: PhotoCleanupResult | "invalid_path" | "error"; code?: string }>;
+}
+
+export interface PhotoCleanupBatchOptions extends PhotoAbsenceProofOptions {
+  beforeItem?: () => Promise<boolean>;
 }
 
 // This scans deleting assets only; a separate expiry pass must transition
@@ -37,7 +42,7 @@ export async function runDeletingPhotoCleanupBatch(
   objects: Pick<ExactPhotoObjectStore, "metadata" | "read" | "deleteGeneration"> &
     Partial<Pick<ExactPhotoObjectStore, "verifyGenerationAbsent" | "verifyKeyAbsent">>,
   maxItems = 5,
-  options?: PhotoAbsenceProofOptions,
+  options?: PhotoCleanupBatchOptions,
 ): Promise<PhotoCleanupBatchResult> {
   if (!Number.isInteger(maxItems) || maxItems < 1 || maxItems > 10)
     throw new HttpError(400, "invalid_photo_cleanup_batch");
@@ -64,8 +69,13 @@ export async function runDeletingPhotoCleanupBatch(
   });
   const nowMs = options?.nowMs ?? Date.now();
   let staleOver24hCount = 0;
+  let stoppedEarly = false;
   const outcomes: PhotoCleanupBatchResult["outcomes"] = [];
   for (const doc of page.docs) {
+    if (options?.beforeItem && !(await options.beforeItem())) {
+      stoppedEarly = true;
+      break;
+    }
     const updatedAt = doc.data()?.updatedAt;
     if (updatedAt instanceof Timestamp && nowMs - updatedAt.toMillis() > STALE_DELETING_MS) {
       staleOver24hCount += 1;
@@ -85,5 +95,12 @@ export async function runDeletingPhotoCleanupBatch(
         code: error instanceof HttpError ? error.code : "service_unavailable" });
     }
   }
-  return { scanned: page.size, wrapped, cursor: next, staleOver24hCount, outcomes };
+  return {
+    scanned: outcomes.length,
+    wrapped,
+    cursor: next,
+    staleOver24hCount,
+    outcomes,
+    ...(stoppedEarly ? { stoppedEarly: true } : {}),
+  };
 }

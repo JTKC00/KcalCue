@@ -342,6 +342,7 @@ export function MealJournal({
   const queuedDraft = useRef<MealDraft | null>(null);
   const cacheEnabled = useRef(true);
   const preparedFile = useRef<File | null>(null);
+  const preparingRef = useRef(false);
   const photoGeneration = useRef(0);
   const refreshGeneration = useRef(0);
   const busyRef = useRef(false);
@@ -456,6 +457,7 @@ export function MealJournal({
     function clearVolatilePhoto() {
       photoGeneration.current++;
       preparedFile.current = null;
+      preparingRef.current = false;
       setPreparing(false);
       setPhotoFailure(null);
       setNotice(clearPhotoNotice);
@@ -479,12 +481,18 @@ export function MealJournal({
             (await localMeals.read("guest", tabKey).catch(() => ({ draft: null })))
               .draft)
           : null;
+      const loggedOutUid = localStorage.getItem("kcalcue-logout")?.split(":")[0];
       if (oldId !== "guest" && oldId !== id) {
         cacheEnabled.current = false;
         await writes.current;
         // Account changes preserve unsynced work; explicit logout clears local data.
-        if (localStorage.getItem("kcalcue-logout")?.split(":")[0] === oldId)
+        if (loggedOutUid === oldId) {
           await localMeals.clear(oldId);
+          await clearSyncState(oldId);
+        }
+      }
+      if (loggedOutUid && loggedOutUid !== "guest" && loggedOutUid !== oldId && loggedOutUid !== id) {
+        await clearSyncState(loggedOutUid).catch(() => {});
       }
       const local = await localMeals.read(id, tabKey).catch(() => {
         setNotice("本機儲存不可用，請勿在儲存到雲端前關閉頁面。");
@@ -618,11 +626,13 @@ export function MealJournal({
       }
     };
     const signedOutElsewhere = (event: StorageEvent) => {
-      if (
-        event.key !== "kcalcue-logout" ||
-        event.newValue?.split(":")[0] !== current.current.userId
-      )
+      if (event.key !== "kcalcue-logout") return;
+      const loggedOut = event.newValue?.split(":")[0];
+      if (!loggedOut || loggedOut === "guest") return;
+      if (loggedOut !== current.current.userId) {
+        void clearSyncState(loggedOut).catch(() => {});
         return;
+      }
       const old = current.current.userId;
       accountGeneration.current++;
       cacheEnabled.current = false;
@@ -648,6 +658,7 @@ export function MealJournal({
       loadGeneration++;
       void writes.current
         .then(() => localMeals.clear(old))
+        .then(() => clearSyncState(old))
         .then(() => {
           if (active) setNotice("這個帳戶已在另一個分頁登出，本機資料已清除。");
         })
@@ -789,6 +800,7 @@ export function MealJournal({
   function openDraft(next: MealDraft, isManual = false, savedBaseline: string | null = null) {
     photoGeneration.current++;
     preparedFile.current = null;
+    preparingRef.current = false;
     setPreparing(false);
     setPhotoFailure(null);
     setDraft(next);
@@ -867,6 +879,7 @@ export function MealJournal({
             ? { ...value, photo: undefined, photoPath: null, savePhoto: false, removePhoto: true }
             : value,
         );
+        preparingRef.current = false;
         setPreparing(false);
         setPhotoFailure(null);
         setNotice(clearPhotoNotice);
@@ -877,6 +890,7 @@ export function MealJournal({
       setDraft((value) =>
         value?.id === id ? { ...value, photo: undefined, photoPath: null, savePhoto: false } : value,
       );
+      preparingRef.current = true;
       setPreparing(true);
       setPhotoFailure(null);
       setNotice(clearPhotoNotice);
@@ -907,14 +921,17 @@ export function MealJournal({
           }
         })
         .finally(() => {
-          if (generation === photoGeneration.current) setPreparing(false);
+          if (generation === photoGeneration.current) {
+            preparingRef.current = false;
+            setPreparing(false);
+          }
         });
     },
     [initialProviderMode, photoUploadsEnabled],
   );
 
   async function save() {
-    if (!draft || busyRef.current) return;
+    if (!draft || busyRef.current || preparingRef.current || preparing) return;
     const noteLength = journalNoteCodePoints(normalizeJournalNote(draft.journalNote ?? "") ?? "");
     if (noteLength > MAX_JOURNAL_NOTE_CODE_POINTS) {
       setNotice("餐點備註最多 " + MAX_JOURNAL_NOTE_CODE_POINTS + " 個字元，請縮短後再儲存。");
@@ -1088,6 +1105,8 @@ export function MealJournal({
     }
     photoGeneration.current++;
     preparedFile.current = null;
+    preparingRef.current = false;
+    setPreparing(false);
     setDraft(null);
     setSavedDraftBaseline(null);
     setInitialDraft(undefined);
@@ -1992,6 +2011,7 @@ export function MealJournal({
                   aria-describedby={draft.mode === "live" ? "save-review-note" : undefined}
                   disabled={
                     busy ||
+                    preparing ||
                     (nutritionPending && online) ||
                     !draft.items.length ||
                     draft.mode === "demo" ||

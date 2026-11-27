@@ -18,7 +18,13 @@ export interface DeletedPhotoReconcileBatchResult {
   scanned: number;
   wrapped: boolean;
   cursor: string | null;
+  stoppedEarly?: boolean;
   outcomes: Array<{ path: string; result: DeletedPhotoReconcileResult | "invalid_path" | "error"; code?: string }>;
+}
+
+export interface DeletedPhotoReconcileBatchOptions {
+  absenceProof?: PhotoBucketIdentity;
+  beforeItem?: () => Promise<boolean>;
 }
 
 // Deleted tombstones stay in the index, so the cursor wraps and can find a
@@ -29,7 +35,7 @@ export async function runDeletedPhotoReconcileBatch(
   objects: Pick<ExactPhotoObjectStore, "metadata" | "read" | "deleteGeneration"> &
     Partial<Pick<ExactPhotoObjectStore, "verifyGenerationAbsent" | "verifyKeyAbsent">>,
   maxItems = 5,
-  options?: { absenceProof?: PhotoBucketIdentity },
+  options?: DeletedPhotoReconcileBatchOptions,
 ): Promise<DeletedPhotoReconcileBatchResult> {
   if (!Number.isInteger(maxItems) || maxItems < 1 || maxItems > 10)
     throw new HttpError(400, "invalid_photo_reconcile_batch");
@@ -54,8 +60,13 @@ export async function runDeletedPhotoReconcileBatch(
       throw new HttpError(409, "photo_reconcile_cursor_conflict");
     tx.set(cursorRef, { lastPath: next, updatedAt: Timestamp.now() });
   });
+  let stoppedEarly = false;
   const outcomes: DeletedPhotoReconcileBatchResult["outcomes"] = [];
   for (const doc of page.docs) {
+    if (options?.beforeItem && !(await options.beforeItem())) {
+      stoppedEarly = true;
+      break;
+    }
     const match = assetPath.exec(doc.ref.path);
     if (!match) {
       outcomes.push({ path: doc.ref.path, result: "invalid_path" });
@@ -69,5 +80,11 @@ export async function runDeletedPhotoReconcileBatch(
         code: error instanceof HttpError ? error.code : "service_unavailable" });
     }
   }
-  return { scanned: page.size, wrapped, cursor: next, outcomes };
+  return {
+    scanned: outcomes.length,
+    wrapped,
+    cursor: next,
+    outcomes,
+    ...(stoppedEarly ? { stoppedEarly: true } : {}),
+  };
 }

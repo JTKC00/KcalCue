@@ -46,6 +46,15 @@ const PHOTO_JOBS_STORE = "photoJobs";
 const MAX_PHOTO_BYTES = 2 * 1024 * 1024;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+interface StoredAccountState extends SyncState {
+  photoEpoch?: string;
+}
+
+interface StoredPhotoJobs {
+  epoch: string;
+  jobs: PendingMeal[];
+}
+
 interface PhotoPayload {
   uid: string;
   uploadId: string;
@@ -54,6 +63,52 @@ interface PhotoPayload {
   blob?: Blob;
   sha256: string;
   byteSize: number;
+}
+
+function toPublicSyncState(state: StoredAccountState, jobs: PendingMeal[]): SyncState {
+  const clean: StoredAccountState = { ...state };
+  delete clean.photoEpoch;
+  return { ...clean, jobs };
+}
+
+function readStoredPhotoJobs(
+  raw: StoredPhotoJobs | PendingMeal[] | undefined,
+  accountEpoch: string | undefined,
+): { jobs: PendingMeal[]; epoch?: string; orphaned: boolean } {
+  if (!raw) return { jobs: [], orphaned: false };
+  if (Array.isArray(raw)) {
+    if (raw.length === 0) return { jobs: [], orphaned: false };
+    return accountEpoch
+      ? { jobs: raw, epoch: accountEpoch, orphaned: false }
+      : { jobs: [], orphaned: true };
+  }
+  if (!Array.isArray(raw.jobs) || raw.jobs.length === 0) {
+    return { jobs: [], orphaned: false };
+  }
+  if (!accountEpoch || raw.epoch !== accountEpoch) {
+    return { jobs: [], orphaned: true };
+  }
+  return { jobs: raw.jobs, epoch: raw.epoch, orphaned: false };
+}
+
+function writeSplitState(
+  accounts: IDBObjectStore,
+  photoJobsStore: IDBObjectStore | null,
+  uid: string,
+  state: StoredAccountState,
+  split: { accountJobs: PendingMeal[]; photoJobs: PendingMeal[] },
+  existingEpoch?: string,
+) {
+  const clean: StoredAccountState = { ...state };
+  delete clean.photoEpoch;
+  if (split.photoJobs.length > 0 && photoJobsStore) {
+    const epoch = existingEpoch ?? crypto.randomUUID();
+    accounts.put({ ...clean, jobs: split.accountJobs, photoEpoch: epoch } satisfies StoredAccountState, uid);
+    photoJobsStore.put({ epoch, jobs: split.photoJobs } satisfies StoredPhotoJobs, uid);
+  } else {
+    accounts.put({ ...clean, jobs: split.accountJobs }, uid);
+    if (photoJobsStore) photoJobsStore.delete(uid);
+  }
 }
 
 function storageError(tx: IDBTransaction, request?: IDBRequest) {
@@ -149,9 +204,10 @@ async function openForPhoto() {
   });
 }
 
-function clearPhotoRows(store: IDBObjectStore, uid: string, uploadIds?: string[]) {
+function clearPhotoRows(store: IDBObjectStore, uid: string, uploadIds?: string[], onDone?: () => void) {
   if (uploadIds) {
     for (const uploadId of new Set(uploadIds)) store.delete([uid, uploadId]);
+    onDone?.();
     return;
   }
   const cursor = store.indexNames.contains("uid")
@@ -163,8 +219,49 @@ function clearPhotoRows(store: IDBObjectStore, uid: string, uploadIds?: string[]
       if (Array.isArray(row.primaryKey) && row.primaryKey[0] === uid)
         store.delete(row.primaryKey);
       row.continue();
+    } else {
+      onDone?.();
     }
   };
+}
+
+async function purgeOrphanedPhotoOutbox(db: IDBDatabase, uid: string): Promise<void> {
+  const hasPhotoJobs = db.objectStoreNames.contains(PHOTO_JOBS_STORE);
+  const hasPhotos = db.objectStoreNames.contains(PHOTO_STORE);
+  if (!hasPhotoJobs && !hasPhotos) return;
+  const storeNames = ["accounts", ...(hasPhotoJobs ? [PHOTO_JOBS_STORE] : []), ...(hasPhotos ? [PHOTO_STORE] : [])];
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(storeNames, "readwrite");
+    const accounts = tx.objectStore("accounts");
+    const photoJobsStore = hasPhotoJobs ? tx.objectStore(PHOTO_JOBS_STORE) : null;
+    const accountRequest = accounts.get(uid);
+    const photoJobsRequest = photoJobsStore ? photoJobsStore.get(uid) : null;
+    let accountResult: StoredAccountState | undefined;
+    let photoJobsResult: StoredPhotoJobs | PendingMeal[] | undefined;
+    let accountLoaded = false;
+    let photoJobsLoaded = !photoJobsRequest;
+
+    const tryRun = () => {
+      if (!accountLoaded || !photoJobsLoaded) return;
+      const photoState = hasPhotoJobs
+        ? readStoredPhotoJobs(photoJobsResult, accountResult?.photoEpoch)
+        : { jobs: [], orphaned: false };
+      if (!photoState.orphaned) return;
+      if (photoJobsStore) photoJobsStore.delete(uid);
+      if (hasPhotos) clearPhotoRows(tx.objectStore(PHOTO_STORE), uid);
+    };
+
+    accountRequest.onsuccess = () => { accountResult = accountRequest.result; accountLoaded = true; tryRun(); };
+    if (photoJobsRequest) {
+      photoJobsRequest.onsuccess = () => {
+        photoJobsResult = photoJobsRequest.result;
+        photoJobsLoaded = true;
+        tryRun();
+      };
+    }
+    tx.oncomplete = () => resolve();
+    tx.onerror = tx.onabort = () => reject(storageError(tx, accountRequest));
+  });
 }
 
 function stableStringify(value: unknown): string {
@@ -219,65 +316,74 @@ export async function enqueuePhotoMeal(
       const request = accounts.get(uid);
       const photoJobsRequest = photoJobsStore.get(uid);
       let value: SyncState;
-      let accountResult: SyncState | undefined;
-      let photoJobsResult: PendingMeal[] | undefined;
+      let accountResult: StoredAccountState | undefined;
+      let photoJobsResult: StoredPhotoJobs | PendingMeal[] | undefined;
       let accountLoaded = false;
       let photoJobsLoaded = false;
 
       const tryRun = () => {
         if (!accountLoaded || !photoJobsLoaded) return;
-        const base = accountResult ?? empty();
-        const current: SyncState = { ...base, jobs: mergeJobs(base.jobs, photoJobsResult ?? []) };
-        if (current.remote.some((record) => record.mutationId === job.id)) {
-          abortWith(tx, new Error("Mutation already acknowledged"), reject);
-          return;
-        }
-        const existing = current.jobs.find((pending) => pending.id === job.id);
-        if (current.jobs.some((pending) => pending.record.id === job.record.id && (pending.error || pending.kind === "delete"))) {
-          abortWith(tx, new Error("Conflicting pending meal"), reject);
-          return;
-        }
-        if (existing && !sameJobIntent(existing, queued)) {
-          abortWith(tx, new Error("Conflicting photo mutation"), reject);
-          return;
-        }
-        if (!existing && !hasCurrentMealVersion(current, job.record.id, job.expectedVersion)) {
-          abortWith(tx, new Error("Conflicting pending meal"), reject);
-          return;
-        }
-        if (current.jobs.some((pending) => pending.id !== job.id && pending.photoUpload?.uploadId === uploadId)) {
-          abortWith(tx, new Error("Photo upload ID already queued"), reject);
-          return;
-        }
-        const payloadRequest = photos.get([uid, uploadId]);
-        payloadRequest.onsuccess = () => {
-          const payload = payloadRequest.result as PhotoPayload | undefined;
-          if (existing) {
-            if (!payload || payload.sha256 !== sha256 || payload.byteSize !== blob.size) {
-              abortWith(tx, new Error("Conflicting photo payload"), reject);
-              return;
-            }
-            value = current;
-          } else {
-            if (payload) {
-              abortWith(tx, new Error("Photo upload ID already exists"), reject);
-              return;
-            }
-            const nextJobs = [...current.jobs, queued];
-            const split = splitJobs(nextJobs);
-            value = { ...current, jobs: mergeJobs(split.accountJobs, split.photoJobs) };
-            photos.put({
-              uid,
-              uploadId,
-              bytes: payloadBytes,
-              type: blob.type,
-              sha256,
-              byteSize: blob.size,
-            } satisfies PhotoPayload);
-            accounts.put({ ...base, jobs: split.accountJobs }, uid);
-            photoJobsStore.put(split.photoJobs, uid);
+        const base: StoredAccountState = accountResult ?? empty();
+        const photoState = readStoredPhotoJobs(photoJobsResult, base.photoEpoch);
+        const current = toPublicSyncState(base, mergeJobs(base.jobs, photoState.jobs));
+        const runEnqueue = () => {
+          if (current.remote.some((record) => record.mutationId === job.id)) {
+            abortWith(tx, new Error("Mutation already acknowledged"), reject);
+            return;
           }
+          const existing = current.jobs.find((pending) => pending.id === job.id);
+          if (current.jobs.some((pending) => pending.record.id === job.record.id && (pending.error || pending.kind === "delete"))) {
+            abortWith(tx, new Error("Conflicting pending meal"), reject);
+            return;
+          }
+          if (existing && !sameJobIntent(existing, queued)) {
+            abortWith(tx, new Error("Conflicting photo mutation"), reject);
+            return;
+          }
+          if (!existing && !hasCurrentMealVersion(current, job.record.id, job.expectedVersion)) {
+            abortWith(tx, new Error("Conflicting pending meal"), reject);
+            return;
+          }
+          if (current.jobs.some((pending) => pending.id !== job.id && pending.photoUpload?.uploadId === uploadId)) {
+            abortWith(tx, new Error("Photo upload ID already queued"), reject);
+            return;
+          }
+          const payloadRequest = photos.get([uid, uploadId]);
+          payloadRequest.onsuccess = () => {
+            const payload = payloadRequest.result as PhotoPayload | undefined;
+            if (existing) {
+              if (!payload || payload.sha256 !== sha256 || payload.byteSize !== blob.size) {
+                abortWith(tx, new Error("Conflicting photo payload"), reject);
+                return;
+              }
+              value = current;
+            } else {
+              if (payload) {
+                abortWith(tx, new Error("Photo upload ID already exists"), reject);
+                return;
+              }
+              const nextJobs = [...current.jobs, queued];
+              const split = splitJobs(nextJobs);
+              value = toPublicSyncState(base, mergeJobs(split.accountJobs, split.photoJobs));
+              photos.put({
+                uid,
+                uploadId,
+                bytes: payloadBytes,
+                type: blob.type,
+                sha256,
+                byteSize: blob.size,
+              } satisfies PhotoPayload);
+              writeSplitState(accounts, photoJobsStore, uid, base, split, photoState.orphaned ? undefined : photoState.epoch);
+            }
+          };
         };
+
+        if (photoState.orphaned) {
+          photoJobsStore.delete(uid);
+          clearPhotoRows(photos, uid, undefined, runEnqueue);
+        } else {
+          runEnqueue();
+        }
       };
 
       request.onsuccess = () => { accountResult = request.result; accountLoaded = true; tryRun(); };
@@ -294,21 +400,60 @@ export async function readPhotoPayload(uid: string, uploadId: string): Promise<B
   const db = await open();
   try {
     if (!db.objectStoreNames.contains(PHOTO_STORE)) return null;
-    return await new Promise<Blob | null>((resolve, reject) => {
-      const tx = db.transaction(PHOTO_STORE, "readonly");
+    const hasPhotoJobs = db.objectStoreNames.contains(PHOTO_JOBS_STORE);
+    const storeNames = hasPhotoJobs ? ["accounts", PHOTO_JOBS_STORE, PHOTO_STORE] : [PHOTO_STORE];
+    let orphaned = false;
+    const result = await new Promise<Blob | null>((resolve, reject) => {
+      const tx = db.transaction(storeNames, "readonly");
       const request = tx.objectStore(PHOTO_STORE).get([uid, uploadId]);
+      const accountRequest = hasPhotoJobs ? tx.objectStore("accounts").get(uid) : null;
+      const photoJobsRequest = hasPhotoJobs ? tx.objectStore(PHOTO_JOBS_STORE).get(uid) : null;
+      let accountResult: StoredAccountState | undefined;
+      let photoJobsResult: StoredPhotoJobs | PendingMeal[] | undefined;
+      let rawPayload: PhotoPayload | undefined;
+      let accountLoaded = !accountRequest;
+      let photoJobsLoaded = !photoJobsRequest;
+      let photoLoaded = false;
       let value: Blob | null = null;
-      request.onsuccess = () => {
-        const payload = request.result as PhotoPayload | undefined;
-        if (payload?.bytes) {
-          value = new Blob([new Uint8Array(payload.bytes)], { type: payload.type || "image/jpeg" });
+
+      const tryResolve = () => {
+        if (!accountLoaded || !photoJobsLoaded || !photoLoaded) return;
+        if (hasPhotoJobs && readStoredPhotoJobs(photoJobsResult, accountResult?.photoEpoch).orphaned) {
+          orphaned = true;
+          value = null;
+          return;
+        }
+        if (rawPayload?.bytes) {
+          value = new Blob([new Uint8Array(rawPayload.bytes)], { type: rawPayload.type || "image/jpeg" });
         } else {
-          value = payload?.blob ?? null;
+          value = rawPayload?.blob ?? null;
         }
       };
+
+      request.onsuccess = () => {
+        rawPayload = request.result as PhotoPayload | undefined;
+        photoLoaded = true;
+        tryResolve();
+      };
+      if (accountRequest) {
+        accountRequest.onsuccess = () => {
+          accountResult = accountRequest.result;
+          accountLoaded = true;
+          tryResolve();
+        };
+      }
+      if (photoJobsRequest) {
+        photoJobsRequest.onsuccess = () => {
+          photoJobsResult = photoJobsRequest.result;
+          photoJobsLoaded = true;
+          tryResolve();
+        };
+      }
       tx.oncomplete = () => resolve(value);
       tx.onerror = tx.onabort = () => reject(storageError(tx, request));
     });
+    if (orphaned) await purgeOrphanedPhotoOutbox(db, uid);
+    return result;
   } finally {
     db.close();
   }
@@ -327,15 +472,16 @@ export async function markPhotoUploadStaged(uid: string, uploadId: string): Prom
       const request = accounts.get(uid);
       const photoJobsRequest = photoJobsStore.get(uid);
       let value: SyncState;
-      let accountResult: SyncState | undefined;
-      let photoJobsResult: PendingMeal[] | undefined;
+      let accountResult: StoredAccountState | undefined;
+      let photoJobsResult: StoredPhotoJobs | PendingMeal[] | undefined;
       let accountLoaded = false;
       let photoJobsLoaded = false;
 
       const tryRun = () => {
         if (!accountLoaded || !photoJobsLoaded) return;
-        const base = accountResult ?? empty();
-        const current: SyncState = { ...base, jobs: mergeJobs(base.jobs, photoJobsResult ?? []) };
+        const base: StoredAccountState = accountResult ?? empty();
+        const photoState = readStoredPhotoJobs(photoJobsResult, base.photoEpoch);
+        const current = toPublicSyncState(base, mergeJobs(base.jobs, photoState.jobs));
         const job = current.jobs.find((pending) => pending.photoUpload?.uploadId === uploadId);
         if (!job?.photoUpload) {
           abortWith(tx, new Error("Photo upload intent missing"), reject);
@@ -353,9 +499,8 @@ export async function markPhotoUploadStaged(uid: string, uploadId: string): Prom
             ...pending, photoUpload: { ...job.photoUpload!, status: "staged" as const },
           } : pending);
           const split = splitJobs(updatedJobs);
-          value = { ...current, jobs: mergeJobs(split.accountJobs, split.photoJobs) };
-          accounts.put({ ...base, jobs: split.accountJobs }, uid);
-          photoJobsStore.put(split.photoJobs, uid);
+          value = toPublicSyncState(base, mergeJobs(split.accountJobs, split.photoJobs));
+          writeSplitState(accounts, photoJobsStore, uid, base, split, photoState.epoch);
         };
       };
 
@@ -400,15 +545,16 @@ export async function replaceExpiredPhotoJobAndPayload(
       const request = accounts.get(uid);
       const photoJobsRequest = photoJobsStore.get(uid);
       let value: SyncState;
-      let accountResult: SyncState | undefined;
-      let photoJobsResult: PendingMeal[] | undefined;
+      let accountResult: StoredAccountState | undefined;
+      let photoJobsResult: StoredPhotoJobs | PendingMeal[] | undefined;
       let accountLoaded = false;
       let photoJobsLoaded = false;
 
       const tryRun = () => {
         if (!accountLoaded || !photoJobsLoaded) return;
-        const base = accountResult ?? empty();
-        const current: SyncState = { ...base, jobs: mergeJobs(base.jobs, photoJobsResult ?? []) };
+        const base: StoredAccountState = accountResult ?? empty();
+        const photoState = readStoredPhotoJobs(photoJobsResult, base.photoEpoch);
+        const current = toPublicSyncState(base, mergeJobs(base.jobs, photoState.jobs));
         const payloadRequest = photos.get([uid, newUploadId]);
         payloadRequest.onsuccess = () => {
           if (payloadRequest.result) {
@@ -420,7 +566,7 @@ export async function replaceExpiredPhotoJobAndPayload(
             if (next.jobs.some((pending) => pending.photoUpload?.uploadId === oldUploadId))
               throw new Error("Cannot clear a queued photo payload");
             const split = splitJobs(next.jobs);
-            value = { ...next, jobs: mergeJobs(split.accountJobs, split.photoJobs) };
+            value = toPublicSyncState(next, mergeJobs(split.accountJobs, split.photoJobs));
             photos.put({
               uid,
               uploadId: newUploadId,
@@ -430,8 +576,7 @@ export async function replaceExpiredPhotoJobAndPayload(
               byteSize: blob.size,
             } satisfies PhotoPayload);
             clearPhotoRows(photos, uid, [oldUploadId]);
-            accounts.put({ ...next, jobs: split.accountJobs }, uid);
-            photoJobsStore.put(split.photoJobs, uid);
+            writeSplitState(accounts, photoJobsStore, uid, next, split, photoState.epoch);
           } catch (error) {
             abortWith(tx, error, reject);
           }
@@ -467,24 +612,33 @@ export async function changeSyncStateAndClearPhotos(
       const request = accounts.get(uid);
       const photoJobsRequest = photoJobsStore ? photoJobsStore.get(uid) : null;
       let value: SyncState;
-      let accountResult: SyncState | undefined;
-      let photoJobsResult: PendingMeal[] | undefined;
+      let accountResult: StoredAccountState | undefined;
+      let photoJobsResult: StoredPhotoJobs | PendingMeal[] | undefined;
       let accountLoaded = false;
       let photoJobsLoaded = !photoJobsRequest;
 
       const tryRun = () => {
         if (!accountLoaded || !photoJobsLoaded) return;
         try {
-          const base = accountResult ?? empty();
-          const merged: SyncState = { ...base, jobs: mergeJobs(base.jobs, photoJobsResult ?? []) };
+          const base: StoredAccountState = accountResult ?? empty();
+          const photoState = hasPhotoJobs
+            ? readStoredPhotoJobs(photoJobsResult, base.photoEpoch)
+            : { jobs: [], orphaned: false };
+          const merged = toPublicSyncState(base, mergeJobs(base.jobs, photoState.jobs));
           const next = change(merged);
           if (next.jobs.some((pending) => pending.photoUpload && uploadIds.includes(pending.photoUpload.uploadId)))
             throw new Error("Cannot clear a queued photo payload");
           const split = splitJobs(next.jobs);
-          value = { ...next, jobs: mergeJobs(split.accountJobs, split.photoJobs) };
-          accounts.put({ ...next, jobs: split.accountJobs }, uid);
-          if (photoJobsStore) photoJobsStore.put(split.photoJobs, uid);
-          if (hasPhotos) clearPhotoRows(tx.objectStore(PHOTO_STORE), uid, uploadIds);
+          value = toPublicSyncState(next, mergeJobs(split.accountJobs, split.photoJobs));
+          writeSplitState(
+            accounts,
+            photoJobsStore,
+            uid,
+            next,
+            split,
+            photoState.orphaned ? undefined : photoState.epoch,
+          );
+          if (hasPhotos) clearPhotoRows(tx.objectStore(PHOTO_STORE), uid, photoState.orphaned ? undefined : uploadIds);
         } catch (error) {
           abortWith(tx, error, reject);
         }
@@ -510,10 +664,11 @@ async function runChangeSyncState(
   db: IDBDatabase,
   uid: string,
   change?: (state: SyncState) => SyncState,
-): Promise<{ state: SyncState; needsPhotoUpgrade: boolean }> {
+): Promise<{ state: SyncState; needsPhotoUpgrade: boolean; needsOrphanPurge: boolean }> {
   const hasPhotoJobs = db.objectStoreNames.contains(PHOTO_JOBS_STORE);
   const storeNames = hasPhotoJobs ? ["accounts", PHOTO_JOBS_STORE] : ["accounts"];
   let needsPhotoUpgrade = false;
+  let needsOrphanPurge = false;
   const state = await new Promise<SyncState>((resolve, reject) => {
     const tx = db.transaction(storeNames, change ? "readwrite" : "readonly");
     const accounts = tx.objectStore("accounts");
@@ -521,18 +676,27 @@ async function runChangeSyncState(
     const request = accounts.get(uid);
     const photoJobsRequest = photoJobsStore ? photoJobsStore.get(uid) : null;
     let value: SyncState;
-    let accountResult: SyncState | undefined;
-    let photoJobsResult: PendingMeal[] | undefined;
+    let accountResult: StoredAccountState | undefined;
+    let photoJobsResult: StoredPhotoJobs | PendingMeal[] | undefined;
     let accountLoaded = false;
     let photoJobsLoaded = !photoJobsRequest;
 
     const tryRun = () => {
       if (!accountLoaded || !photoJobsLoaded) return;
       try {
-        const base = accountResult ?? empty();
-        const merged: SyncState = { ...base, jobs: mergeJobs(base.jobs, photoJobsResult ?? []) };
+        const base: StoredAccountState = accountResult ?? empty();
+        const photoState = hasPhotoJobs
+          ? readStoredPhotoJobs(photoJobsResult, base.photoEpoch)
+          : { jobs: [], orphaned: false };
+        const merged = toPublicSyncState(base, mergeJobs(base.jobs, photoState.jobs));
         if (!change) {
+          if (photoState.orphaned) needsOrphanPurge = true;
           value = merged;
+          return;
+        }
+        if (photoState.orphaned) {
+          needsOrphanPurge = true;
+          tx.abort();
           return;
         }
         const next = change(structuredClone(merged));
@@ -542,9 +706,8 @@ async function runChangeSyncState(
           return;
         }
         const split = splitJobs(next.jobs);
-        value = { ...next, jobs: mergeJobs(split.accountJobs, split.photoJobs) };
-        accounts.put({ ...next, jobs: split.accountJobs }, uid);
-        if (photoJobsStore) photoJobsStore.put(split.photoJobs, uid);
+        value = toPublicSyncState(next, mergeJobs(split.accountJobs, split.photoJobs));
+        writeSplitState(accounts, photoJobsStore, uid, next, split, photoState.epoch);
       } catch (error) {
         abortWith(tx, error, reject);
       }
@@ -560,11 +723,11 @@ async function runChangeSyncState(
     }
     tx.oncomplete = () => resolve(value);
     tx.onerror = tx.onabort = () => {
-      if (needsPhotoUpgrade) resolve(empty());
+      if (needsPhotoUpgrade || needsOrphanPurge) resolve(empty());
       else reject(storageError(tx, request));
     };
   });
-  return { state, needsPhotoUpgrade };
+  return { state, needsPhotoUpgrade, needsOrphanPurge };
 }
 
 // One IDB transaction prevents tabs losing each other's queued changes.
@@ -576,7 +739,12 @@ export async function changeSyncState(
 ): Promise<SyncState> {
   const db = await open();
   try {
-    const result = await runChangeSyncState(db, uid, change);
+    let result = await runChangeSyncState(db, uid, change);
+    if (result.needsOrphanPurge) {
+      await purgeOrphanedPhotoOutbox(db, uid);
+      if (!change) return result.state;
+      result = await runChangeSyncState(db, uid, change);
+    }
     if (!result.needsPhotoUpgrade) return result.state;
   } finally {
     db.close();
@@ -641,7 +809,7 @@ export async function clearSyncState(uid: string) {
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(storeNames, "readwrite");
       tx.objectStore("accounts").put(empty(), uid);
-      if (hasPhotoJobs) tx.objectStore(PHOTO_JOBS_STORE).put([], uid);
+      if (hasPhotoJobs) tx.objectStore(PHOTO_JOBS_STORE).delete(uid);
       if (hasPhotos) clearPhotoRows(tx.objectStore(PHOTO_STORE), uid);
       tx.oncomplete = () => resolve();
       tx.onerror = tx.onabort = () => reject(storageError(tx));
