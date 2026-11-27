@@ -231,7 +231,79 @@ const IDENTITY_RULES: TermRule[] = [
   { keys: ["savory sauce", "豉油汁", "醬汁"], canonicalName: "sauce", category: "sauce", kind: "specific_food" },
   { keys: ["tomato", "番茄", "蕃茄"], canonicalName: "tomato", category: "sauce", kind: "specific_food", qualifiers: ["tomato"] },
   { keys: ["sauce", "gravy", "汁", "醬"], canonicalName: "sauce", category: "sauce", kind: "generic_ingredient" },
-  { keys: ["fried egg", "boiled egg", "雞蛋", "煎蛋", "烚蛋", "egg"], canonicalName: "egg", category: "egg", kind: "specific_food" },
+  {
+    keys: [
+      "braised egg",
+      "marinated egg",
+      "soy egg",
+      "soy braised egg",
+      "soy-braised egg",
+      "tea egg",
+      "lu dan",
+      "滷蛋",
+      "鹵蛋",
+      "卤蛋",
+      "滷水蛋",
+      "鹵水蛋",
+      "茶葉蛋",
+      "茶叶蛋",
+    ],
+    canonicalName: "egg",
+    category: "egg",
+    kind: "specific_food",
+    qualifiers: ["braised"],
+  },
+  {
+    keys: [
+      "fried egg",
+      "pan-fried egg",
+      "pan fried egg",
+      "sunny side up",
+      "sunny-side-up egg",
+      "scrambled egg",
+      "scrambled eggs",
+      "omelette",
+      "omelet",
+      "煎蛋",
+      "荷包蛋",
+      "太陽蛋",
+      "炒蛋",
+      "滑蛋",
+      "奄列",
+    ],
+    canonicalName: "egg",
+    category: "egg",
+    kind: "specific_food",
+    qualifiers: ["fried"],
+  },
+  {
+    keys: [
+      "boiled egg",
+      "hard-boiled egg",
+      "hard boiled egg",
+      "soft-boiled egg",
+      "soft boiled egg",
+      "poached egg",
+      "steamed egg",
+      "烚蛋",
+      "水煮蛋",
+      "白烚蛋",
+      "溫泉蛋",
+      "溏心蛋",
+      "水波蛋",
+      "蒸蛋",
+    ],
+    canonicalName: "egg",
+    category: "egg",
+    kind: "specific_food",
+    qualifiers: ["boiled"],
+  },
+  {
+    keys: ["whole egg", "cooked egg", "雞蛋", "eggs", "egg"],
+    canonicalName: "egg",
+    category: "egg",
+    kind: "specific_food",
+  },
   { keys: ["firm tofu", "bean curd", "豆腐", "tofu"], canonicalName: "tofu", category: "tofu", kind: "specific_food" },
   { keys: ["french fries", "fries", "chips", "薯條"], canonicalName: "french-fries", category: "fried", kind: "specific_food" },
   { keys: ["fried dough stick", "chinese cruller", "youtiao", "油炸鬼", "油條", "油条"], canonicalName: "youtiao", category: "fried", kind: "specific_food" },
@@ -1931,6 +2003,35 @@ export function canonicalizeFood(food: FoodEstimate): CanonicalFoodIdentity {
 
   if (identityHits.some((rule) => rule.qualifiers?.includes("wholegrain"))) {
     qualifiers.add("wholegrain");
+  }
+
+  if (canonicalName === "egg") {
+    for (const eggQualifier of ["braised", "boiled", "fried"] as const) {
+      if (identityHits.some((rule) => rule.qualifiers?.includes(eggQualifier))) {
+        qualifiers.add(eggQualifier);
+      }
+    }
+    const eggPrepText = normalizeFoodName(
+      [food.displayName, food.normalizedName, food.preparationMethod ?? ""].join(" "),
+    );
+    if (/(?:^|\s)(?:braised|marinated|soy braised)(?:$|\s)|滷|鹵|卤|茶葉|茶叶/.test(eggPrepText)) {
+      qualifiers.add("braised");
+    }
+    if (
+      !/(?:^|\s)deep fried(?:$|\s)|油炸|炸/.test(eggPrepText) &&
+      /(?:^|\s)(?:(?:pan |stir )?fried|scrambled|omelette|omelet|sunny side up)(?:$|\s)|煎|炒/.test(
+        eggPrepText,
+      )
+    ) {
+      qualifiers.add("fried");
+    }
+    if (
+      /(?:^|\s)(?:(?:hard |soft )?boiled|poached|steamed)(?:$|\s)|烚|水煮|蒸|溫泉|溏心|水波/.test(
+        eggPrepText,
+      )
+    ) {
+      qualifiers.add("boiled");
+    }
   }
 
   if (

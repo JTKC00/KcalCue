@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import {
   firebaseAuth,
   onAuthStateChanged,
@@ -28,7 +28,7 @@ import { readAnalysisProvenance } from "@/lib/domain/analysis-provenance";
 import { roundRange } from "@/lib/nutrition/calculation";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { NutritionService } from "@/lib/nutrition/service";
-import { KcalCueApp } from "./kcalcue-app";
+import { KcalCueApp, type EditorFlushResult } from "./kcalcue-app";
 import { PwaControls } from "./pwa-controls";
 import { CalorieCorrectionInput } from "./calorie-correction-input";
 import { PrivateMealPhoto } from "./private-meal-photo";
@@ -221,6 +221,41 @@ function mealView(record: MealRecord): MealView {
   return view;
 }
 
+function formatDisplayDate(isoDate: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : isoDate;
+}
+
+function DateInput({
+  id,
+  value,
+  onChange,
+  required,
+  disabled,
+}: {
+  id: string;
+  value: string;
+  onChange: (value: string) => void;
+  required?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <span className={`date-input-wrap${disabled ? " is-disabled" : ""}${!value ? " is-empty" : ""}`}>
+      <span className="date-input-display" aria-hidden="true">
+        {value ? formatDisplayDate(value) : "DD/MM/YYYY"}
+      </span>
+      <input
+        id={id}
+        required={required}
+        disabled={disabled}
+        type="date"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </span>
+  );
+}
+
 function journalDateLabel(date: string) {
   const parsed = new Date(`${date}T12:00:00`);
   return Number.isNaN(parsed.getTime())
@@ -356,6 +391,9 @@ export function MealJournal({
   const preparingRef = useRef(false);
   const photoGeneration = useRef(0);
   const refreshGeneration = useRef(0);
+  const mealDateId = useId();
+  const filterDateId = useId();
+  const editorFlushRef = useRef<(() => EditorFlushResult) | null>(null);
   const busyRef = useRef(false);
   const allowUpdateReload = useRef(false);
   useEffect(() => {
@@ -945,21 +983,49 @@ export function MealJournal({
 
   async function save() {
     if (!draft || busyRef.current || preparingRef.current || preparing) return;
-    const noteLength = journalNoteCodePoints(normalizeJournalNote(draft.journalNote ?? "") ?? "");
+    const flushed = editorFlushRef.current?.();
+    if (flushed?.invalidPortion) {
+      const invalidPortion = document.querySelector<HTMLInputElement>(
+        ".journal-editor .portion-fields input:invalid, .journal-editor .portion-fields input[aria-invalid='true']",
+      );
+      invalidPortion?.reportValidity();
+      invalidPortion?.focus();
+      return;
+    }
+    if (flushed?.nutritionPending && online) return;
+    let source = current.current.draft ?? draft;
+    if (flushed) {
+      const basisChanged = !sameCalorieBasis(source.items, flushed.items) || source.mode !== flushed.mode;
+      if (basisChanged && (source.calorieInput !== undefined || source.calorieCorrection)) {
+        setNotice("餐點內容已改，已恢復參考估算；請重新確認手動卡路里。");
+      }
+      if (basisChanged || source.items !== flushed.items || source.mode !== flushed.mode) {
+        source = {
+          ...source,
+          items: flushed.items,
+          mode: flushed.mode,
+          calorieCorrection: basisChanged ? null : source.calorieCorrection,
+          calorieInput: basisChanged ? undefined : source.calorieInput,
+        };
+        current.current.draft = source;
+        setDraft(source);
+      }
+    }
+    const noteLength = journalNoteCodePoints(normalizeJournalNote(source.journalNote ?? "") ?? "");
     if (noteLength > MAX_JOURNAL_NOTE_CODE_POINTS) {
       setNotice("餐點備註最多 " + MAX_JOURNAL_NOTE_CODE_POINTS + " 個字元，請縮短後再儲存。");
       document.querySelector<HTMLTextAreaElement>("#meal-journal-note")?.focus();
       return;
     }
     const invalid = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(
-      ".journal-editor input:invalid, .journal-editor textarea:invalid",
+      ".journal-editor input:invalid, .journal-editor textarea:invalid, .journal-editor .portion-fields input[aria-invalid='true']",
     );
     if (invalid) {
       invalid.reportValidity();
       invalid.focus();
       return;
     }
-    if (draft.mode === "demo") {
+    if (source.mode === "demo") {
       setNotice("示範結果不會加入正式記錄。");
       return;
     }
@@ -973,10 +1039,9 @@ export function MealJournal({
     refreshGeneration.current++;
     const id = userId;
     const scope = operationScope();
-    const source = draft;
     try {
       const wantsPhotoUpload = Boolean(
-        photoUploadsEnabled && source.savePhoto && source.photo && source.mode !== "demo",
+        photoUploadsEnabled && source.savePhoto && source.photo,
       );
       const wantsRemovePhoto = Boolean(
         !wantsPhotoUpload && source.removePhoto && source.photoRef,
@@ -1511,7 +1576,7 @@ export function MealJournal({
           <p>此裝置另有 {otherDrafts.length} 份未儲存草稿。</p>
           {otherDrafts.map((saved) => (
             <div key={saved.revision}>
-              <span>{saved.label} · {saved.date} · {new Date(saved.updatedAt).toLocaleString("zh-HK")}</span>{" "}
+              <span>{saved.label} · {formatDisplayDate(saved.date)} · {new Date(saved.updatedAt).toLocaleString("zh-HK")}</span>{" "}
               <button className="button button-secondary" onClick={() => void recoverDraft(saved)}>
                 恢復草稿
               </button>
@@ -1733,6 +1798,7 @@ export function MealJournal({
                   manual={manual}
                   onDraftChange={onDraftChange}
                   onNutritionPendingChange={setNutritionPending}
+                  flushEditorRef={editorFlushRef}
                   onPhotoSelected={onPhotoSelected}
                   onExit={() => {
                     void discard();
@@ -1759,18 +1825,16 @@ export function MealJournal({
                   <small>按 {draft.timezone} 記錄</small>
                 </div>
                 <div className="metadata-grid">
-                  <label className="metadata-date">
-                    日期
-                    <input
+                  <div className="metadata-date">
+                    <label htmlFor={mealDateId}>日期</label>
+                    <DateInput
+                      id={mealDateId}
                       required
                       disabled={busy}
-                      type="date"
                       value={draft.date}
-                      onChange={(e) =>
-                        setDraft({ ...draft, date: e.target.value })
-                      }
+                      onChange={(date) => setDraft({ ...draft, date })}
                     />
-                  </label>
+                  </div>
                   <label>
                     時間
                     <input
@@ -2066,12 +2130,12 @@ export function MealJournal({
             </section>
           )}
           {tab === "history" && (
-            <label className="date-filter">
-              按日期查看
-              <input
-                type="date"
+            <div className="date-filter">
+              <label htmlFor={filterDateId}>按日期查看</label>
+              <DateInput
+                id={filterDateId}
                 value={filter}
-                onChange={(e) => setFilter(e.target.value)}
+                onChange={setFilter}
               />
               <button
                 className="button button-ghost"
@@ -2079,7 +2143,7 @@ export function MealJournal({
               >
                 全部日期
               </button>
-            </label>
+            </div>
           )}
           {cloudRecordsUnknown && !!visible.length && (
             <p className="journal-card" role="status">
@@ -2139,8 +2203,7 @@ export function MealJournal({
             const meals = visible.filter((r) => r.date === date);
             const nutrition = dayNutrition(meals);
             const calories = dayCalories(meals);
-            const calorieRange = calories.range && (calories.referenceCount
-              ? roundRange(calories.range, 5) : calories.range);
+            const calorieRange = calories.range;
             const groups = tab === "today"
               ? Object.entries(mealTypes).map(([mealType, label]) => ({
                 key: mealType,
@@ -2154,7 +2217,7 @@ export function MealJournal({
                 {tab === "history" && (
                   <div className="journal-day-heading">
                     <h2>{journalDateLabel(date)}</h2>
-                    <span>{date}</span>
+                    <span>{formatDisplayDate(date)}</span>
                   </div>
                 )}
                 <div className={`day-summary journal-card ${tab === "today" ? "today-summary" : "history-summary"}`} role="region" aria-label={tab === "today" ? "今日摘要" : `${date} 摘要`}>

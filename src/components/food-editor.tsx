@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { PLANT_MILK_PHOTO_NOTICE } from "@/lib/domain/photo-milk-analysis";
 
@@ -23,13 +23,24 @@ export interface RecognitionBadge {
   label: string;
 }
 
+export interface PortionPreviewUpdate {
+  raw: string;
+  value: number | null;
+  valid: boolean;
+}
+
 interface FoodEditorProps {
   number?: number;
   item: EditableFoodItem;
   calculation: CalculatedFood;
   recognition: RecognitionBadge;
   onNameChange: (name: string) => void;
-  onPortionChange: (field: "portionMin" | "portionMax", value: number | null) => void;
+  onPortionPreview?: (
+    field: "portionMin" | "portionMax",
+    preview: PortionPreviewUpdate | null,
+    peerAnchor?: number | null,
+  ) => void;
+  onPortionChange: (field: "portionMin" | "portionMax", value: number | null, peerAnchor?: number | null) => void;
   onUnitChange: (unit: PortionUnit) => void;
   onPreset: (preset: PortionPreset) => void;
   onDelete: () => void;
@@ -47,14 +58,34 @@ function selectPortion(input: HTMLInputElement) {
   input.select();
 }
 
-function PortionInput({ id, value, onCommit }: { id: string; value: number | null; onCommit: (value: number | null) => void }) {
-  const [editing, setEditing] = useState<string | null>(null);
+function PortionInput({
+  id,
+  value,
+  peerValue,
+  unit,
+  onPreview,
+  onCommit,
+}: {
+  id: string;
+  value: number | null;
+  peerValue: number | null;
+  unit: PortionUnit;
+  onPreview?: (preview: PortionPreviewUpdate | null, peerAnchor?: number | null) => void;
+  onCommit: (value: number | null, peerAnchor?: number | null) => void;
+}) {
+  const [editing, setEditing] = useState<{ text: string; unit: PortionUnit } | null>(null);
   const [error, setError] = useState(false);
-  const shown = editing ?? (value == null ? "" : String(value));
+  const peerAnchorRef = useRef<{ active: boolean; value: number | null }>({
+    active: false,
+    value: null,
+  });
+  const activeEditing = editing && editing.unit === unit ? editing.text : null;
+  const shown = activeEditing ?? (value == null ? "" : String(value));
   return <><input id={id} type="number" inputMode="decimal" min="0.1" max="5000" step="any"
     value={shown} placeholder="未知" aria-invalid={error || undefined} aria-describedby={error ? `${id}-error` : undefined}
     onFocus={event => {
       event.currentTarget.dataset.portionOnFocus = event.currentTarget.value;
+      peerAnchorRef.current = { active: true, value: peerValue };
       selectPortion(event.currentTarget);
     }}
     onClick={event => { selectPortion(event.currentTarget); }}
@@ -72,15 +103,31 @@ function PortionInput({ id, value, onCommit }: { id: string; value: number | nul
         inputType,
       );
       input.dataset.portionOnFocus = next;
-      setEditing(next);
+      setEditing({ text: next, unit });
       setError(false);
+      if (!peerAnchorRef.current.active) {
+        peerAnchorRef.current = { active: true, value: peerValue };
+      }
+      if (next === "") {
+        onPreview?.({ raw: "", value: null, valid: true }, peerAnchorRef.current.value);
+      } else {
+        const parsed = Number(next);
+        if (Number.isFinite(parsed) && parsed >= 0.1 && parsed <= 5000) {
+          onPreview?.({ raw: next, value: parsed, valid: true }, peerAnchorRef.current.value);
+        } else {
+          onPreview?.({ raw: next, value: null, valid: false }, peerAnchorRef.current.value);
+        }
+      }
     }}
     onBlur={event => {
       const raw = event.currentTarget.value;
       const number = Number(raw);
+      const anchor = peerAnchorRef.current.active ? peerAnchorRef.current.value : undefined;
+      peerAnchorRef.current = { active: false, value: null };
+      onPreview?.(null);
       if (!raw) { onCommit(null); setEditing(null); setError(false); return; }
       if (!Number.isFinite(number) || number < .1 || number > 5000) { setError(true); return; }
-      onCommit(number); setEditing(null); setError(false);
+      onCommit(number, anchor); setEditing(null); setError(false);
     }} />{error && <small id={`${id}-error`} role="alert">請輸入 0.1 至 5000 的份量。</small>}</>;
 }
 
@@ -96,6 +143,7 @@ export function FoodEditor({
   calculation,
   recognition,
   onNameChange,
+  onPortionPreview,
   onPortionChange,
   onUnitChange,
   onPreset,
@@ -195,7 +243,10 @@ export function FoodEditor({
           <PortionInput
             id={`${fieldId}-min`}
             value={item.portionMin}
-            onCommit={value => onPortionChange("portionMin", value)}
+            peerValue={item.portionMax}
+            unit={item.unit}
+            onPreview={(preview, peerAnchor) => onPortionPreview?.("portionMin", preview, peerAnchor)}
+            onCommit={(value, peerAnchor) => onPortionChange("portionMin", value, peerAnchor)}
           />
         </div>
         <div className="range-divider" aria-hidden="true">
@@ -206,7 +257,10 @@ export function FoodEditor({
           <PortionInput
             id={`${fieldId}-max`}
             value={item.portionMax}
-            onCommit={value => onPortionChange("portionMax", value)}
+            peerValue={item.portionMin}
+            unit={item.unit}
+            onPreview={(preview, peerAnchor) => onPortionPreview?.("portionMax", preview, peerAnchor)}
+            onCommit={(value, peerAnchor) => onPortionChange("portionMax", value, peerAnchor)}
           />
         </div>
         <div className="field-group unit-field">

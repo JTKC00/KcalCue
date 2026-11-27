@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { EditableFoodItem } from "@/lib/domain/editable-meal";
 import { NutritionService } from "@/lib/nutrition/service";
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
-import { mealShowsTotal } from "@/lib/nutrition/calculation";
+import { mealShowsTotal, roundRange } from "@/lib/nutrition/calculation";
 import type { NutrientRange } from "@/lib/nutrition/types";
 
 export const MAX_MANUAL_KCAL = 20_000;
@@ -99,9 +99,12 @@ export function dayCalories(records: CalorieMeal[]) {
   for (const meal of meals) {
     const summary = mealCalories(meal);
     if (summary.range) {
+      const contributed = summary.source === "reference"
+        ? roundRange(summary.range, 5)
+        : summary.range;
       range ??= { min: 0, max: 0 };
-      range.min += summary.range.min;
-      range.max += summary.range.max;
+      range.min += contributed.min;
+      range.max += contributed.max;
     }
     if (summary.source === "user") manualCount++;
     if (summary.source === "reference") referenceCount++;

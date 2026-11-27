@@ -274,6 +274,57 @@ svg {
   font-weight: 600;
 }
 
+.date-input-wrap {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.date-input-display {
+  position: absolute;
+  inset: 0 38px 0 12px;
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+  font-family: var(--font-num);
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.date-input-wrap:focus-within .date-input-display {
+  opacity: 0;
+}
+
+.date-input-wrap.is-empty .date-input-display,
+.date-input-wrap.is-disabled .date-input-display {
+  color: var(--ink-3);
+}
+
+.journal-shell .date-input-wrap input[type="date"]:not(:focus) {
+  color: transparent;
+  caret-color: transparent;
+}
+
+.journal-shell .date-input-wrap input[type="date"]:not(:focus)::-webkit-datetime-edit,
+.journal-shell .date-input-wrap input[type="date"]:not(:focus)::-webkit-datetime-edit-fields-wrapper,
+.journal-shell .date-input-wrap input[type="date"]:not(:focus)::-webkit-datetime-edit-text,
+.journal-shell .date-input-wrap input[type="date"]:not(:focus)::-webkit-datetime-edit-month-field,
+.journal-shell .date-input-wrap input[type="date"]:not(:focus)::-webkit-datetime-edit-day-field,
+.journal-shell .date-input-wrap input[type="date"]:not(:focus)::-webkit-datetime-edit-year-field {
+  color: transparent;
+  background: transparent;
+}
+
+.journal-shell .date-input-wrap input[type="date"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.85;
+}
+
 .journal-shell :where(select) {
   appearance: none;
   padding-right: 38px;
@@ -660,9 +711,13 @@ svg {
   font-weight: 700;
 }
 
-.journal-shell .date-filter input {
+.journal-shell .date-filter .date-input-wrap {
   flex: 1 1 180px;
   width: auto;
+}
+
+.journal-shell .date-filter .date-input-wrap input {
+  width: 100%;
 }
 
 .journal-card.empty-journal {
@@ -1372,7 +1427,8 @@ svg {
   gap: 10px;
 }
 
-.metadata-grid > label {
+.metadata-grid > label,
+.metadata-grid > .metadata-date {
   min-width: 0;
   display: grid;
   gap: 4px;

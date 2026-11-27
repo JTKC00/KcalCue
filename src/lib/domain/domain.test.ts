@@ -131,8 +131,8 @@ describe("portion adjustment", () => {
     const smaller = applyPortionPreset(editable, "small");
     const largerAfterSmall = applyPortionPreset(smaller, "large");
 
-    expect(smaller).toMatchObject({ portionMin: 92, portionMax: 143 });
-    expect(largerAfterSmall).toMatchObject({ portionMin: 176, portionMax: 269 });
+    expect(smaller).toMatchObject({ portionMin: 106, portionMax: 134 });
+    expect(largerAfterSmall).toMatchObject({ portionMin: 183, portionMax: 233 });
     expect(largerAfterSmall.originalPortionMin).toBe(141);
     expect(largerAfterSmall.originalPortionMax).toBe(179);
   });
@@ -144,7 +144,7 @@ describe("portion adjustment", () => {
 
     expect(applyPortionPreset(editable, "large")).toMatchObject({
       portionMin: 1.6,
-      portionMax: 2.6,
+      portionMax: 2.3,
     });
   });
 

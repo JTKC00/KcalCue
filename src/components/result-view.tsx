@@ -17,7 +17,7 @@ import {
 import { LocalNutritionProvider } from "@/lib/nutrition/local-provider";
 import { NutritionService } from "@/lib/nutrition/service";
 import { AlertIcon, CheckIcon, PlusIcon, RefreshIcon, ShieldIcon } from "./icons";
-import { FoodEditor, type RecognitionBadge } from "./food-editor";
+import { FoodEditor, type PortionPreviewUpdate, type RecognitionBadge } from "./food-editor";
 import type { PhotoMilkChoiceId } from "@/lib/nutrition/photo-milk";
 import { ImagePreviewFallback } from "./image-preview-fallback";
 import { RangeRail } from "./range-rail";
@@ -33,10 +33,17 @@ interface ResultViewProps {
   previewFailed: boolean;
   isHeic: boolean;
   onNameChange: (id: string, name: string) => void;
+  onPortionPreview?: (
+    id: string,
+    field: "portionMin" | "portionMax",
+    preview: PortionPreviewUpdate | null,
+    peerAnchor?: number | null,
+  ) => void;
   onPortionChange: (
     id: string,
     field: "portionMin" | "portionMax",
     value: number | null,
+    peerAnchor?: number | null,
   ) => void;
   onUnitChange: (id: string, unit: PortionUnit) => void;
   onPreset: (id: string, preset: PortionPreset) => void;
@@ -105,6 +112,7 @@ export function ResultView({
   previewFailed,
   isHeic,
   onNameChange,
+  onPortionPreview,
   onPortionChange,
   onUnitChange,
   onPreset,
@@ -279,8 +287,14 @@ export function ResultView({
                   calculation={meal.foods[index]}
                   recognition={recognitionSources[index]}
                   onNameChange={(name) => onNameChange(item.id, name)}
-                  onPortionChange={(field, value) =>
-                    onPortionChange(item.id, field, value)
+                  onPortionPreview={
+                    onPortionPreview
+                      ? (field, preview, peerAnchor) =>
+                          onPortionPreview(item.id, field, preview, peerAnchor)
+                      : undefined
+                  }
+                  onPortionChange={(field, value, peerAnchor) =>
+                    onPortionChange(item.id, field, value, peerAnchor)
                   }
                   onUnitChange={(unit) => onUnitChange(item.id, unit)}
                   onPreset={(preset) => onPreset(item.id, preset)}

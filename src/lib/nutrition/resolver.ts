@@ -151,6 +151,18 @@ function scoreProfile(
     score += 20;
   }
 
+  if (identity.canonicalName === "egg" && profile.canonicalName === "egg") {
+    const eggStyle = identity.qualifiers.includes("braised")
+      ? "egg-braised"
+      : identity.qualifiers.includes("fried") || identity.preparation === "pan_fried" || identity.preparation === "stir_fried"
+        ? "egg-fried"
+        : identity.qualifiers.includes("boiled") || identity.preparation === "boiled" || identity.preparation === "steamed"
+          ? "egg-boiled"
+          : "egg-generic";
+    if (profile.id === eggStyle) score += 100;
+    else if (profile.id === "egg-generic" && eggStyle !== "egg-generic") score -= 50;
+  }
+
   if (!isCompatibleNutritionIdentity(identity, profile)) score -= 200;
   else if (isCompositeIdentity(identity) && !profile.composite) score -= 40;
   else if (!isCompositeIdentity(identity) && profile.composite) score -= 20;
@@ -509,6 +521,10 @@ export function resolveNutritionMatch(
   };
 }
 
+function explicitNamesOf(profile: NutritionProfile): string[] {
+  return [profile.id, profile.displayName, ...profile.aliases];
+}
+
 export function findProfileByNormalizedName(
   name: string,
   catalog: NutritionProfile[],
@@ -517,7 +533,9 @@ export function findProfileByNormalizedName(
   if (!normalized) return null;
   return (
     catalog.find((profile) =>
-      namesOf(profile).some((alias) => normalizeFoodName(alias) === normalized),
-    ) ?? null
+      explicitNamesOf(profile).some((alias) => normalizeFoodName(alias) === normalized),
+    ) ??
+    catalog.find((profile) => normalizeFoodName(profile.canonicalName) === normalized) ??
+    null
   );
 }
