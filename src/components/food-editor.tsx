@@ -23,12 +23,23 @@ export interface RecognitionBadge {
   label: string;
 }
 
+export interface PortionPreviewUpdate {
+  raw: string;
+  value: number | null;
+  valid: boolean;
+}
+
 interface FoodEditorProps {
   number?: number;
   item: EditableFoodItem;
   calculation: CalculatedFood;
   recognition: RecognitionBadge;
   onNameChange: (name: string) => void;
+  onPortionPreview?: (
+    field: "portionMin" | "portionMax",
+    preview: PortionPreviewUpdate | null,
+    peerAnchor?: number | null,
+  ) => void;
   onPortionChange: (field: "portionMin" | "portionMax", value: number | null, peerAnchor?: number | null) => void;
   onUnitChange: (unit: PortionUnit) => void;
   onPreset: (preset: PortionPreset) => void;
@@ -51,20 +62,25 @@ function PortionInput({
   id,
   value,
   peerValue,
+  unit,
+  onPreview,
   onCommit,
 }: {
   id: string;
   value: number | null;
   peerValue: number | null;
+  unit: PortionUnit;
+  onPreview?: (preview: PortionPreviewUpdate | null, peerAnchor?: number | null) => void;
   onCommit: (value: number | null, peerAnchor?: number | null) => void;
 }) {
-  const [editing, setEditing] = useState<string | null>(null);
+  const [editing, setEditing] = useState<{ text: string; unit: PortionUnit } | null>(null);
   const [error, setError] = useState(false);
   const peerAnchorRef = useRef<{ active: boolean; value: number | null }>({
     active: false,
     value: null,
   });
-  const shown = editing ?? (value == null ? "" : String(value));
+  const activeEditing = editing && editing.unit === unit ? editing.text : null;
+  const shown = activeEditing ?? (value == null ? "" : String(value));
   return <><input id={id} type="number" inputMode="decimal" min="0.1" max="5000" step="any"
     value={shown} placeholder="未知" aria-invalid={error || undefined} aria-describedby={error ? `${id}-error` : undefined}
     onFocus={event => {
@@ -87,15 +103,19 @@ function PortionInput({
         inputType,
       );
       input.dataset.portionOnFocus = next;
-      setEditing(next);
+      setEditing({ text: next, unit });
       setError(false);
       if (!peerAnchorRef.current.active) {
         peerAnchorRef.current = { active: true, value: peerValue };
       }
-      if (next !== "") {
+      if (next === "") {
+        onPreview?.({ raw: "", value: null, valid: true }, peerAnchorRef.current.value);
+      } else {
         const parsed = Number(next);
         if (Number.isFinite(parsed) && parsed >= 0.1 && parsed <= 5000) {
-          onCommit(parsed, peerAnchorRef.current.value);
+          onPreview?.({ raw: next, value: parsed, valid: true }, peerAnchorRef.current.value);
+        } else {
+          onPreview?.({ raw: next, value: null, valid: false }, peerAnchorRef.current.value);
         }
       }
     }}
@@ -104,6 +124,7 @@ function PortionInput({
       const number = Number(raw);
       const anchor = peerAnchorRef.current.active ? peerAnchorRef.current.value : undefined;
       peerAnchorRef.current = { active: false, value: null };
+      onPreview?.(null);
       if (!raw) { onCommit(null); setEditing(null); setError(false); return; }
       if (!Number.isFinite(number) || number < .1 || number > 5000) { setError(true); return; }
       onCommit(number, anchor); setEditing(null); setError(false);
@@ -122,6 +143,7 @@ export function FoodEditor({
   calculation,
   recognition,
   onNameChange,
+  onPortionPreview,
   onPortionChange,
   onUnitChange,
   onPreset,
@@ -222,6 +244,8 @@ export function FoodEditor({
             id={`${fieldId}-min`}
             value={item.portionMin}
             peerValue={item.portionMax}
+            unit={item.unit}
+            onPreview={(preview, peerAnchor) => onPortionPreview?.("portionMin", preview, peerAnchor)}
             onCommit={(value, peerAnchor) => onPortionChange("portionMin", value, peerAnchor)}
           />
         </div>
@@ -234,6 +258,8 @@ export function FoodEditor({
             id={`${fieldId}-max`}
             value={item.portionMax}
             peerValue={item.portionMin}
+            unit={item.unit}
+            onPreview={(preview, peerAnchor) => onPortionPreview?.("portionMax", preview, peerAnchor)}
             onCommit={(value, peerAnchor) => onPortionChange("portionMax", value, peerAnchor)}
           />
         </div>

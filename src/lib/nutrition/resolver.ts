@@ -521,6 +521,10 @@ export function resolveNutritionMatch(
   };
 }
 
+function explicitNamesOf(profile: NutritionProfile): string[] {
+  return [profile.id, profile.displayName, ...profile.aliases];
+}
+
 export function findProfileByNormalizedName(
   name: string,
   catalog: NutritionProfile[],
@@ -529,7 +533,9 @@ export function findProfileByNormalizedName(
   if (!normalized) return null;
   return (
     catalog.find((profile) =>
-      namesOf(profile).some((alias) => normalizeFoodName(alias) === normalized),
-    ) ?? null
+      explicitNamesOf(profile).some((alias) => normalizeFoodName(alias) === normalized),
+    ) ??
+    catalog.find((profile) => normalizeFoodName(profile.canonicalName) === normalized) ??
+    null
   );
 }

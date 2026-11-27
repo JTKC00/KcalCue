@@ -2011,6 +2011,27 @@ export function canonicalizeFood(food: FoodEstimate): CanonicalFoodIdentity {
         qualifiers.add(eggQualifier);
       }
     }
+    const eggPrepText = normalizeFoodName(
+      [food.displayName, food.normalizedName, food.preparationMethod ?? ""].join(" "),
+    );
+    if (/(?:^|\s)(?:braised|marinated|soy braised)(?:$|\s)|滷|鹵|卤|茶葉|茶叶/.test(eggPrepText)) {
+      qualifiers.add("braised");
+    }
+    if (
+      !/(?:^|\s)deep fried(?:$|\s)|油炸|炸/.test(eggPrepText) &&
+      /(?:^|\s)(?:(?:pan |stir )?fried|scrambled|omelette|omelet|sunny side up)(?:$|\s)|煎|炒/.test(
+        eggPrepText,
+      )
+    ) {
+      qualifiers.add("fried");
+    }
+    if (
+      /(?:^|\s)(?:(?:hard |soft )?boiled|poached|steamed)(?:$|\s)|烚|水煮|蒸|溫泉|溏心|水波/.test(
+        eggPrepText,
+      )
+    ) {
+      qualifiers.add("boiled");
+    }
   }
 
   if (

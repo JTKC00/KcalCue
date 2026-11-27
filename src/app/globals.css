@@ -296,25 +296,26 @@ svg {
   overflow: hidden;
 }
 
+.date-input-wrap:focus-within .date-input-display {
+  opacity: 0;
+}
+
 .date-input-wrap.is-empty .date-input-display,
 .date-input-wrap.is-disabled .date-input-display {
   color: var(--ink-3);
 }
 
-.journal-shell .date-input-wrap input[type="date"] {
+.journal-shell .date-input-wrap input[type="date"]:not(:focus) {
   color: transparent;
   caret-color: transparent;
 }
 
-.journal-shell .date-input-wrap input[type="date"]::-webkit-datetime-edit,
-.journal-shell .date-input-wrap input[type="date"]::-webkit-datetime-edit-fields-wrapper,
-.journal-shell .date-input-wrap input[type="date"]::-webkit-datetime-edit-text,
-.journal-shell .date-input-wrap input[type="date"]::-webkit-datetime-edit-month-field,
-.journal-shell .date-input-wrap input[type="date"]::-webkit-datetime-edit-day-field,
-.journal-shell .date-input-wrap input[type="date"]::-webkit-datetime-edit-year-field,
-.journal-shell .date-input-wrap input[type="date"]::-webkit-datetime-edit-month-field:focus,
-.journal-shell .date-input-wrap input[type="date"]::-webkit-datetime-edit-day-field:focus,
-.journal-shell .date-input-wrap input[type="date"]::-webkit-datetime-edit-year-field:focus {
+.journal-shell .date-input-wrap input[type="date"]:not(:focus)::-webkit-datetime-edit,
+.journal-shell .date-input-wrap input[type="date"]:not(:focus)::-webkit-datetime-edit-fields-wrapper,
+.journal-shell .date-input-wrap input[type="date"]:not(:focus)::-webkit-datetime-edit-text,
+.journal-shell .date-input-wrap input[type="date"]:not(:focus)::-webkit-datetime-edit-month-field,
+.journal-shell .date-input-wrap input[type="date"]:not(:focus)::-webkit-datetime-edit-day-field,
+.journal-shell .date-input-wrap input[type="date"]:not(:focus)::-webkit-datetime-edit-year-field {
   color: transparent;
   background: transparent;
 }
@@ -1426,7 +1427,8 @@ svg {
   gap: 10px;
 }
 
-.metadata-grid > label {
+.metadata-grid > label,
+.metadata-grid > .metadata-date {
   min-width: 0;
   display: grid;
   gap: 4px;
