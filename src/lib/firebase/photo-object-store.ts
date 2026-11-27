@@ -103,6 +103,13 @@ export interface ExactPhotoMetadata {
   height: number;
 }
 
+export interface PhotoBucketIdentity {
+  bucketName: string;
+  projectNumber: string;
+}
+
+const projectNumberPattern = /^[1-9][0-9]{0,31}$/;
+
 export class ExactPhotoObjectStore {
   constructor(
     private readonly credential: Pick<Credential, "getAccessToken">,
@@ -238,5 +245,105 @@ export class ExactPhotoObjectStore {
     if (response.status === 412) throw new HttpError(409, "photo_generation_conflict");
     if (response.status !== 204) throw new HttpError(503, "photo_storage_unavailable");
     return "deleted";
+  }
+
+  private async verifyBucketIdentity(
+    bucket: string,
+    identity: PhotoBucketIdentity,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (!bucketName.test(bucket) ||
+        identity.bucketName !== bucket ||
+        !projectNumberPattern.test(identity.projectNumber))
+      throw new HttpError(503, "photo_storage_unavailable");
+    const url = new URL(`https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}`);
+    url.searchParams.set("projection", "noAcl");
+    const { response, requestSignal } = await this.request("GET", url, signal);
+    if (response.status !== 200) throw new HttpError(503, "photo_storage_unavailable");
+    const bytes = await boundedBytes(response, metadataLimit, requestSignal);
+    let data: unknown;
+    try { data = JSON.parse(new TextDecoder().decode(bytes)); }
+    catch { throw new HttpError(503, "photo_storage_unavailable"); }
+    if (!data || typeof data !== "object") throw new HttpError(503, "photo_storage_unavailable");
+    const value = data as Record<string, unknown>;
+    if (value.kind !== "storage#bucket" ||
+        value.id !== bucket ||
+        value.name !== bucket ||
+        value.projectNumber !== identity.projectNumber)
+      throw new HttpError(503, "photo_storage_unavailable");
+  }
+
+  // Proves a specific object generation is absent only after verifying the
+  // original private bucket's GCS identity (bucket name + GCP projectNumber)
+  // and receiving an explicit GCS JSON API notFound 404 for that exact generation.
+  async verifyGenerationAbsent(
+    bucket: string,
+    key: string,
+    exact: string,
+    identity: PhotoBucketIdentity,
+    signal?: AbortSignal,
+  ): Promise<"absent"> {
+    const url = objectUrl(bucket, key);
+    url.searchParams.set("generation", generation(exact));
+    if (identity.bucketName !== bucket || !projectNumberPattern.test(identity.projectNumber))
+      throw new HttpError(503, "photo_storage_unavailable");
+    await this.verifyBucketIdentity(bucket, identity, signal);
+    const { response, requestSignal } = await this.request("GET", url, signal);
+    if (response.status === 200) throw new HttpError(409, "photo_object_present");
+    if (response.status !== 404) throw new HttpError(503, "photo_storage_unavailable");
+    const bytes = await boundedBytes(response, metadataLimit, requestSignal);
+    let data: unknown;
+    try { data = JSON.parse(new TextDecoder().decode(bytes)); }
+    catch { throw new HttpError(503, "photo_storage_unavailable"); }
+    const errorObj = (data && typeof data === "object" ? (data as Record<string, unknown>).error : undefined) as
+      | Record<string, unknown>
+      | undefined;
+    const errors = Array.isArray(errorObj?.errors) ? errorObj.errors : [];
+    const hasNotFound = errors.some(
+      (entry) => entry && typeof entry === "object" && (entry as Record<string, unknown>).reason === "notFound",
+    );
+    if (errorObj?.code !== 404 || !hasNotFound)
+      throw new HttpError(503, "photo_storage_unavailable");
+    return "absent";
+  }
+
+  // Proves no object (live or archived) exists for an immutable reserved key
+  // after verifying the private bucket's GCS identity and listing with
+  // versions=true. Truncated or mismatched responses fail closed.
+  async verifyKeyAbsent(
+    bucket: string,
+    key: string,
+    identity: PhotoBucketIdentity,
+    signal?: AbortSignal,
+  ): Promise<"absent"> {
+    objectUrl(bucket, key);
+    if (identity.bucketName !== bucket || !projectNumberPattern.test(identity.projectNumber))
+      throw new HttpError(503, "photo_storage_unavailable");
+    await this.verifyBucketIdentity(bucket, identity, signal);
+    const listUrl = new URL(`https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o`);
+    listUrl.searchParams.set("prefix", key);
+    listUrl.searchParams.set("versions", "true");
+    listUrl.searchParams.set("maxResults", "5");
+    const { response, requestSignal } = await this.request("GET", listUrl, signal);
+    if (response.status !== 200) throw new HttpError(503, "photo_storage_unavailable");
+    const bytes = await boundedBytes(response, metadataLimit, requestSignal);
+    let data: unknown;
+    try { data = JSON.parse(new TextDecoder().decode(bytes)); }
+    catch { throw new HttpError(503, "photo_storage_unavailable"); }
+    if (!data || typeof data !== "object") throw new HttpError(503, "photo_storage_unavailable");
+    const value = data as Record<string, unknown>;
+    if (value.kind !== "storage#objects") throw new HttpError(503, "photo_storage_unavailable");
+    if (value.items !== undefined) {
+      if (!Array.isArray(value.items)) throw new HttpError(503, "photo_storage_unavailable");
+      for (const item of value.items) {
+        if (!item || typeof item !== "object" || typeof (item as Record<string, unknown>).name !== "string")
+          throw new HttpError(503, "photo_storage_unavailable");
+        if ((item as Record<string, unknown>).name === key)
+          throw new HttpError(409, "photo_object_present");
+      }
+    }
+    if (typeof value.nextPageToken === "string" && value.nextPageToken.length > 0)
+      throw new HttpError(503, "photo_storage_unavailable");
+    return "absent";
   }
 }

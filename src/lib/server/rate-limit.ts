@@ -30,6 +30,11 @@ export const PHOTO_PREPARATION_RATE_LIMIT: RateLimitConfig = {
   windowMs: 60_000,
 };
 
+export const PHOTO_UPLOAD_RATE_LIMIT: RateLimitConfig = {
+  limit: 5,
+  windowMs: 60_000,
+};
+
 interface Bucket {
   tokens: number;
   updatedAt: number;

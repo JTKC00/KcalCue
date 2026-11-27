@@ -9,7 +9,7 @@ import {
   cloudConfigured,
 } from "@/lib/firebase/client";
 import { Account } from "./firebase-account";
-import { clearSyncState, visibleMeals, type PendingMeal } from "@/lib/meals/outbox";
+import { clearOrphanedPhotoOutbox, clearSyncState, visibleMeals, type PendingMeal } from "@/lib/meals/outbox";
 import { draftTabId, prepareDraftTabId, localMeals, type LocalMeals, type SavedDraftSummary } from "@/lib/meals/cache";
 import { MealRepository, RepositoryError } from "@/lib/meals/repository";
 import {
@@ -47,6 +47,16 @@ const messages: Record<string, string> = {
   invalid_request: "請檢查食物名稱、份量及日期時間。每餐最多 12 項食物。",
   unsupported_schema: "這筆餐點的資料格式暫未支援，修改仍保留於本機。",
   photo_failed: "照片未能處理，可再試一次，或移除草稿圖片。",
+  photo_uploads_disabled: "私人照片保存功能目前未啟用，可不附圖儲存餐點。",
+  photo_quota_not_configured: "私人照片保存尚未設定上限，可不附圖儲存餐點。",
+  photo_quota_exceeded: "照片保存空間暫達上限，可稍後重試或不附圖儲存餐點。",
+  photo_output_too_large: "壓縮後照片仍超過 2 MiB 上限，請更換圖片或不附圖儲存餐點。",
+  photo_not_staged: "此附圖的暫存期限已過，可重新上傳附圖或不附圖儲存餐點。",
+  photo_upload_expired: "此草稿圖片的上傳期限已過，請重新選取圖片或不附圖儲存餐點。",
+  photo_upload_conflict: "圖片上傳識別衝突，請移除草稿圖片重新選取，或不附圖儲存餐點。",
+  photo_object_conflict: "雲端圖片檢查不一致，請重新選取圖片或不附圖儲存餐點。",
+  photo_payload_missing: "本機暫存圖片已遺失，請重新選取圖片或不附圖儲存餐點。",
+  photo_storage_unavailable: "照片儲存暫時不可用，修改及圖片仍保留於本機，稍後自動重試。",
   trial_access_required:
     "這個 Email 尚未獲得試用權限，修改保留於本機。請聯絡管理員開通後重試。",
   browser_unsupported:
@@ -63,7 +73,15 @@ type JournalNotice =
   | string
   | { kind: "pending-sync" | "blocked-save" | "pending-logout"; message: string };
 function commandFingerprint(draft: MealDraft) {
-  const next = { ...draft, photoPath: null, photo: undefined, calorieInput: undefined };
+  const next = {
+    ...draft,
+    photoPath: null,
+    photo: undefined,
+    calorieInput: undefined,
+    savePhoto: Boolean(draft.savePhoto),
+    removePhoto: Boolean(draft.removePhoto),
+    photoSignature: draft.photo ? `${draft.photo.size}:${draft.photo.type}` : null,
+  };
   return JSON.stringify({
     ...next,
     analysisProvenance: next.analysisProvenance ?? undefined,
@@ -122,6 +140,7 @@ function isUntouchedSavedMeal(
   if (!candidate || candidate.version === 0 || !baseline) return false;
   if (
     candidate.photo ||
+    candidate.savePhoto ||
     candidate.removePhoto ||
     candidate.pendingMutation ||
     candidate.calorieInput !== undefined
@@ -143,6 +162,17 @@ const photoRateLimitNotice = "照片處理稍忙，請約 10 秒後重試。原�
 function clearPhotoNotice(notice: JournalNotice): JournalNotice {
   return notice === oversizedPhotoNotice || notice === retryablePhotoNotice ||
     notice === photoRateLimitNotice ? "" : notice;
+}
+async function clearOrphanedPhotoOutboxLocked(uid: string) {
+  if (typeof navigator !== "undefined" && navigator.locks?.request) {
+    await navigator.locks.request(`kcalcue-sync-${uid}`, () =>
+      navigator.locks.request(`kcalcue-account-${uid}`, () =>
+        clearOrphanedPhotoOutbox(uid),
+      ),
+    );
+    return;
+  }
+  await clearOrphanedPhotoOutbox(uid);
 }
 
 function mealCalorieLabel(calories: MealCalorieSummary) {
@@ -245,9 +275,12 @@ function OriginalAnalysisDetails({ record }: { record: MealRecord }) {
 
 export function MealJournal({
   initialProviderMode,
+  initialPhotoUploadsEnabled = false,
 }: {
   initialProviderMode: "demo" | "live";
+  initialPhotoUploadsEnabled?: boolean;
 }) {
+  const [photoUploadsEnabled, setPhotoUploadsEnabled] = useState(initialPhotoUploadsEnabled);
   const [tab, setTab] = useState("today");
   const [account, setAccount] = useState(false);
   const [reauth, setReauth] = useState(false);
@@ -320,6 +353,7 @@ export function MealJournal({
   const queuedDraft = useRef<MealDraft | null>(null);
   const cacheEnabled = useRef(true);
   const preparedFile = useRef<File | null>(null);
+  const preparingRef = useRef(false);
   const photoGeneration = useRef(0);
   const refreshGeneration = useRef(0);
   const busyRef = useRef(false);
@@ -406,7 +440,11 @@ export function MealJournal({
             if (value.kind === "pending-logout") {
               return state.jobs.length === 0 ? "" : value;
             }
-            return state.jobs.length === 0 ? "" : pendingSyncNotice(state.jobs.length);
+            if (state.jobs.length === 0) return "";
+            if (state.jobs.length === 1 && state.jobs[0].photoUpload) {
+              return { kind: "pending-sync", message: "已保留本機；餐點及附圖待同步。" };
+            }
+            return pendingSyncNotice(state.jobs.length);
           });
           const saved = await localMeals.listDrafts(id).catch(() => null);
           if (isCurrent() && saved) setSavedDrafts({ uid: id, items: saved });
@@ -430,6 +468,7 @@ export function MealJournal({
     function clearVolatilePhoto() {
       photoGeneration.current++;
       preparedFile.current = null;
+      preparingRef.current = false;
       setPreparing(false);
       setPhotoFailure(null);
       setNotice(clearPhotoNotice);
@@ -453,12 +492,20 @@ export function MealJournal({
             (await localMeals.read("guest", tabKey).catch(() => ({ draft: null })))
               .draft)
           : null;
+      const initialLoggedOutUid = localStorage.getItem("kcalcue-logout")?.split(":")[0];
       if (oldId !== "guest" && oldId !== id) {
         cacheEnabled.current = false;
         await writes.current;
         // Account changes preserve unsynced work; explicit logout clears local data.
-        if (localStorage.getItem("kcalcue-logout")?.split(":")[0] === oldId)
+        const currentLoggedOutUid = localStorage.getItem("kcalcue-logout")?.split(":")[0];
+        if (currentLoggedOutUid === oldId) {
           await localMeals.clear(oldId);
+          await clearOrphanedPhotoOutboxLocked(oldId);
+        }
+      }
+      const latestLoggedOutUid = localStorage.getItem("kcalcue-logout")?.split(":")[0] ?? initialLoggedOutUid;
+      if (latestLoggedOutUid && latestLoggedOutUid !== "guest" && latestLoggedOutUid !== oldId && latestLoggedOutUid !== id) {
+        await clearOrphanedPhotoOutboxLocked(latestLoggedOutUid).catch(() => {});
       }
       const local = await localMeals.read(id, tabKey).catch(() => {
         setNotice("本機儲存不可用，請勿在儲存到雲端前關閉頁面。");
@@ -542,35 +589,49 @@ export function MealJournal({
       setAccount(true);
       setReauth(true);
     }
+    const probeStatus = () => {
+      const probeId = statusProbeGeneration.current;
+      const controller = new AbortController();
+      statusProbeController.current = controller;
+      const timeout = setTimeout(() => controller.abort(), 5_000);
+      void fetch("/api/status", {
+        cache: "no-store",
+        signal: controller.signal,
+      })
+        .then(async (response) => {
+          if (!active || statusProbeGeneration.current !== probeId) return;
+          setOnline(response.ok);
+          if (response.ok) {
+            const payload = await response.json().catch(() => null);
+            if (
+              active &&
+              statusProbeGeneration.current === probeId &&
+              typeof payload?.photoUploadsEnabled === "boolean"
+            ) {
+              setPhotoUploadsEnabled(payload.photoUploadsEnabled);
+            }
+          }
+        })
+        .catch(() => {
+          if (active && statusProbeGeneration.current === probeId)
+            setOnline(false);
+        })
+        .finally(() => {
+          clearTimeout(timeout);
+          if (statusProbeController.current === controller)
+            statusProbeController.current = null;
+        });
+    };
     const connection = () => {
       lastAttempt.current = Date.now();
       cancelStatusProbe();
       setOnline(navigator.onLine);
       if (navigator.onLine) {
-        const probeId = statusProbeGeneration.current;
-        const controller = new AbortController();
-        statusProbeController.current = controller;
-        const timeout = setTimeout(() => controller.abort(), 5_000);
-        void fetch("/api/status", {
-          cache: "no-store",
-          signal: controller.signal,
-        })
-          .then((response) => {
-            if (active && statusProbeGeneration.current === probeId)
-              setOnline(response.ok);
-          })
-          .catch(() => {
-            if (active && statusProbeGeneration.current === probeId)
-              setOnline(false);
-          })
-          .finally(() => {
-            clearTimeout(timeout);
-            if (statusProbeController.current === controller)
-              statusProbeController.current = null;
-          });
+        probeStatus();
         void refresh();
       }
     };
+    if (navigator.onLine) probeStatus();
     const foreground = () => {
       if (document.visibilityState === "visible") {
         setToday(localDate());
@@ -578,11 +639,13 @@ export function MealJournal({
       }
     };
     const signedOutElsewhere = (event: StorageEvent) => {
-      if (
-        event.key !== "kcalcue-logout" ||
-        event.newValue?.split(":")[0] !== current.current.userId
-      )
+      if (event.key !== "kcalcue-logout") return;
+      const loggedOut = event.newValue?.split(":")[0];
+      if (!loggedOut || loggedOut === "guest") return;
+      if (loggedOut !== current.current.userId) {
+        void clearOrphanedPhotoOutboxLocked(loggedOut).catch(() => {});
         return;
+      }
       const old = current.current.userId;
       accountGeneration.current++;
       cacheEnabled.current = false;
@@ -608,6 +671,7 @@ export function MealJournal({
       loadGeneration++;
       void writes.current
         .then(() => localMeals.clear(old))
+        .then(() => clearOrphanedPhotoOutboxLocked(old))
         .then(() => {
           if (active) setNotice("這個帳戶已在另一個分頁登出，本機資料已清除。");
         })
@@ -749,6 +813,7 @@ export function MealJournal({
   function openDraft(next: MealDraft, isManual = false, savedBaseline: string | null = null) {
     photoGeneration.current++;
     preparedFile.current = null;
+    preparingRef.current = false;
     setPreparing(false);
     setPhotoFailure(null);
     setDraft(next);
@@ -818,15 +883,16 @@ export function MealJournal({
     [],
   );
   const onPhotoSelected = useCallback(
-    (file: File | null) => {
+    (file: File | null, options?: { autoOptIn?: boolean }) => {
       const generation = ++photoGeneration.current;
       preparedFile.current = file;
       if (!file) {
         setDraft((value) =>
           value
-            ? { ...value, photo: undefined, photoPath: null, removePhoto: true }
+            ? { ...value, photo: undefined, photoPath: null, savePhoto: false, removePhoto: true }
             : value,
         );
+        preparingRef.current = false;
         setPreparing(false);
         setPhotoFailure(null);
         setNotice(clearPhotoNotice);
@@ -835,17 +901,24 @@ export function MealJournal({
       const id = current.current.draft?.id;
       if (!id) return;
       setDraft((value) =>
-        value?.id === id ? { ...value, photo: undefined, photoPath: null } : value,
+        value?.id === id ? { ...value, photo: undefined, photoPath: null, savePhoto: false } : value,
       );
+      preparingRef.current = true;
       setPreparing(true);
       setPhotoFailure(null);
       setNotice(clearPhotoNotice);
-      void preparePhoto(file, id, initialProviderMode === "live")
+      void preparePhoto(file, id, initialProviderMode === "live" || photoUploadsEnabled)
         .then((photo) => {
           if (generation === photoGeneration.current)
             setDraft((value) =>
               value?.id === id
-                ? { ...value, photo, photoPath: null, removePhoto: false }
+                ? {
+                    ...value,
+                    photo,
+                    photoPath: null,
+                    removePhoto: false,
+                    ...(options?.autoOptIn ? { savePhoto: true } : {}),
+                  }
                 : value,
             );
         })
@@ -861,14 +934,17 @@ export function MealJournal({
           }
         })
         .finally(() => {
-          if (generation === photoGeneration.current) setPreparing(false);
+          if (generation === photoGeneration.current) {
+            preparingRef.current = false;
+            setPreparing(false);
+          }
         });
     },
-    [initialProviderMode],
+    [initialProviderMode, photoUploadsEnabled],
   );
 
   async function save() {
-    if (!draft || busyRef.current) return;
+    if (!draft || busyRef.current || preparingRef.current || preparing) return;
     const noteLength = journalNoteCodePoints(normalizeJournalNote(draft.journalNote ?? "") ?? "");
     if (noteLength > MAX_JOURNAL_NOTE_CODE_POINTS) {
       setNotice("餐點備註最多 " + MAX_JOURNAL_NOTE_CODE_POINTS + " 個字元，請縮短後再儲存。");
@@ -899,15 +975,48 @@ export function MealJournal({
     const scope = operationScope();
     const source = draft;
     try {
+      const wantsPhotoUpload = Boolean(
+        photoUploadsEnabled && source.savePhoto && source.photo && source.mode !== "demo",
+      );
+      const wantsRemovePhoto = Boolean(
+        !wantsPhotoUpload && source.removePhoto && source.photoRef,
+      );
       const fingerprint = commandFingerprint(source);
       const pendingMutation =
-        source.pendingMutation?.fingerprint === fingerprint
+        source.pendingMutation?.fingerprint === fingerprint &&
+        (!wantsPhotoUpload || Boolean(source.pendingMutation.uploadId))
           ? source.pendingMutation
-          : { fingerprint, id: crypto.randomUUID() };
+          : {
+              fingerprint,
+              id: crypto.randomUUID(),
+              ...(wantsPhotoUpload ? { uploadId: crypto.randomUUID() } : {}),
+            };
       const retained = { ...source, pendingMutation };
-      const command = { ...retained, photoPath: null, photo: undefined, calorieInput: undefined };
+      const command = {
+        ...retained,
+        photoPath: null,
+        photo: undefined,
+        savePhoto: undefined,
+        removePhoto: undefined,
+        calorieInput: undefined,
+      };
       setDraft(retained);
-      await repository.save(command, pendingMutation.id, id);
+      if (wantsPhotoUpload && source.photo && pendingMutation.uploadId) {
+        await repository.saveWithPhoto(
+          { ...command, photo: source.photo },
+          pendingMutation.id,
+          pendingMutation.uploadId,
+          id,
+        );
+      } else {
+        await repository.save(
+          command,
+          pendingMutation.id,
+          id,
+          undefined,
+          wantsRemovePhoto ? { removePhoto: true } : undefined,
+        );
+      }
       if (!scope.isCurrent()) return;
       if (navigator.onLine) {
         try {
@@ -954,9 +1063,13 @@ export function MealJournal({
       setDraft(null);
       setSavedDraftBaseline(null);
       setInitialDraft(undefined);
-      setNotice(proved
-        ? ""
-        : { kind: "pending-sync", message: "已儲存到本機，連線時會自動同步。圖片不會保存到雲端。" });
+      setNotice(
+        proved
+          ? ""
+          : wantsPhotoUpload
+            ? { kind: "pending-sync", message: "已保留本機；餐點及附圖待同步。" }
+            : { kind: "pending-sync", message: "已儲存到本機，連線時會自動同步。圖片不會保存到雲端。" },
+      );
       go("today");
       await writes.current;
       if (!scope.isCurrent()) return;
@@ -1005,6 +1118,8 @@ export function MealJournal({
     }
     photoGeneration.current++;
     preparedFile.current = null;
+    preparingRef.current = false;
+    setPreparing(false);
     setDraft(null);
     setSavedDraftBaseline(null);
     setInitialDraft(undefined);
@@ -1206,6 +1321,10 @@ export function MealJournal({
         version: 0,
         schemaVersion: undefined,
         createdAt: undefined,
+        photoRef: undefined,
+        photoPath: null,
+        savePhoto: undefined,
+        removePhoto: undefined,
         pendingMutation: undefined,
       };
       if (preserve) {
@@ -1217,7 +1336,54 @@ export function MealJournal({
       }
       await repository.discardPending(job.record.id, scope.id);
       if (!scope.isCurrent()) return;
-      if (preserve) openDraft(copy);
+      if (preserve) {
+        openDraft(copy);
+        if (last.record.photoRef || last.photoUpload) {
+          setNotice("已保留為新餐點草稿。原有附圖不會轉移至新餐，如需附圖請重新選取。");
+        }
+      }
+    } catch (error) {
+      if (scope.isCurrent()) setNotice(errorText(error));
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+      void refresh();
+    }
+  }
+  async function saveWithoutPhoto(job: PendingMeal) {
+    if (busyRef.current) return;
+    const scope = operationScope();
+    if (job.record.userId !== scope.id) return;
+    busyRef.current = true;
+    setBusy(true);
+    refreshGeneration.current++;
+    try {
+      await repository.saveQueuedWithoutPhoto(job.record.id, job.id, scope.id);
+      if (!scope.isCurrent()) return;
+      setNotice({ kind: "pending-sync", message: "已改為不附圖儲存餐點，待同步。" });
+    } catch (error) {
+      if (scope.isCurrent()) setNotice(errorText(error));
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+      void refresh();
+    }
+  }
+  async function retryExpiredPhoto(job: PendingMeal) {
+    if (busyRef.current) return;
+    const scope = operationScope();
+    if (job.record.userId !== scope.id) return;
+    busyRef.current = true;
+    setBusy(true);
+    refreshGeneration.current++;
+    try {
+      const result = await repository.requeueExpiredPhotoUpload(job.record.id, job.id, scope.id);
+      if (!scope.isCurrent()) return;
+      setNotice(
+        result
+          ? { kind: "pending-sync", message: "已排程重新上傳附圖，待同步。" }
+          : "",
+      );
     } catch (error) {
       if (scope.isCurrent()) setNotice(errorText(error));
     } finally {
@@ -1377,8 +1543,30 @@ export function MealJournal({
               <div key={job.id}>
                 <p>
                   {job.record.items.map((item) => item.displayName).join("、")}
+                  {job.photoUpload ? "（含待同步附圖）" : ""}
                   ：{messages[job.error!] ?? "同步未完成，修改仍保留於本機。"}
                 </p>
+                {job.kind === "save" && job.photoUpload?.status === "staged" && job.error === "photo_not_staged" && (
+                  <button
+                    className="button button-secondary"
+                    disabled={busy || syncing}
+                    onClick={() => void retryExpiredPhoto(job)}
+                  >
+                    重新上傳附圖
+                  </button>
+                )}
+                {job.kind === "save" && job.photoUpload && (
+                  job.photoUpload.status === "pending" ||
+                  (job.photoUpload.status === "staged" && job.error === "photo_not_staged")
+                ) && (
+                  <button
+                    className="button button-secondary"
+                    disabled={busy || syncing}
+                    onClick={() => void saveWithoutPhoto(job)}
+                  >
+                    不附圖儲存餐點
+                  </button>
+                )}
                 {job.kind === "save" && (
                   <button
                     className="button button-secondary"
@@ -1459,12 +1647,20 @@ export function MealJournal({
           )}
           <section className="journal-card">
             <h2>照片與私隱</h2>
-            <p>
-              Live 分析會將相片傳送至 AI 服務。圖片只用於分析請求，不會存入
-              Firebase
-              Storage；雲端只保存餐點及營養分析結果。本機草稿可暫存壓縮圖片，儲存或放棄草稿後清除。AI
-              分析需要連線。
-            </p>
+            {photoUploadsEnabled ? (
+              <p>
+                Live 分析會將相片傳送至 AI 服務作食物辨識。只有在你明確勾選「儲存餐點縮圖供歷史查看」並儲存後，系統才會將單張壓縮縮圖（最長邊
+                1600px JPEG、移除 EXIF 與 GPS 位置資料）私密保存於你的帳戶供日後查看；你可隨時移除附圖或刪除餐點，刪除後雲端會立即封鎖存取並於背景完成實體清理（可能會有短暫延遲）。AI
+                分析與雲端保存均需要連線。
+              </p>
+            ) : (
+              <p>
+                Live 分析會將相片傳送至 AI 服務。圖片只用於分析請求，不會存入
+                Firebase
+                Storage；雲端只保存餐點及營養分析結果。本機草稿可暫存壓縮圖片，儲存或放棄草稿後清除。AI
+                分析需要連線。
+              </p>
+            )}
           </section>
         </main>
       ) : !ready ? (
@@ -1666,6 +1862,84 @@ export function MealJournal({
               </section>
               <section className="journal-card journal-actions">
                 {preparing && <p role="status">正在準備壓縮照片…</p>}
+                {photoUploadsEnabled && draft.mode !== "demo" && draft.photo && (
+                  <div className="meal-photo-controls">
+                    <label className="meal-photo-optin">
+                      <input
+                        type="checkbox"
+                        disabled={busy}
+                        checked={Boolean(draft.savePhoto)}
+                        onChange={(e) =>
+                          setDraft((value) =>
+                            value
+                              ? {
+                                  ...value,
+                                  savePhoto: e.target.checked,
+                                  ...(e.target.checked ? { removePhoto: false } : {}),
+                                }
+                              : value,
+                          )
+                        }
+                      />
+                      <span>儲存餐點縮圖供歷史查看</span>
+                    </label>
+                    <p className="meal-photo-help">
+                      只保存單張壓縮縮圖（≤ 1600px JPEG，移除 EXIF/GPS），可隨時移除；刪除後背景實體清理可能有短暫延遲。
+                    </p>
+                  </div>
+                )}
+                {draft.photoRef && !draft.removePhoto && !(photoUploadsEnabled && draft.savePhoto && draft.photo) && (
+                  <div className="meal-photo-controls">
+                    <p className="meal-photo-help" role="status">此餐已附有私人縮圖。</p>
+                    <button
+                      className="button button-secondary"
+                      type="button"
+                      disabled={busy}
+                      onClick={() =>
+                        openDraft({
+                          ...draft,
+                          removePhoto: true,
+                          savePhoto: false,
+                        }, false, savedDraftBaseline)
+                      }
+                    >
+                      移除已保存圖片
+                    </button>
+                  </div>
+                )}
+                {draft.photoRef && draft.removePhoto && (
+                  <div className="meal-photo-controls">
+                    <p className="meal-photo-help" role="status">儲存後將移除此餐附圖。</p>
+                    <button
+                      className="button button-secondary"
+                      type="button"
+                      disabled={busy}
+                      onClick={() =>
+                        openDraft({
+                          ...draft,
+                          removePhoto: false,
+                        }, false, savedDraftBaseline)
+                      }
+                    >
+                      保留原附圖
+                    </button>
+                  </div>
+                )}
+                {photoUploadsEnabled && draft.version > 0 && draft.mode !== "demo" && (
+                  <label className="button button-secondary meal-photo-picker">
+                    <span>{draft.photoRef || draft.photo ? "更換餐點附圖" : "附設餐點縮圖"}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      disabled={busy || preparing}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = "";
+                        if (file) onPhotoSelected(file, { autoOptIn: true });
+                      }}
+                    />
+                  </label>
+                )}
                 {photoFailure === "retryable" && (
                   <button
                     className="button button-secondary"
@@ -1687,6 +1961,7 @@ export function MealJournal({
                         ...draft,
                         photo: undefined,
                         photoPath: null,
+                        savePhoto: false,
                       });
                       setNotice("已移除草稿圖片。");
                     }}
@@ -1749,6 +2024,7 @@ export function MealJournal({
                   aria-describedby={draft.mode === "live" ? "save-review-note" : undefined}
                   disabled={
                     busy ||
+                    preparing ||
                     (nutritionPending && online) ||
                     !draft.items.length ||
                     draft.mode === "demo" ||

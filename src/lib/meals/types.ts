@@ -57,10 +57,11 @@ export interface MealDraft {
   photoPath: string | null;
   readonly photoRef?: PhotoRef | null;
   photo?: Blob;
+  savePhoto?: boolean;
   removePhoto?: boolean;
-  pendingMutation?: { id: string; fingerprint: string };
+  pendingMutation?: { id: string; fingerprint: string; uploadId?: string };
 }
-export interface MealRecord extends Omit<MealDraft, "photo" | "removePhoto" | "calorieInput"> {
+export interface MealRecord extends Omit<MealDraft, "photo" | "savePhoto" | "removePhoto" | "calorieInput"> {
   userId: string;
   updatedAt: string;
   mutationId: string;

@@ -7,7 +7,10 @@ import {
   MAX_PHOTO_JPEG_BYTES, expireUnattachedPhotoAsset, finalizePhotoAsset,
   photoAssetRef, recordPhotoAssetDeletion, reservePhotoAsset,
 } from "@/lib/firebase/photo-assets";
-import { cleanupKnownPhotoGeneration } from "@/lib/firebase/photo-cleanup";
+import {
+  cleanupKnownPhotoGeneration,
+  reconcileUnknownPhotoGenerationAndCleanup,
+} from "@/lib/firebase/photo-cleanup";
 
 if (!process.env.FIRESTORE_EMULATOR_HOST ||
     !/^127\.0\.0\.1:\d+$/.test(process.env.FIRESTORE_EMULATOR_HOST))
@@ -124,5 +127,70 @@ describe("known-generation private photo cleanup primitive", () => {
     expect(objects.deleteGeneration).toHaveBeenCalledTimes(1);
     expect((await ref.get()).data()?.state).toBe("deleting");
     expect((await quota.get()).data()?.reservedBytes).toBe(0);
+  });
+
+  it("refunds quota after a lost DELETE ACK only when bucket-bound generation absence is proven", async () => {
+    const uid = `owner-${crypto.randomUUID()}`;
+    const { input, ref } = await expiredAsset(uid, true);
+    const identity = { bucketName: policy.bucketName, projectNumber: "123456789012" };
+    const objects = {
+      deleteGeneration: vi.fn(async () => { throw new HttpError(503, "photo_storage_unavailable"); }),
+      verifyGenerationAbsent: vi.fn(async () => "absent" as const),
+    };
+    expect(await cleanupKnownPhotoGeneration(db, objects, uid, input.uploadId, { absenceProof: identity }))
+      .toBe("deleted");
+    expect(objects.verifyGenerationAbsent).toHaveBeenCalledWith(
+      policy.bucketName, expect.stringContaining(`/${input.mealId}/${input.uploadId}.jpg`), exact, identity,
+    );
+    expect((await ref.get()).data()?.state).toBe("deleted");
+    expect((await db.doc(`${accountPath(uid)}/photoQuota/current`).get()).data()).toEqual({
+      pendingCount: 0, reservedBytes: 0,
+    });
+  });
+
+  it("retains deleting state and quota when absence proof fails or bucket mismatches", async () => {
+    const uid = `owner-${crypto.randomUUID()}`;
+    const { input, ref } = await expiredAsset(uid, true);
+    const objects = {
+      deleteGeneration: vi.fn(async () => { throw new HttpError(503, "photo_storage_unavailable"); }),
+      verifyGenerationAbsent: vi.fn(async () => { throw new HttpError(409, "photo_object_present"); }),
+    };
+    await expect(cleanupKnownPhotoGeneration(db, objects, uid, input.uploadId, {
+      absenceProof: { bucketName: "wrong-bucket", projectNumber: "123456789012" },
+    })).rejects.toMatchObject({ status: 503, code: "photo_storage_unavailable" });
+    expect(objects.verifyGenerationAbsent).not.toHaveBeenCalled();
+
+    await expect(cleanupKnownPhotoGeneration(db, objects, uid, input.uploadId, {
+      absenceProof: { bucketName: policy.bucketName, projectNumber: "123456789012" },
+    })).rejects.toMatchObject({ status: 409, code: "photo_object_present" });
+    expect((await ref.get()).data()?.state).toBe("deleting");
+    expect((await db.doc(`${accountPath(uid)}/photoQuota/current`).get()).data()?.reservedBytes)
+      .toBe(MAX_PHOTO_JPEG_BYTES);
+  });
+
+  it("proves unknown-generation key absence only after the grace window expires", async () => {
+    const uid = `owner-${crypto.randomUUID()}`;
+    const { input, ref } = await expiredAsset(uid, false);
+    const expiresAtMs = (await ref.get()).data()!.expiresAt.toMillis() as number;
+    const identity = { bucketName: policy.bucketName, projectNumber: "123456789012" };
+    const objects = {
+      metadata: vi.fn(async () => { throw new HttpError(503, "photo_storage_unavailable"); }),
+      read: vi.fn(async () => new Uint8Array(0)),
+      deleteGeneration: vi.fn(async () => "deleted" as const),
+      verifyKeyAbsent: vi.fn(async () => "absent" as const),
+    };
+    await expect(reconcileUnknownPhotoGenerationAndCleanup(db, objects, uid, input.uploadId, {
+      absenceProof: identity, absenceGraceMs: 60_000, nowMs: expiresAtMs + 30_000,
+    })).rejects.toMatchObject({ status: 503, code: "photo_storage_unavailable" });
+    expect(objects.verifyKeyAbsent).not.toHaveBeenCalled();
+
+    expect(await reconcileUnknownPhotoGenerationAndCleanup(db, objects, uid, input.uploadId, {
+      absenceProof: identity, absenceGraceMs: 60_000, nowMs: expiresAtMs + 60_000,
+    })).toBe("deleted");
+    expect(objects.verifyKeyAbsent).toHaveBeenCalledTimes(1);
+    expect((await ref.get()).data()?.state).toBe("deleted");
+    expect((await db.doc(`${accountPath(uid)}/photoQuota/current`).get()).data()).toEqual({
+      pendingCount: 0, reservedBytes: 0,
+    });
   });
 });

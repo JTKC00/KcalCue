@@ -1,0 +1,8 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // All private meal photo access goes exclusively through authenticated
+    // Next.js server endpoints using Admin/GCS credentials.
+    match /{allPaths=**} { allow read, write: if false; }
+  }
+}

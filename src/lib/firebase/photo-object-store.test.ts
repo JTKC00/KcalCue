@@ -190,3 +190,76 @@ it("does not acknowledge a stored object whose exact-generation bytes differ", a
     .rejects.toMatchObject({ status: 503, code: "photo_storage_unavailable" });
   expect(transport).toHaveBeenCalledTimes(2);
 });
+
+it("proves exact-generation absence only when bucket identity and GCS JSON 404 match", async () => {
+  const identity = { bucketName: bucket, projectNumber: "123456789012" };
+  const bucketResource = { kind: "storage#bucket", id: bucket, name: bucket, projectNumber: "123456789012" };
+  const notFoundJson = { error: { code: 404, errors: [{ reason: "notFound" }] } };
+  const transport = vi.fn()
+    .mockResolvedValueOnce(Response.json(bucketResource))
+    .mockResolvedValueOnce(Response.json(notFoundJson, { status: 404 }));
+  const { store } = adapter(transport);
+  expect(await store.verifyGenerationAbsent(bucket, key, exact, identity)).toBe("absent");
+  expect(transport).toHaveBeenCalledTimes(2);
+  expect(new URL(transport.mock.calls[0][0] as URL).searchParams.get("projection")).toBe("noAcl");
+  expect(new URL(transport.mock.calls[1][0] as URL).searchParams.get("generation")).toBe(exact);
+});
+
+it("fails closed on generation absence proof for wrong bucket identity, 403, non-JSON 404, or present object", async () => {
+  const identity = { bucketName: bucket, projectNumber: "123456789012" };
+  const bucketResource = { kind: "storage#bucket", id: bucket, name: bucket, projectNumber: "123456789012" };
+
+  const wrongProject = vi.fn().mockResolvedValueOnce(Response.json({ ...bucketResource, projectNumber: "999" }));
+  await expect(adapter(wrongProject).store.verifyGenerationAbsent(bucket, key, exact, identity))
+    .rejects.toMatchObject({ status: 503, code: "photo_storage_unavailable" });
+  expect(wrongProject).toHaveBeenCalledTimes(1);
+
+  const forbidden = vi.fn()
+    .mockResolvedValueOnce(Response.json(bucketResource))
+    .mockResolvedValueOnce(new Response(null, { status: 403 }));
+  await expect(adapter(forbidden).store.verifyGenerationAbsent(bucket, key, exact, identity))
+    .rejects.toMatchObject({ status: 503, code: "photo_storage_unavailable" });
+
+  const html404 = vi.fn()
+    .mockResolvedValueOnce(Response.json(bucketResource))
+    .mockResolvedValueOnce(new Response("<html>404</html>", { status: 404 }));
+  await expect(adapter(html404).store.verifyGenerationAbsent(bucket, key, exact, identity))
+    .rejects.toMatchObject({ status: 503, code: "photo_storage_unavailable" });
+
+  const present = vi.fn()
+    .mockResolvedValueOnce(Response.json(bucketResource))
+    .mockResolvedValueOnce(Response.json(storedMetadata()));
+  await expect(adapter(present).store.verifyGenerationAbsent(bucket, key, exact, identity))
+    .rejects.toMatchObject({ status: 409, code: "photo_object_present" });
+
+  const mismatchIdentity = vi.fn();
+  const { store, credential } = adapter(mismatchIdentity);
+  await expect(store.verifyGenerationAbsent(bucket, key, exact, { bucketName: "other", projectNumber: "123" }))
+    .rejects.toMatchObject({ status: 503, code: "photo_storage_unavailable" });
+  expect(credential.getAccessToken).not.toHaveBeenCalled();
+});
+
+it("proves key absence with versions=true listing and fails closed on present or truncated results", async () => {
+  const identity = { bucketName: bucket, projectNumber: "123456789012" };
+  const bucketResource = { kind: "storage#bucket", id: bucket, name: bucket, projectNumber: "123456789012" };
+
+  const empty = vi.fn()
+    .mockResolvedValueOnce(Response.json(bucketResource))
+    .mockResolvedValueOnce(Response.json({ kind: "storage#objects" }));
+  expect(await adapter(empty).store.verifyKeyAbsent(bucket, key, identity)).toBe("absent");
+  const listUrl = new URL(empty.mock.calls[1][0] as URL);
+  expect(listUrl.searchParams.get("prefix")).toBe(key);
+  expect(listUrl.searchParams.get("versions")).toBe("true");
+
+  const present = vi.fn()
+    .mockResolvedValueOnce(Response.json(bucketResource))
+    .mockResolvedValueOnce(Response.json({ kind: "storage#objects", items: [{ name: key }] }));
+  await expect(adapter(present).store.verifyKeyAbsent(bucket, key, identity))
+    .rejects.toMatchObject({ status: 409, code: "photo_object_present" });
+
+  const truncated = vi.fn()
+    .mockResolvedValueOnce(Response.json(bucketResource))
+    .mockResolvedValueOnce(Response.json({ kind: "storage#objects", items: [], nextPageToken: "next" }));
+  await expect(adapter(truncated).store.verifyKeyAbsent(bucket, key, identity))
+    .rejects.toMatchObject({ status: 503, code: "photo_storage_unavailable" });
+});

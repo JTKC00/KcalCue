@@ -2,10 +2,15 @@ import type { Firestore } from "firebase-admin/firestore";
 import { FieldPath, Timestamp } from "firebase-admin/firestore";
 import { HttpError } from "@/lib/server/auth";
 import type { ExactPhotoObjectStore } from "./photo-object-store";
-import { reconcileUnknownPhotoGenerationAndCleanup, type PhotoCleanupResult } from "./photo-cleanup";
+import {
+  reconcileUnknownPhotoGenerationAndCleanup,
+  type PhotoAbsenceProofOptions,
+  type PhotoCleanupResult,
+} from "./photo-cleanup";
 
 const cursorPath = "kcalcuePhotoCleanup/current";
 const assetPath = /^kcalcueUsers\/([^/]+)\/photoAssets\/([0-9a-fA-F-]{36})$/;
+const STALE_DELETING_MS = 24 * 60 * 60 * 1000;
 
 function validCursorPath(path: unknown): path is string {
   if (typeof path !== "string" || path.length > 1024 || /[\x00-\x1f]/u.test(path)) return false;
@@ -18,18 +23,26 @@ export interface PhotoCleanupBatchResult {
   scanned: number;
   wrapped: boolean;
   cursor: string | null;
+  staleOver24hCount: number;
+  stoppedEarly?: boolean;
   outcomes: Array<{ path: string; result: PhotoCleanupResult | "invalid_path" | "error"; code?: string }>;
+}
+
+export interface PhotoCleanupBatchOptions extends PhotoAbsenceProofOptions {
+  beforeItem?: () => Promise<boolean>;
 }
 
 // This scans deleting assets only; a separate expiry pass must transition
 // abandoned uploading/staged assets before an operator can run this batch.
 // The cursor is checkpointed before object calls. A crash can delay a page,
 // but the next end-of-index wrap revisits it; poisoned entries cannot starve
-// later assets. The Firestore cursor is server-only and does not start a job.
+// later assets.
 export async function runDeletingPhotoCleanupBatch(
   db: Firestore,
-  objects: Pick<ExactPhotoObjectStore, "metadata" | "read" | "deleteGeneration">,
+  objects: Pick<ExactPhotoObjectStore, "metadata" | "read" | "deleteGeneration"> &
+    Partial<Pick<ExactPhotoObjectStore, "verifyGenerationAbsent" | "verifyKeyAbsent">>,
   maxItems = 5,
+  options?: PhotoCleanupBatchOptions,
 ): Promise<PhotoCleanupBatchResult> {
   if (!Number.isInteger(maxItems) || maxItems < 1 || maxItems > 10)
     throw new HttpError(400, "invalid_photo_cleanup_batch");
@@ -54,20 +67,40 @@ export async function runDeletingPhotoCleanupBatch(
       throw new HttpError(409, "photo_cleanup_cursor_conflict");
     tx.set(cursorRef, { lastPath: next, updatedAt: Timestamp.now() });
   });
+  const nowMs = options?.nowMs ?? Date.now();
+  let staleOver24hCount = 0;
+  let stoppedEarly = false;
   const outcomes: PhotoCleanupBatchResult["outcomes"] = [];
   for (const doc of page.docs) {
+    if (options?.beforeItem && !(await options.beforeItem())) {
+      stoppedEarly = true;
+      break;
+    }
+    const updatedAt = doc.data()?.updatedAt;
+    if (updatedAt instanceof Timestamp && nowMs - updatedAt.toMillis() > STALE_DELETING_MS) {
+      staleOver24hCount += 1;
+    }
     const match = assetPath.exec(doc.ref.path);
     if (!match) {
       outcomes.push({ path: doc.ref.path, result: "invalid_path" });
       continue;
     }
     try {
-      const result = await reconcileUnknownPhotoGenerationAndCleanup(db, objects, match[1], match[2]);
+      const result = await reconcileUnknownPhotoGenerationAndCleanup(
+        db, objects, match[1], match[2], options,
+      );
       outcomes.push({ path: doc.ref.path, result });
     } catch (error) {
       outcomes.push({ path: doc.ref.path, result: "error",
         code: error instanceof HttpError ? error.code : "service_unavailable" });
     }
   }
-  return { scanned: page.size, wrapped, cursor: next, outcomes };
+  return {
+    scanned: outcomes.length,
+    wrapped,
+    cursor: next,
+    staleOver24hCount,
+    outcomes,
+    ...(stoppedEarly ? { stoppedEarly: true } : {}),
+  };
 }
